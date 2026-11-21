@@ -3,7 +3,7 @@
 //! "The `inferred range` row".
 
 use crate::common::{
-    CHAIN_UNDER_THREE_FLOORS, Fixture, Run, WALL_LEVER, assert_stream, cairn_argv,
+    Fixture, Run, STONEBRICK_UNDER_THREE_FLOORS, WALL_LEVER, assert_stream, cairn_argv,
 };
 
 /// A struct whose floor and walls paint the theme's two slots.
@@ -61,6 +61,52 @@ fn inferred_json(run: &Run) -> serde_json::Value {
     report["inferred_range"].clone()
 }
 
+/// The note line 1's `bedrock version>=1.21.40` prints, as no edition-neutral row weighs it.
+const SCOPED_FLOOR_NOTE: &str = "note: s.crn:1:1: `bedrock version>=1.21.40` is scoped to one \
+                                 edition, so it is not part of the `registry compatibility` row, \
+                                 which is edition-neutral; `buildable targets` is where it is \
+                                 weighed\n";
+
+/// What `buildable targets` prints for each Bedrock version after 1.21.0, which lacks the
+/// `@stonebrick` the source names at `at`.
+fn stonebrick_refusals(at: &str) -> String {
+    use std::fmt::Write as _;
+
+    let mut refusals = String::new();
+    for version in ["1.21.40", "1.21.60", "1.26.60"] {
+        write!(
+            refusals,
+            "note: bedrock {version} refuses this source\n\
+             s.crn:{at}: error[E_UNKNOWN_ID]: `minecraft:stonebrick` is not a block in \
+             `bedrock {version}`\n  \
+             note: `bedrock {version}` spells this block `minecraft:stone_bricks`, \
+             `minecraft:chiseled_stone_bricks`, `minecraft:cracked_stone_bricks`, \
+             `minecraft:mossy_stone_bricks`, per the registry pack's alias table\n  \
+             note: the last target that declares `minecraft:stonebrick` is bedrock 1.21.0: \
+             build with `--target 1.21.0` or another target that declares it, or pick a block \
+             `bedrock {version}` has\n"
+        )
+        .expect("writing to a String cannot fail");
+    }
+    refusals
+}
+
+/// The floor's note, the range's note and the conflict of line 1's `bedrock version>=1.21.40` over
+/// the `@stonebrick` the source names at `at`.
+fn stonebrick_conflict(at: &str) -> String {
+    format!(
+        "note: s.crn:1:1: bedrock 1.21.0 is below the `bedrock version>=1.21.40` this file \
+         declares\n\
+         note: s.crn:{at}: bedrock's inferred range ends at 1.21.0, the last bedrock target that \
+         declares `minecraft:stonebrick`\n\
+         error[E_REQUIRES_CONFLICT]: s.crn:1:1: this file requires bedrock version>=1.21.40, but \
+         no bedrock target it admits declares `minecraft:stonebrick`, which this build paints.\n  \
+         note: s.crn:{at}: `minecraft:stonebrick` is last declared at bedrock 1.21.0\n  \
+         fix: lower the `@requires` floor to 1.21.0 or below, or replace `minecraft:stonebrick` \
+         with a block a bedrock target at or above 1.21.40 declares\n"
+    )
+}
+
 #[test]
 fn a_build_every_carried_version_declares_has_an_open_range() {
     let fixture = Fixture::new(&painting("cobblestone", "oak_planks"));
@@ -93,25 +139,38 @@ fn an_id_a_later_version_adds_starts_the_range_there() {
     );
 }
 
+/// Bedrock 1.21.40 splits `stonebrick` four ways, so no later version writes it.
 #[test]
 fn an_id_a_later_version_drops_ends_the_range_there() {
-    let fixture = Fixture::new(&painting("cobblestone", "chain"));
-    let run = info(&fixture, "java", &[]);
+    let fixture = Fixture::new(&painting("cobblestone", "stonebrick"));
+    let run = info(&fixture, "bedrock", &[]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
-    assert_eq!(inferred_row(&run), "Java: 0.0 .. 1.21.4");
+    assert_eq!(inferred_row(&run), "Bedrock: 0.0 .. 1.21.0");
     assert_eq!(
         range_notes(&fixture, &run),
         [
-            "note: s.crn:3:16: java's inferred range ends at 1.21.4, the last java target that \
-          declares `minecraft:chain`"
+            "note: s.crn:3:16: bedrock's inferred range ends at 1.21.0, the last bedrock target \
+             that declares `minecraft:stonebrick`"
         ],
     );
 }
 
-/// Java adds `pale_moss_block` at 1.21.4 and `leaf_litter` at 26.3; Bedrock drops `stonebrick`
-/// after 1.21.0 and `chain` after 1.21.60.
+/// Java 26.3 and Bedrock 1.26.60 spell `chain` `iron_chain`.
 #[test]
-fn the_latest_start_and_the_earliest_end_bound_the_range() {
+fn a_renamed_id_bounds_no_range() {
+    let fixture = Fixture::new(&painting("chain", "cobblestone"));
+    let run = info(&fixture, "java,bedrock", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        inferred_row(&run),
+        "Java: 0.0 .. latest   Bedrock: 0.0 .. latest"
+    );
+    assert_eq!(range_notes(&fixture, &run), Vec::<String>::new());
+}
+
+/// Java adds `pale_moss_block` at 1.21.4 and `leaf_litter` at 26.3.
+#[test]
+fn the_latest_start_bounds_the_range() {
     let fixture = Fixture::new(&painting("pale_moss_block", "leaf_litter"));
     let run = info(&fixture, "java", &[]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
@@ -121,18 +180,6 @@ fn the_latest_start_and_the_earliest_end_bound_the_range() {
         [
             "note: s.crn:3:16: java's inferred range starts at 26.3, the first java target that \
           declares `minecraft:leaf_litter`"
-        ],
-    );
-
-    let fixture = Fixture::new(&painting("chain", "stonebrick"));
-    let run = info(&fixture, "bedrock", &[]);
-    assert_eq!(run.code, Some(0), "{}", run.stderr);
-    assert_eq!(inferred_row(&run), "Bedrock: 0.0 .. 1.21.0");
-    assert_eq!(
-        range_notes(&fixture, &run),
-        [
-            "note: s.crn:3:16: bedrock's inferred range ends at 1.21.0, the last bedrock target \
-          that declares `minecraft:stonebrick`"
         ],
     );
 }
@@ -261,10 +308,10 @@ fn an_id_painted_twice_is_named_once_where_the_source_first_names_it() {
     );
 }
 
-/// Bedrock's catalog maps `@floor.stone.smooth` onto `stone_bricks`, which 1.21.0 spells
-/// `stonebrick`, and says so with an override.
+/// Bedrock's catalog maps `@floor.stone.smooth` onto `stone_bricks`, and its state map writes
+/// `@stone_bricks` at 1.21.0 as `stonebrick`.
 #[test]
-fn a_catalog_token_counts_as_each_pin_spells_it() {
+fn a_catalog_or_canonical_token_counts_as_each_pin_spells_it() {
     let fixture = Fixture::new(&painting("floor.stone.smooth", "cobblestone"));
     let run = info(&fixture, "bedrock", &[]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
@@ -273,11 +320,9 @@ fn a_catalog_token_counts_as_each_pin_spells_it() {
 
     let authored = Fixture::new(&painting("stone_bricks", "cobblestone"));
     let run = info(&authored, "bedrock", &[]);
-    assert_eq!(
-        inferred_row(&run),
-        "Bedrock: 1.21.40 .. latest",
-        "the id the token reaches at 1.21.40 and later, written as an id, has no override",
-    );
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(inferred_row(&run), "Bedrock: 0.0 .. latest");
+    assert_eq!(range_notes(&authored, &run), Vec::<String>::new());
 }
 
 #[test]
@@ -293,6 +338,7 @@ fn a_floor_below_the_range_is_no_conflict() {
         "registry compatibility:  1.20.4 .. latest\n\
          inferred range:          Java: 1.21.4 .. latest\n\
          edition portability:     Java: portable: 2  degraded: 0  unsupported: 0\n\
+         respelled:               Java: none\n\
          buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)\n\
          intended targets:        (none declared)\n\
          semantic-sensitive:      (none)\n\
@@ -311,10 +357,10 @@ fn a_floor_below_the_range_is_no_conflict() {
 #[test]
 fn a_floor_above_the_range_is_reported_and_the_report_completes() {
     let fixture = Fixture::new(&format!(
-        "@requires java version>=26.3\n{}",
-        painting("cobblestone", "chain")
+        "@requires bedrock version>=1.21.40\n{}",
+        painting("cobblestone", "stonebrick")
     ));
-    let run = info(&fixture, "java", &[]);
+    let run = info(&fixture, "bedrock", &[]);
     assert_eq!(
         run.code,
         Some(0),
@@ -324,67 +370,60 @@ fn a_floor_above_the_range_is_reported_and_the_report_completes() {
     assert_eq!(
         run.stdout,
         "registry compatibility:  0.0 .. latest\n\
-         inferred range:          Java: 0.0 .. 1.21.4\n\
-         edition portability:     Java: portable: 2  degraded: 0  unsupported: 0\n\
-         buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)\n\
+         inferred range:          Bedrock: 0.0 .. 1.21.0\n\
+         edition portability:     Bedrock: portable: 2  degraded: 0  unsupported: 0\n\
+         respelled:               Bedrock: none\n\
+         buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)\n\
          intended targets:        (none declared)\n\
          semantic-sensitive:      (none)\n\
          verified target:         (no lock)\n",
     );
     assert_eq!(
         stderr(&fixture, &run),
-        "note: s.crn:1:1: `java version>=26.3` is scoped to one edition, so it is not part of the \
-         `registry compatibility` row, which is edition-neutral; `buildable targets` is where it \
-         is weighed\n\
-         note: java 26.3 refuses this source\n\
-         s.crn:4:16: error[E_UNKNOWN_ID]: `minecraft:chain` is not a block in `java 26.3`\n  \
-         note: `java 26.3` spells this block `minecraft:iron_chain`, per the registry pack's alias \
-         table\n  \
-         note: the last target that declares `minecraft:chain` is java 1.21.4: build with \
-         `--target 1.21.4` or another target that declares it, or pick a block `java 26.3` has\n\
-         note: s.crn:1:1: java 1.20.4, 1.21, 1.21.4 are below the `java version>=26.3` this file \
-         declares\n\
-         note: s.crn:4:16: java's inferred range ends at 1.21.4, the last java target that \
-         declares `minecraft:chain`\n\
-         error[E_REQUIRES_CONFLICT]: s.crn:1:1: this file requires java version>=26.3, but no \
-         java target it admits declares `minecraft:chain`, which this build paints.\n  \
-         note: s.crn:4:16: `minecraft:chain` is last declared at java 1.21.4\n  \
-         fix: lower the `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with \
-         a block a java target at or above 26.3 declares\n\
-         note: no lockfile at s.crn.lock, so no target is verified; `cairn compile` writes one\n",
+        format!(
+            "{SCOPED_FLOOR_NOTE}{}{}note: no lockfile at s.crn.lock, so no target is verified; \
+             `cairn compile` writes one\n",
+            stonebrick_refusals("4:16"),
+            stonebrick_conflict("4:16"),
+        ),
         "the refused versions, the floor's note, the range's note, then the conflict",
     );
 }
-
 #[test]
 fn a_floor_at_or_below_the_upper_edge_is_no_conflict() {
-    for floor in ["1.21.4", "1.21"] {
+    for floor in ["1.21.0", "1.20.80"] {
         let fixture = Fixture::new(&format!(
-            "@requires version>={floor}\n{}",
-            painting("cobblestone", "chain")
+            "@requires bedrock version>={floor}\n{}",
+            painting("cobblestone", "stonebrick")
         ));
-        let run = info(&fixture, "java", &["--format", "json"]);
+        let run = info(&fixture, "bedrock", &["--format", "json"]);
         assert_eq!(run.code, Some(0), "{floor}: {}", run.stderr);
         assert_eq!(
             inferred_json(&run),
             serde_json::json!([{
-                "edition": "java",
+                "edition": "bedrock",
                 "min": "0.0",
-                "max": "1.21.4",
+                "max": "1.21.0",
                 "empty": false,
-                "max_ids": [{ "id": "minecraft:chain", "line": 4, "col": 16 }],
+                "max_ids": [{ "id": "minecraft:stonebrick", "line": 4, "col": 16 }],
             }]),
             "{floor}",
         );
-        assert_stream(&run.stderr, &[(4, 16, "error", "E_UNKNOWN_ID")]);
+        assert_stream(
+            &run.stderr,
+            &[
+                (4, 16, "error", "E_UNKNOWN_ID"),
+                (4, 16, "error", "E_UNKNOWN_ID"),
+                (4, 16, "error", "E_UNKNOWN_ID"),
+            ],
+        );
     }
 }
-
 #[test]
 fn a_floor_no_carried_version_meets_is_not_weighed() {
     let fixture = Fixture::new(&format!(
         "@requires version>=26.3\n{}",
-        painting("cobblestone", "chain")
+        painting("cobblestone", "stonebrick")
     ));
     let run = info(&fixture, "bedrock", &["--format", "json"]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
@@ -393,54 +432,44 @@ fn a_floor_no_carried_version_meets_is_not_weighed() {
         serde_json::json!([{
             "edition": "bedrock",
             "min": "0.0",
-            "max": "1.21.60",
+            "max": "1.21.0",
             "empty": false,
-            "max_ids": [{ "id": "minecraft:chain", "line": 4, "col": 16 }],
+            "max_ids": [{ "id": "minecraft:stonebrick", "line": 4, "col": 16 }],
         }]),
     );
     assert_stream(&run.stderr, &[]);
 }
-
 #[test]
 fn a_run_an_edition_refuses_still_reports_the_conflict_and_its_json_carries_only_the_refusal() {
     let fixture = Fixture::new(&format!(
-        "@requires java version>=26.3\n{WALL_LEVER}  raw_block mat=minecraft:chain at=2,1,2\n"
+        "@requires bedrock version>=1.21.40\n{WALL_LEVER}  raw_block mat=minecraft:stonebrick \
+         at=2,1,2\n"
     ));
-    let notes = "note: java 26.3 refuses this source\n\
-         s.crn:12:17: error[E_UNKNOWN_ID]: `minecraft:chain` is not a block in `java 26.3`\n  \
-         note: `java 26.3` spells this block `minecraft:iron_chain`, per the registry pack's alias \
-         table\n  \
-         note: the last target that declares `minecraft:chain` is java 1.21.4: build with \
-         `--target 1.21.4` or another target that declares it, or pick a block `java 26.3` has\n\
-         note: s.crn:1:1: java 1.20.4, 1.21, 1.21.4 are below the `java version>=26.3` this file \
-         declares\n\
-         note: s.crn:12:17: java's inferred range ends at 1.21.4, the last java target that \
-         declares `minecraft:chain`\n\
-         error[E_REQUIRES_CONFLICT]: s.crn:1:1: this file requires java version>=26.3, but no \
-         java target it admits declares `minecraft:chain`, which this build paints.\n  \
-         note: s.crn:12:17: `minecraft:chain` is last declared at java 1.21.4\n  \
-         fix: lower the `@requires` floor to 1.21.4 or below, or replace `minecraft:chain` with \
-         a block a java target at or above 26.3 declares\n";
-    let scoped = "note: s.crn:1:1: `java version>=26.3` is scoped to one edition, so it is not part \
-         of the `registry compatibility` row, which is edition-neutral; `buildable targets` is \
-         where it is weighed\n";
+    let notes = format!(
+        "{}{}",
+        stonebrick_refusals("12:17"),
+        stonebrick_conflict("12:17")
+    );
 
-    let text = info(&fixture, "java", &[]);
+    let text = info(&fixture, "bedrock", &[]);
     assert_eq!(text.code, Some(1), "{}", text.stderr);
     assert_eq!(text.stdout, "");
     assert_eq!(
         stderr(&fixture, &text),
         format!(
-            "{scoped}s.crn:9:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the lever `l` \
-             at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer \
-             under the floor only from the floor row `y = 0`, the row over it\n  \
+            "{SCOPED_FLOOR_NOTE}s.crn:9:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the \
+             lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches \
+             the layer under the floor only from the floor row `y = 0`, the row over it\n  \
              note: Fix: set `y=0` on it\n{notes}"
         ),
     );
 
-    let json = info(&fixture, "java", &["--format", "json"]);
+    let json = info(&fixture, "bedrock", &["--format", "json"]);
     assert_eq!(json.code, Some(1), "{}", json.stderr);
-    assert_eq!(stderr(&fixture, &json), format!("{scoped}{notes}"));
+    assert_eq!(
+        stderr(&fixture, &json),
+        format!("{SCOPED_FLOOR_NOTE}{notes}")
+    );
     let document: serde_json::Value = serde_json::from_str(&json.stdout).expect("valid JSON");
     let refusals: Vec<(&str, u64, u64)> = document["diagnostics"]
         .as_array()
@@ -456,12 +485,11 @@ fn a_run_an_edition_refuses_still_reports_the_conflict_and_its_json_carries_only
         .collect();
     assert_eq!(refusals, [("E_ROUTE_UNREACHABLE_COMPONENT", 9, 3)]);
 }
-
 #[test]
 fn json_carries_each_editions_range_with_its_ids_and_conflicts() {
     let fixture = Fixture::new(&format!(
-        "@requires java version>=26.3\n{}",
-        painting("pale_moss_block", "chain")
+        "@requires bedrock version>=1.21.40\n{}",
+        painting("pale_moss_block", "stonebrick")
     ));
     let run = info(&fixture, "java,bedrock", &["--format", "json"]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
@@ -472,27 +500,27 @@ fn json_carries_each_editions_range_with_its_ids_and_conflicts() {
             {
                 "edition": "java",
                 "min": "1.21.4",
-                "max": "1.21.4",
-                "empty": false,
+                "max": "latest",
+                "empty": true,
                 "min_ids": [{ "id": "minecraft:pale_moss_block", "line": 3, "col": 17 }],
-                "max_ids": [{ "id": "minecraft:chain", "line": 4, "col": 16 }],
-                "conflicts": [{
-                    "floor": { "declared": "java version>=26.3", "line": 1, "col": 1 },
-                    "ids": [{
-                        "id": "minecraft:chain",
-                        "last_declared": "1.21.4",
-                        "line": 4,
-                        "col": 16,
-                    }],
-                }],
+                "undeclared": [{ "id": "minecraft:stonebrick", "line": 4, "col": 16 }],
             },
             {
                 "edition": "bedrock",
                 "min": "1.21.60",
-                "max": "1.21.60",
-                "empty": false,
+                "max": "1.21.0",
+                "empty": true,
                 "min_ids": [{ "id": "minecraft:pale_moss_block", "line": 3, "col": 17 }],
-                "max_ids": [{ "id": "minecraft:chain", "line": 4, "col": 16 }],
+                "max_ids": [{ "id": "minecraft:stonebrick", "line": 4, "col": 16 }],
+                "conflicts": [{
+                    "floor": { "declared": "bedrock version>=1.21.40", "line": 1, "col": 1 },
+                    "ids": [{
+                        "id": "minecraft:stonebrick",
+                        "last_declared": "1.21.0",
+                        "line": 4,
+                        "col": 16,
+                    }],
+                }],
             },
         ]),
     );
@@ -500,42 +528,41 @@ fn json_carries_each_editions_range_with_its_ids_and_conflicts() {
 
 #[test]
 fn json_names_the_part_that_declares_a_conflicting_floor() {
-    let fixture = Fixture::new(CHAIN_UNDER_THREE_FLOORS);
-    let run = info(&fixture, "java", &["--format", "json"]);
+    let fixture = Fixture::new(STONEBRICK_UNDER_THREE_FLOORS);
+    let run = info(&fixture, "bedrock", &["--format", "json"]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
-    let chain = serde_json::json!([{
-        "id": "minecraft:chain",
-        "last_declared": "1.21.4",
+    let stonebrick = serde_json::json!([{
+        "id": "minecraft:stonebrick",
+        "last_declared": "1.21.0",
         "line": 5,
         "col": 16,
     }]);
     assert_eq!(
         inferred_json(&run),
         serde_json::json!([{
-            "edition": "java",
+            "edition": "bedrock",
             "min": "0.0",
-            "max": "1.21.4",
+            "max": "1.21.0",
             "empty": false,
-            "max_ids": [{ "id": "minecraft:chain", "line": 5, "col": 16 }],
+            "max_ids": [{ "id": "minecraft:stonebrick", "line": 5, "col": 16 }],
             "conflicts": [
                 {
-                    "floor": { "declared": "java version>=26.3", "line": 2, "col": 1 },
-                    "ids": chain,
+                    "floor": { "declared": "bedrock version>=1.21.40", "line": 2, "col": 1 },
+                    "ids": stonebrick,
                 },
                 {
                     "floor": {
-                        "declared": "java version>=26.3",
+                        "declared": "bedrock version>=1.21.40",
                         "line": 8,
                         "col": 3,
                         "declared_by": { "keyword": "def", "name": "cottage" },
                     },
-                    "ids": chain,
+                    "ids": stonebrick,
                 },
             ],
         }]),
     );
 }
-
 #[test]
 fn json_marks_a_range_no_version_can_lie_in_as_empty() {
     let fixture = Fixture::new(&painting("cobblestone", "no_such_block"));

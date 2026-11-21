@@ -415,3 +415,115 @@ fn every_id_origin_has_a_wire_name_and_the_token_that_goes_with_it() {
         assert_eq!(origin.token(), token);
     }
 }
+
+/// A target declaring `iron_chain` and `water_cauldron`, which spells `chain` `iron_chain`, splits
+/// `cauldron` by `fluid`, and whose catalog maps `@chain.link` onto `chain`.
+struct Respeller {
+    ids: Vec<String>,
+}
+
+impl Respeller {
+    fn new() -> Self {
+        Self {
+            ids: vec![
+                "minecraft:iron_chain".to_owned(),
+                "minecraft:water_cauldron".to_owned(),
+            ],
+        }
+    }
+}
+
+impl TargetRegistry for Respeller {
+    fn lookup(&self, token: &str) -> Option<BlockState> {
+        (token == "chain.link").then(|| BlockState::bare("minecraft:chain"))
+    }
+
+    fn known_tokens(&self) -> Vec<String> {
+        vec!["chain.link".to_owned()]
+    }
+
+    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
+        Some(BlockIdSet::new("test 2.0", &self.ids))
+    }
+
+    fn meant(&self, state: &BlockState) -> Option<BlockState> {
+        let fluid = state.properties.get("fluid")?;
+        (state.id == "minecraft:cauldron" && fluid == "water")
+            .then(|| BlockState::bare("minecraft:water_cauldron"))
+    }
+
+    fn respelled(&self, state: &BlockState) -> Option<BlockState> {
+        // Answers for the declared `iron_chain` too, which the lowering must not ask.
+        let id = match state.id.as_str() {
+            "minecraft:chain" => "minecraft:iron_chain",
+            "minecraft:iron_chain" => "minecraft:chain",
+            _ => return None,
+        };
+        Some(BlockState {
+            id: id.to_owned(),
+            properties: state.properties.clone(),
+        })
+    }
+}
+
+#[test]
+fn a_canonical_token_the_target_respells_resolves_to_its_spelling() {
+    let registry = Respeller::new();
+    let chain = resolve_block_state(&token("chain"), Some(&registry)).unwrap();
+    assert_eq!(chain, BlockState::bare("minecraft:iron_chain"));
+    let iron_chain = resolve_block_state(&token("iron_chain"), Some(&registry)).unwrap();
+    assert_eq!(
+        iron_chain,
+        BlockState::bare("minecraft:iron_chain"),
+        "a declared id is written as itself"
+    );
+}
+
+#[test]
+fn a_meaning_token_resolves_to_the_block_it_picks() {
+    let registry = Respeller::new();
+    let water = resolve_block_state(&token("cauldron[fluid=water]"), Some(&registry)).unwrap();
+    assert_eq!(water, BlockState::bare("minecraft:water_cauldron"));
+    let err = resolve_block_state(&token("cauldron[fluid=lava]"), Some(&registry)).unwrap_err();
+    let MaterialDeferred::UnknownId(unknown) = err else {
+        panic!("a value the target has no block for is an unknown id, got {err:?}");
+    };
+    assert_eq!(unknown.id, "minecraft:cauldron");
+}
+
+#[test]
+fn an_abstract_token_is_not_respelled() {
+    let registry = Respeller::new();
+    let err = resolve_block_state(&token("chain.link"), Some(&registry)).unwrap_err();
+    assert!(
+        matches!(err, MaterialDeferred::UnknownId(_)),
+        "the catalog's id is checked as written, got {err:?}"
+    );
+}
+
+#[test]
+fn the_bound_canonical_tokens_are_each_slot_and_path_once_in_source_order() {
+    let source = "theme t:\n  slot floor -> @oak_log[axis=x]\n  slot wall -> @floor.stone.smooth\n  \
+                  slot roof -> @chain\n\ndef hut size=3x3:\n  floor mat_slot=floor\n  walls \
+                  mat_slot=wall height=2\n  door id=entry side=front at=center\n\nstruct s \
+                  size=2x2\n  floor mat_slot=floor\n\nsite pair:\n  place id=a use=hut theme=t \
+                  at=origin\n  place id=b use=hut theme=t east_of=a gap=4\n  connect a.entry to \
+                  b.entry path=@gravel\n";
+    let module = crate::parse(source).expect("the source parses");
+    let ir = crate::lower(&module);
+    let resolution = crate::resolve(&ir, None);
+    let tokens: Vec<(&str, BlockState)> = bound_canonical_tokens(&resolution)
+        .into_iter()
+        .map(|(span, state)| (&source[span], state))
+        .collect();
+    let mut log = BlockState::bare("minecraft:oak_log");
+    log.properties.insert("axis".to_owned(), "x".to_owned());
+    assert_eq!(
+        tokens,
+        [
+            ("@oak_log[axis=x]", log),
+            ("@gravel", BlockState::bare("minecraft:gravel")),
+        ],
+        "`roof` binds no member, and the abstract `wall` is the catalog's",
+    );
+}
