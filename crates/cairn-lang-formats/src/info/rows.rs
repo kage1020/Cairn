@@ -13,10 +13,10 @@ use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
-use super::Reporter;
 use super::floors::{buildable_refusal, report_version_notes, weigh_versions};
 use super::inferred::report_inferred_range;
 use super::respelled::{report_respelled_notes, respelled_tokens};
+use super::{Refusal, ReportFormat, Reporter};
 use crate::build::circuits::{lay_circuits, raised_by_each, same_place};
 use crate::build::finding::{Finding, Found};
 use crate::build::run_level::palette_entry_name;
@@ -28,30 +28,27 @@ use crate::registry::builtin_pack;
 
 /// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and
 /// one per version.
-///
-/// `Err` holds the errors the JSON failure document owes; it is empty unless
-/// `errors_in_document`, or when only a palette refused the run.
 pub(super) fn edition_rows(
     out: &mut Reporter<'_>,
     module: &Module,
     ir: &IntentModule,
     editions: &[Edition],
     already_reported: &[Diagnostic],
-    errors_in_document: bool,
-) -> Result<Vec<EditionReport>, Vec<Found>> {
+    format: ReportFormat,
+) -> Result<Vec<EditionReport>, Refusal> {
     let already: HashSet<(&str, usize, usize)> = already_reported
         .iter()
         .map(|d| (d.code.as_str(), d.span.start, d.span.end))
         .collect();
     let mut rows: Vec<EditionReport> = Vec::with_capacity(editions.len());
     let mut error_found = false;
-    let mut refused: Vec<Found> = Vec::new();
+    let mut refusal = Refusal::findings(Vec::new());
 
     let lowered: Vec<_> = editions
         .iter()
         .map(|&edition| lowered_for(ir, edition, &already))
         .collect();
-    let shared = report_shared_circuits(out, &lowered, &mut refused, errors_in_document);
+    let shared = report_shared_circuits(out, &lowered, &mut refusal.findings, format);
     error_found |= shared.iter().any(|d| d.severity() == Severity::Error);
 
     for EditionLowering {
@@ -67,10 +64,10 @@ pub(super) fn edition_rows(
             .filter(|d| !matches!(d, Found::Circuit(d) if shared.iter().any(|s| same_place(s, d))))
             .collect();
         error_found |= only_here.iter().any(|d| d.severity() == Severity::Error);
-        report_edition_findings(out, edition, only_here, &mut refused, errors_in_document);
+        report_edition_findings(out, edition, only_here, &mut refusal.findings, format);
 
-        // A refused palette does not end the walk: the scope and version notes below still print.
-        let portability = portability_figure(out, edition, edition_portability(edition, &block_ir));
+        // A refused palette does not end the walk: the scope and version notes are still sent.
+        let portability = portability_figure(out, edition, &block_ir, &mut refusal.palettes);
         error_found |= portability.is_none();
         if let Some(portability) = &portability {
             for note in degraded_notes(edition, portability.degraded()) {
@@ -138,25 +135,25 @@ pub(super) fn edition_rows(
         }
     }
 
-    // Not `refused.is_empty()`: a refused palette refuses the run without a finding.
+    // Not `refusal.findings.is_empty()`: a text run sends its errors on, and a palette has none.
     if error_found {
-        return Err(refused);
+        return Err(refusal);
     }
     Ok(rows)
 }
 
 /// Report what one edition's lowering alone found under a header naming the edition, holding
-/// back each error for the failure document when `errors_in_document`.
+/// back each error for the failure document in a JSON run.
 fn report_edition_findings(
     out: &mut Reporter<'_>,
     edition: Edition,
     only_here: Vec<Found>,
     refused: &mut Vec<Found>,
-    errors_in_document: bool,
+    format: ReportFormat,
 ) {
     let mut edition_header_printed = false;
     for d in only_here {
-        if d.severity() == Severity::Error && errors_in_document {
+        if d.severity() == Severity::Error && format == ReportFormat::Json {
             refused.push(d);
             continue;
         }
@@ -177,7 +174,7 @@ fn report_shared_circuits(
     out: &mut Reporter<'_>,
     lowered: &[EditionLowering],
     refused: &mut Vec<Found>,
-    errors_in_document: bool,
+    format: ReportFormat,
 ) -> Vec<CircuitDiagnostic> {
     let circuits: Vec<Vec<CircuitDiagnostic>> = lowered
         .iter()
@@ -195,7 +192,7 @@ fn report_shared_circuits(
     let shared = raised_by_each(&circuits);
     for d in &shared {
         let d = Found::Circuit(d.clone());
-        if d.severity() == Severity::Error && errors_in_document {
+        if d.severity() == Severity::Error && format == ReportFormat::Json {
             refused.push(d);
         } else {
             out.finding(&d);
@@ -319,19 +316,22 @@ fn edition_portability(
     }
 }
 
-/// One edition's portability figure, or `None` after reporting a palette whose blockstates a
-/// registry pack is expected to refuse.
+/// `block_ir`'s portability figure on `edition`, or `None` after sending the lines refusing a
+/// palette whose blockstates a registry pack is expected to refuse, which `palettes` keeps.
 fn portability_figure(
     out: &mut Reporter<'_>,
     edition: Edition,
-    portability: Result<PortabilityReport, InvalidPalette>,
+    block_ir: &BlockArrayIr,
+    palettes: &mut Vec<String>,
 ) -> Option<PortabilityReport> {
-    match portability {
+    match edition_portability(edition, block_ir) {
         Ok(portability) => Some(portability),
         Err(invalid) => {
-            for line in invalid_palette_report(edition, &invalid) {
-                out.line(&line);
+            let lines = invalid_palette_report(edition, &invalid);
+            for line in &lines {
+                out.line(line);
             }
+            palettes.extend(lines);
             None
         }
     }

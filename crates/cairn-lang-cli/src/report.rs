@@ -104,9 +104,7 @@ pub(crate) fn report_failure_document(
             }
         }
         FailureReport::Json => {
-            let document = FailureDocument {
-                diagnostics: render_findings(source, &lines, diagnostics),
-            };
+            let document = FailureDocument::new(render_findings(source, &lines, diagnostics));
             if let Err(code) = print_json("diagnostics", &document) {
                 return code;
             }

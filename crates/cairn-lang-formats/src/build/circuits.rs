@@ -60,7 +60,7 @@ pub fn check_circuits(
 
 /// Each distinct finding of `runs` that every other run raises with the same code at the same span.
 #[must_use]
-pub fn raised_by_each(runs: &[Vec<CircuitDiagnostic>]) -> Vec<CircuitDiagnostic> {
+pub(crate) fn raised_by_each(runs: &[Vec<CircuitDiagnostic>]) -> Vec<CircuitDiagnostic> {
     kept_findings(runs, |_, _| false)
 }
 
@@ -87,6 +87,6 @@ fn kept_findings(
 
 /// Whether `a` and `b` are one finding: the same code at the same span.
 #[must_use]
-pub fn same_place(a: &CircuitDiagnostic, b: &CircuitDiagnostic) -> bool {
+pub(crate) fn same_place(a: &CircuitDiagnostic, b: &CircuitDiagnostic) -> bool {
     a.code == b.code && a.span == b.span
 }

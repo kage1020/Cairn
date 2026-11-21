@@ -14,7 +14,7 @@ use cairn_lang_formats::build::run_level::{
 };
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::info::{
-    FailureDocument, InfoDocument, InfoRequest, InfoSink, RequestedEditions,
+    FailureDocument, InfoDocument, InfoRequest, InfoSink, ReportFormat, RequestedEditions,
 };
 use cairn_lang_formats::registry::builtin_pack;
 use serde::Serialize;
@@ -163,12 +163,12 @@ pub fn info(source: &str, editions: &RequestedEditions) -> Informed {
         file: Path::new(""),
         source,
         editions,
-        lock: Path::new(""),
-        errors_in_document: true,
+        lock: Some(Path::new("")),
+        format: ReportFormat::Json,
     };
     match cairn_lang_formats::info::info(&request, &mut Unsent) {
         Ok(document) => Informed::Report(Box::new(document)),
-        Err(refused) => Informed::Refused(FailureDocument::new(source, &refused)),
+        Err(refused) => Informed::Refused(refused.document(source)),
     }
 }
 

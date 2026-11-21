@@ -243,7 +243,7 @@ pub(super) fn report_floors_left_out_of_the_neutral_row(out: &mut Reporter<'_>, 
     }
 }
 
-/// What stderr says under one edition's `buildable targets` entry: each refused version's
+/// What the sink is sent under one edition's `buildable targets` entry: each refused version's
 /// findings, then the `note:` lines on the floors.
 pub(super) fn report_version_notes(
     out: &mut Reporter<'_>,

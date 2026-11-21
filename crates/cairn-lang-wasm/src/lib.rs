@@ -9,7 +9,7 @@
 //! `spec/lint` "Machine-readable payload" gives; a name that is not an edition throws an `Error`.
 
 use cairn_lang_core::Edition;
-use cairn_lang_formats::info::requested_editions;
+use cairn_lang_formats::info::{EditionsRefused, requested_editions};
 use js_sys::{Array, JSON, Object, Reflect, Uint8Array};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -65,14 +65,24 @@ pub fn compile(source: &str, edition: &str, target: &str) -> Result<JsValue, JsV
     reason = "wasm-bindgen takes a JavaScript array only as an owned `Vec`"
 )]
 pub fn info(source: &str, editions: Vec<String>) -> Result<JsValue, JsValue> {
-    if editions.is_empty() {
-        return Err(JsError::new(
-            "`editions` names no edition. Valid: java, bedrock. Fix: pass at least one edition name",
-        )
-        .into());
-    }
-    let editions = requested_editions(&editions).map_err(|err| JsError::new(&err))?;
+    let editions = requested_editions(&editions)
+        .map_err(|refused| JsError::new(&editions_refused(&refused)))?;
     to_js(&report::info(source, &editions))
+}
+
+/// Why [`info`]'s `editions` names nothing to report on.
+fn editions_refused(refused: &EditionsRefused) -> String {
+    match refused {
+        EditionsRefused::Empty => {
+            "`editions` names no edition. Valid: java, bedrock. Fix: pass at least one edition name"
+                .to_owned()
+        }
+        EditionsRefused::EmptyEntry => {
+            "`editions` holds an empty entry. Valid: java, bedrock. Fix: remove the empty entry"
+                .to_owned()
+        }
+        EditionsRefused::Unknown(unknown) => unknown.to_string(),
+    }
 }
 
 /// The versions `edition` can build for, as [`report::Targets`].

@@ -116,22 +116,13 @@ fn a_refused_palette_says_which_edition_lost_its_row_and_whose_bug_it_is() {
     let source = "";
     let starts = LineStarts::new(source);
     let mut out = Reporter::new(Path::new("probe.crn"), source, &starts, &mut sink);
+    let mut palettes = Vec::new();
     assert!(
-        portability_figure(
-            &mut out,
-            Edition::Bedrock,
-            portability_for_bedrock(
-                &block_ir,
-                pack.blocks(),
-                pack.aliases(),
-                pack.absent(),
-                pack.states()
-            ),
-        )
-        .is_none(),
+        portability_figure(&mut out, Edition::Bedrock, &block_ir, &mut palettes).is_none(),
         "a refused palette costs the edition its row rather than printing counts over it",
     );
     assert_eq!(sink.0, lines, "the refusal is reported as it reads");
+    assert_eq!(palettes, lines, "the refusal keeps what it reported");
     assert_eq!(lines.len(), 3, "header, one leak, closing note: {lines:?}");
     assert!(
         lines[0].starts_with("error: the bedrock ") && lines[0].contains("no portability"),
