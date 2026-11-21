@@ -14,6 +14,7 @@ fn synthetic_portability(entries: &[(Edition, u32)]) -> Vec<EditionReport> {
             considered: Vec::new(),
             refusal: None,
             inferred_range: open_range(edition),
+            respelled: Vec::new(),
             semantic_sensitive: Vec::new(),
         })
         .collect()
@@ -74,6 +75,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 considered: vec!["1.20.4".to_owned()],
                 refusal: None,
                 inferred_range: open_range(Edition::Java),
+                respelled: Vec::new(),
                 semantic_sensitive: Vec::new(),
             },
             EditionReport {
@@ -94,6 +96,7 @@ fn edition_portability_is_forwarded_verbatim_from_caller() {
                 considered: vec!["1.21.0".to_owned(), "1.21.40".to_owned()],
                 refusal: None,
                 inferred_range: open_range(Edition::Bedrock),
+                respelled: Vec::new(),
                 semantic_sensitive: Vec::new(),
             },
         ],
@@ -455,6 +458,44 @@ fn the_recommended_targets_are_one_row_per_edition_in_report_order() {
         serde_json::json!([
             {"edition": "bedrock", "versions": ["1.21.0", "1.21.40"]},
             {"edition": "java", "versions": []},
+        ]),
+    );
+}
+
+#[test]
+fn each_editions_respelled_tokens_are_forwarded_in_the_callers_order() {
+    let m = parse("struct s size=4x4\n  walls height=3\n").expect("parse");
+    let mut reports = synthetic_portability(&[(Edition::Bedrock, 0), (Edition::Java, 0)]);
+    reports[0].respelled.push(RespelledToken {
+        id: "minecraft:oak_sign".to_owned(),
+        position: Position {
+            line: std::num::NonZeroU32::new(2).expect("1-based"),
+            col: std::num::NonZeroU32::new(17).expect("1-based"),
+        },
+        written: vec![WrittenSpelling {
+            version: "1.21.60".to_owned(),
+            id: "minecraft:standing_sign".to_owned(),
+            through: SpellingTable::StateMap,
+        }],
+    });
+    let axes = compute_axes(&m, reports);
+    assert_eq!(
+        serde_json::to_value(&axes.respelled).expect("the rows serialize"),
+        serde_json::json!([
+            {
+                "edition": "bedrock",
+                "tokens": [{
+                    "id": "minecraft:oak_sign",
+                    "line": 2,
+                    "col": 17,
+                    "written": [{
+                        "version": "1.21.60",
+                        "id": "minecraft:standing_sign",
+                        "through": "state_map",
+                    }],
+                }],
+            },
+            { "edition": "java", "tokens": [] },
         ]),
     );
 }

@@ -73,7 +73,7 @@ pub(crate) fn check_lowering(
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
             diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).may_declare(id)
+                builtin_pack(edition).id_standing(id)
             }),
             dropped_scopes: Vec::new(),
             built_scopes: 0,

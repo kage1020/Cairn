@@ -1,26 +1,34 @@
 //! Lowering with no target (`spec/lint` "Error vs warning"): the findings every target that reads
-//! their line raises, weighed as if every id some version declares were declared, and none whose
-//! verdict is a target's pack's to give.
+//! their line raises, weighed as if every id some version declares, and every canonical token some
+//! version writes, were declared, and none whose verdict is a target's pack's to give.
 
-use cairn_lang_core::block_array::{findings_without_target, lower_to_block_array};
+use cairn_lang_core::block_array::{IdStanding, findings_without_target, lower_to_block_array};
 use cairn_lang_core::{Diagnostic, Edition, lower, parse, resolve};
 
 use crate::common::{lowered, notes, slice};
 
-/// `source`'s findings lowered with no target, for `edition` or for both, `declared` saying
-/// whether some version of an edition declares an id.
+/// `source`'s findings lowered with no target, for `edition` or for both, `standing` saying what
+/// the versions of an edition make of an id.
 fn without_target_declaring(
     source: &str,
     edition: Option<Edition>,
-    declared: &dyn Fn(Edition, &str) -> bool,
+    standing: &dyn Fn(Edition, &str) -> IdStanding,
 ) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    findings_without_target(&lower(&module), edition, declared)
+    findings_without_target(&lower(&module), edition, standing)
 }
 
 /// [`without_target_declaring`] with every id declared.
 fn without_target(source: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
-    without_target_declaring(source, edition, &|_, _| true)
+    without_target_declaring(source, edition, &|_, _| IdStanding::Declared)
+}
+
+/// What Java and Bedrock make of an id Java alone declares.
+fn java_only(edition: Edition, _: &str) -> IdStanding {
+    match edition {
+        Edition::Java => IdStanding::Declared,
+        Edition::Bedrock => IdStanding::Unknown,
+    }
 }
 
 /// `source`'s findings lowered for `edition` with no registry pack.
@@ -161,13 +169,15 @@ fn an_id_no_edition_sharing_the_lowering_declares_is_left_to_a_pinned_check() {
         "  roof kind=gable mat_slot=roof\n",
     );
     let not_a_stair = [("E_INCOMPATIBLE_MATERIAL", "@oak_stair")];
-    let java_only = |edition: Edition, _: &str| edition == Edition::Java;
     assert_eq!(
         located(source, &without_target(source, None)),
         not_a_stair,
         "premise: an id some version declares is weighed as that block",
     );
-    assert_eq!(without_target_declaring(source, None, &|_, _| false), []);
+    assert_eq!(
+        without_target_declaring(source, None, &|_, _| IdStanding::Unknown),
+        []
+    );
     assert_eq!(without_target_declaring(source, None, &java_only), []);
     assert_eq!(
         located(
@@ -178,6 +188,62 @@ fn an_id_no_edition_sharing_the_lowering_declares_is_left_to_a_pinned_check() {
     );
     assert_eq!(
         without_target_declaring(source, Some(Edition::Bedrock), &java_only),
+        [],
+    );
+}
+
+/// What Java and Bedrock make of an id when Bedrock declares no `oak_sign` but writes the
+/// canonical token naming it under another id, as its state map does.
+fn bedrock_writes_signs(edition: Edition, id: &str) -> IdStanding {
+    if edition == Edition::Bedrock && id == "minecraft:oak_sign" {
+        IdStanding::Respelled
+    } else {
+        IdStanding::Declared
+    }
+}
+
+#[test]
+fn a_token_an_edition_writes_under_another_id_is_weighed_as_its_block() {
+    let source = concat!(
+        "theme t:\n",
+        "  slot wall -> @cobblestone\n",
+        "  slot roof -> @oak_sign\n\n",
+        "struct hut size=5x5\n",
+        "  walls mat_slot=wall height=3\n",
+        "  roof kind=shed slope_to=front mat_slot=roof\n",
+    );
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(
+            located(
+                source,
+                &without_target_declaring(source, edition, &bedrock_writes_signs),
+            ),
+            [("E_INCOMPATIBLE_MATERIAL", "@oak_sign")],
+            "{edition:?}",
+        );
+    }
+}
+
+#[test]
+fn a_raw_block_of_an_id_an_edition_only_writes_as_a_token_stands_in_there() {
+    let source = concat!(
+        "struct s size=3x3\n",
+        "  raw_block mat=minecraft:stone at=1,0,1\n",
+        "  raw_block mat=minecraft:oak_sign at=1,0,1\n",
+    );
+    assert_eq!(
+        located(
+            source,
+            &without_target_declaring(source, Some(Edition::Java), &bedrock_writes_signs),
+        ),
+        [(
+            "W_PHASE_CONFLICT",
+            "raw_block mat=minecraft:oak_sign at=1,0,1"
+        )],
+        "premise: two blocks a target names in one cell conflict",
+    );
+    assert_eq!(
+        without_target_declaring(source, Some(Edition::Bedrock), &bedrock_writes_signs),
         [],
     );
 }
@@ -429,7 +495,6 @@ fn a_theme_both_editions_bind_is_no_ones_own() {
         "site s:\n  place id=a use=house theme=t at=origin\n  \
          place id=b use=hut theme=roofs east_of=a gap=2\n",
     );
-    let java_only = |edition: Edition, _: &str| edition == Edition::Java;
     assert_eq!(
         positioned(
             source,
