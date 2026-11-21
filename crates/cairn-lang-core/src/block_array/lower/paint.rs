@@ -6,6 +6,7 @@ use crate::intent::{BindingKey, Member, MemberRole};
 use crate::block_array::geometry::Declared;
 
 use super::beam::fill_beam;
+use super::bed::fill_bed;
 use super::canvas::{LazySlot, MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
 use super::chest::fill_chest;
@@ -21,6 +22,7 @@ use super::part::{Part, fill_part};
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
+use super::sign::fill_sign;
 use super::sizing::wall_height;
 use super::stair::fill_stair;
 use super::trapdoor::fill_trapdoor;
@@ -123,6 +125,8 @@ pub(super) fn paint_member(
         MemberRole::NoteBlock => {
             fill_note_block(member, y_offset, ctx, palette, canvas, diagnostics);
         }
+        MemberRole::Sign => fill_sign(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Bed => fill_bed(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Repeater => {
             fill_part(
                 Part::Repeater,

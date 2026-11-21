@@ -108,8 +108,8 @@
     "note": [
       {
         "java": ["note_block"],
-        "kind": "missing_state",
-        "reason": "Bedrock keeps a note block's note in its block entity, which Cairn does not write"
+        "kind": "block_entity",
+        "reason": "Bedrock keeps a note block's note in its block entity"
       }
     ],
     "orientation": [
@@ -195,8 +195,8 @@
       },
       {
         "java": ["chest", "copper_chest", "exposed_copper_chest", "oxidized_copper_chest", "trapped_chest", "waxed_copper_chest", "waxed_exposed_copper_chest", "waxed_oxidized_copper_chest", "waxed_weathered_copper_chest", "weathered_copper_chest"],
-        "kind": "missing_state",
-        "reason": "Bedrock pairs chests through their block entities, which Cairn does not write, so each chest stands single"
+        "kind": "block_entity",
+        "reason": "Bedrock pairs chests through their block entities"
       }
     ],
     "up": [

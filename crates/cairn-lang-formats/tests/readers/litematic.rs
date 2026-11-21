@@ -54,7 +54,7 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
         regions: vec![LitematicReadRegion {
             name: "comparator".to_owned(),
             min_corner: (0, 0, 0),
-            volume: volume_of(&array),
+            volume: volume_of(&array, &target("1.20.4")),
             entities: vec![],
         }],
     };
@@ -64,7 +64,8 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
 #[test]
 fn a_site_reads_back_region_by_region_at_each_origin() {
     let ir = lower_example("village.crn", Edition::Java, None);
-    let read = round_trip(&ir, &target(latest(Edition::Java)));
+    let at = target(latest(Edition::Java));
+    let read = round_trip(&ir, &at);
     let regions: Vec<(String, (i32, i32, i32), BlockVolume)> = read
         .into_iter()
         .flat_map(|schematic| schematic.regions)
@@ -80,7 +81,7 @@ fn a_site_reads_back_region_by_region_at_each_origin() {
                 .map(|p| p.origin)
                 .or_else(|| ir.walkways.get(scope.as_str()).map(|w| w.origin))
                 .expect("every village structure is placed");
-            (ir.artifact_stem(scope), origin, volume_of(array))
+            (ir.artifact_stem(scope), origin, volume_of(array, &at))
         })
         .collect();
     assert_eq!(regions, expected);
@@ -96,7 +97,11 @@ fn every_shipped_example_reads_back_as_its_block_arrays() {
             .flat_map(|schematic| schematic.regions)
             .map(|region| region.volume)
             .collect();
-        let expected: Vec<BlockVolume> = ir.structures.values().map(volume_of).collect();
+        let expected: Vec<BlockVolume> = ir
+            .structures
+            .values()
+            .map(|array| volume_of(array, &target))
+            .collect();
         assert_eq!(read, expected, "{name}");
     }
 }
@@ -107,8 +112,9 @@ fn a_palette_past_sixteen_entries_reads_back() {
     let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
     let slots: Vec<u16> = (0..=40).rev().cycle().take(5 * 7 * 3).collect();
     let array = array_of("wide", Dims { x: 5, y: 7, z: 3 }, &ids, &slots);
-    let read = round_trip(&ir_of(array.clone()), &target("1.21.4"));
-    assert_eq!(read[0].regions[0].volume, volume_of(&array));
+    let at = target("1.21.4");
+    let read = round_trip(&ir_of(array.clone()), &at);
+    assert_eq!(read[0].regions[0].volume, volume_of(&array, &at));
 }
 
 /// The uncompressed bytes of an unnamed root holding `entries` in order.

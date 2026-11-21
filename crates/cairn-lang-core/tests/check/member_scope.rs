@@ -27,6 +27,8 @@ const GEOMETRY_ROWS: &[&str] = &[
     "chest id=c at=inside.front",
     "trapdoor id=td at=inside.front",
     "note_block at=1,0,1",
+    "sign at=1,0,1",
+    "bed at=1,0,1 facing=north",
     "repeater at=1,0,1 facing=east",
     "comparator at=1,0,1 facing=east",
     "redstone_torch at=1,0,1",
@@ -207,8 +209,8 @@ fn the_candidate_list_is_scoped_to_the_body() {
         notes(&geometry).contains(
             &"expected one of: floor, walls, fill, door, window, roof, stair, beam, level, \
              pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
-             trapdoor, note_block, repeater, comparator, redstone_torch, redstone_dust, circuit, \
-             raw_block, raw_fill"
+             trapdoor, note_block, sign, bed, repeater, comparator, redstone_torch, redstone_dust, \
+             circuit, raw_block, raw_fill"
         ),
         "got {:#?}",
         notes(&geometry),

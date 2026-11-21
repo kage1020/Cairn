@@ -27,10 +27,10 @@ member's phase ([Materials and Themes](/spec/materials-themes/#selector-bindings
 member's corner posts in `massing`, and a `door` or `window` frame in `openings`, once every
 opening is cut.
 
-Not every row runs today. `sign`, `painting`, `frame`, `bed` and `water` are not keywords yet and
-are each refused as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`,
-`openings`, `fixtures` (whose members are `chest`, `trapdoor`, `note_block`, every sensor and
-actuator but `door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))),
+Not every row runs today. `painting`, `frame` and `water` are not keywords yet and are each refused
+as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`, `openings`, `fixtures`
+(whose members are `sign`, `bed`, `chest`, `trapdoor`, `note_block`, every sensor and actuator but
+`door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))),
 `fluids` and `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The three
 `logic_*` phases lay each struct's circuit in the layers its `circuit` line reserves under the base
 plane, where no other phase paints, so they read the struct as every other phase leaves it, `raw`
@@ -241,11 +241,11 @@ Members inside a `level` count in all three, at their offset: `walls height=3` w
 gives `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `beam`, `chest`,
-`trapdoor`, `note_block`, every sensor and actuator, the Tier 0 parts, `fill`, `raw_block` and
-`raw_fill` read `N` as the base their geometry is measured from, except that a `beam` over an
-opening lies where its opening's `level` puts it. A `floor` and a `roof` are planes a struct has one
-of, and what one under a raised `level` builds is reserved for a later extension: under `level y=N`
-with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
+`trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the Tier 0 parts, `fill`,
+`raw_block` and `raw_fill` read `N` as the base their geometry is measured from, except that a
+`beam` over an opening lies where its opening's `level` puts it. A `floor` and a `roof` are planes a
+struct has one of, and what one under a raised `level` builds is reserved for a later extension:
+under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under
@@ -281,12 +281,16 @@ Two cases are not conflicts:
 - A cell whose value does not change, as when two `walls` of one material meet over shared rows.
 - A member writing over itself, as when a `window`'s `repeat=` / `step=` stamps overlap.
 
+A cell's value is its block and what the block keeps in its block entity ([Entities
+§8.1](/spec/entities/#81-two-tiers)), so two signs of one wood on one cell whose text differs
+conflict, and the finding says the block entity changed hands.
+
 A `door` whose `hinge` is derived is judged by the hinge it is built with, which is settled once
 every opening is cut ([Blockstate Model
 §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)): two doors in one opening
 conflict when the blocks they would build differ, whichever line comes first. An opening that
-takes one of a door's two cells leaves half a door, which the game removes, and the finding says
-so.
+takes one of a door's two cells, or a fixture that takes one of a bed's, leaves half a door or half
+a bed, which the game removes, and the finding says so.
 
 **The palette** of an evaluated body (a `struct`, a `def`, and each `place` that instantiates one)
 is a *set with a canonical rendering*, not a log of the writes that filled it. It lists the blocks

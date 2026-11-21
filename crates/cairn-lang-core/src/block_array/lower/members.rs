@@ -165,6 +165,8 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Chest
         | MemberRole::Trapdoor
         | MemberRole::NoteBlock
+        | MemberRole::Sign
+        | MemberRole::Bed
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
@@ -281,6 +283,8 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Chest
         | MemberRole::Trapdoor
         | MemberRole::NoteBlock
+        | MemberRole::Sign
+        | MemberRole::Bed
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch

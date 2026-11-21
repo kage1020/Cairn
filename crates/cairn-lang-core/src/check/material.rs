@@ -66,7 +66,9 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::PressurePlate
         | MemberRole::Button
         | MemberRole::Chest
-        | MemberRole::Trapdoor => WithoutAMaterial::PaintsAFallback,
+        | MemberRole::Trapdoor
+        | MemberRole::Sign
+        | MemberRole::Bed => WithoutAMaterial::PaintsAFallback,
         // Each is built from its own tokens, which no `mat_slot=` chooses among.
         MemberRole::Lever
         | MemberRole::Daylight
