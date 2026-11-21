@@ -13,10 +13,10 @@ The four exports below ship, and CI builds the module and tests them in Node on 
 ## Build
 
 ```sh
-CARGO_PROFILE_RELEASE_OPT_LEVEL=s wasm-pack build crates/cairn-lang-wasm --target web --release
+wasm-pack build crates/cairn-lang-wasm --target web --release
 ```
 
-`pnpm run build:wasm` in [`website/`](../../website/README.md) runs the same build into the site, and fails when the module outgrows the size budget [`website/scripts/build-wasm.sh`](../../website/scripts/build-wasm.sh) sets. The build takes the release profile but for `opt-level`, which it sets to `s`: the page downloads the module, and a source the playground compiles takes milliseconds at either level. `wasm-opt` is off in `Cargo.toml`: on this module it saves about 5%, and nothing once the module is gzipped, and `wasm-pack` would download it for every build.
+`pnpm run build:wasm` in [`website/`](../../website/README.md) runs the same build into the site, and fails when the module outgrows the size budget [`website/scripts/build-wasm.sh`](../../website/scripts/build-wasm.sh) sets. `wasm-opt` is off in `Cargo.toml`: on this module it saves about 5%, and nothing once the module is gzipped, and `wasm-pack` would download it for every build.
 
 ```sh
 cargo test -p cairn-lang-wasm                  # what each export answers, as Rust values

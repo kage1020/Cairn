@@ -6,8 +6,8 @@
 # them; on a developer's machine the script names what is missing instead.
 set -eu
 
-# The largest the module may be, in bytes: 3 MiB, kept above its size so that it can grow.
-WASM_SIZE_BUDGET=3145728
+# The largest the module may be, in bytes: 4 MiB, kept above its size so that it can grow.
+WASM_SIZE_BUDGET=4194304
 WASM_PACK_VERSION=0.15.0
 
 website=$(cd "$(dirname "$0")/.." && pwd)
@@ -49,10 +49,7 @@ if ! command -v wasm-pack >/dev/null 2>&1; then
   cargo install --locked "wasm-pack@$WASM_PACK_VERSION"
 fi
 
-# Size over speed for the module the page downloads: the playground compiles a source in
-# milliseconds at either level.
-CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
-  wasm-pack build crates/cairn-lang-wasm --target web --release --no-pack --out-dir "$out"
+wasm-pack build crates/cairn-lang-wasm --target web --release --no-pack --out-dir "$out"
 
 module="$out/cairn_lang_wasm_bg.wasm"
 if [ ! -f "$module" ]; then

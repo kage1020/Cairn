@@ -217,7 +217,7 @@ Raising `rust-version` changes who can build the crates, so it is never a quiet 
 
 ## Changing the release profile
 
-`[profile.release]` in the workspace manifest is tuned for the size of the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: a size-oriented level would shrink the archives but slow block-array lowering and place-and-route, which is where a build spends its time. The playground's module is built at `s` all the same, since the page downloads it and the sources it compiles are small; `website/scripts/build-wasm.sh` sets that.
+`[profile.release]` in the workspace manifest is tuned for the size of the release archives, and its comments say why. Most of its settings cost only build time. `opt-level` is the exception: a size-oriented level would shrink the archives but slow block-array lowering and place-and-route, which is where a build spends its time.
 
 Two benches measure that throughput: `lowering` in `cairn-lang-core` and `place_and_route` in `cairn-lang-redstone`. They call the passes in-process, since timing the CLI over an example would mostly time process startup. They also generate their sources instead of using an example, since a source that small goes through a pass faster than the timer can tell a change apart.
 
