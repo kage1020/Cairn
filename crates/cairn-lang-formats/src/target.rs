@@ -2,38 +2,52 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArray;
+use thiserror::Error;
 
-use crate::bedrock_structure::{McStructure, ParityNote, prepare_mcstructure};
+use crate::bedrock_structure::{
+    BedrockStructureError, McStructure, ParityNote, prepare_mcstructure,
+};
 use crate::data_version::ResolvedTarget;
-use crate::java_structure::{JavaStructure, prepare_structure};
+use crate::java_structure::{JavaStructure, JavaStructureError, prepare_structure};
 use crate::litematic::Litematic;
 use crate::registry::builtin_pack;
 use crate::schem::Schem;
+
+/// Why the backend a resolved target selects refuses a structure.
+#[derive(Debug, Error)]
+pub enum BackendRefusal {
+    /// The `.nbt` writer's refusal.
+    #[error(transparent)]
+    Java(#[from] JavaStructureError),
+    /// The `.mcstructure` writer's refusal.
+    #[error(transparent)]
+    Bedrock(#[from] BedrockStructureError),
+}
 
 /// Check `array` against `target`'s backend, with the parity notes it raises.
 ///
 /// # Errors
 ///
-/// The backend's refusal, as the message a front end prints after the scope.
+/// The backend's refusal of the structure.
 ///
 /// # Panics
 ///
 /// If the built-in Bedrock pack has no state map for a version it can build for.
-pub fn prepare<'a>(
+pub(crate) fn prepare<'a>(
     target: &ResolvedTarget,
     array: &'a BlockArray,
-) -> Result<(PreparedStructure<'a>, Vec<ParityNote>), String> {
+) -> Result<(PreparedStructure<'a>, Vec<ParityNote>), BackendRefusal> {
     match target {
-        ResolvedTarget::Java(t) => prepare_structure(array, t)
-            .map(|prepared| (PreparedStructure::Java(prepared), Vec::new()))
-            .map_err(|e| e.to_string()),
+        ResolvedTarget::Java(t) => Ok((
+            PreparedStructure::Java(prepare_structure(array, t)?),
+            Vec::new(),
+        )),
         ResolvedTarget::Bedrock(t) => {
             let states = builtin_pack(Edition::Bedrock)
                 .states_at(&t.mc_version)
                 .expect("the built-in Bedrock pack maps every targetable version");
-            prepare_mcstructure(array, t, &states)
-                .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
-                .map_err(|e| e.to_string())
+            let (prepared, notes) = prepare_mcstructure(array, t, &states)?;
+            Ok((PreparedStructure::Bedrock(prepared), notes))
         }
     }
 }

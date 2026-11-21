@@ -1,12 +1,12 @@
 /** Runs `cairn-lang-wasm` off the page's thread, so a long build never freezes the editor. */
 
-import type { Compiled, Request, Response, Targets } from "./protocol";
+import type { Compiled, Edition, Request, Response, Targets } from "./protocol";
 
 interface Bindings {
   default: () => Promise<unknown>;
   cairn_version(): string;
-  compile(source: string, edition: string, target: string): Compiled;
-  targets(edition: string): Targets;
+  compile(source: string, edition: Edition, target: string): Compiled;
+  targets(edition: Edition): Targets;
 }
 
 const scope = self as unknown as {
@@ -26,15 +26,18 @@ const bindings: Promise<Bindings | undefined> = load
     })
   : Promise.resolve(undefined);
 
-void bindings.then((module) =>
-  scope.postMessage(
-    module ? { kind: "ready", version: module.cairn_version() } : { kind: "unavailable" },
-  ),
+bindings.then(
+  (module) =>
+    scope.postMessage(
+      module ? { kind: "ready", version: module.cairn_version() } : { kind: "unavailable" },
+    ),
+  (error: unknown) => scope.postMessage({ kind: "load-failed", message: String(error) }),
 );
 
 scope.onmessage = async (event) => {
   const request = event.data;
-  const module = await bindings;
+  // A module that failed to load has said so, and answers nothing.
+  const module = await bindings.catch(() => undefined);
   if (!module) return;
   try {
     if (request.kind === "compile") {

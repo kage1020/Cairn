@@ -7,7 +7,7 @@ use std::process::ExitCode;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, diagnose_parse_failure, parse};
 use cairn_lang_formats::build::lowering::{Lowered, lower_for_target};
-use cairn_lang_formats::data_version::ResolvedTarget;
+use cairn_lang_formats::data_version::{ResolvedTarget, UnsupportedTarget};
 
 use crate::report::{FailureReport, report_failure_document};
 
@@ -36,11 +36,12 @@ pub(crate) fn load_module(
     Ok((source, module))
 }
 
-/// Read, parse, resolve and lower `file` for `edition`'s build, returning the source beside it.
+/// Read, parse, resolve and lower `file` for `edition`'s build at `target`, returning the source
+/// beside it.
 pub(crate) fn load_and_lower(
     file: &Path,
     edition: Edition,
-    target: Option<&ResolvedTarget>,
+    target: Result<ResolvedTarget, UnsupportedTarget>,
 ) -> Result<(String, Lowered), ExitCode> {
     let (source, module) = load_module(file, FailureReport::Text)?;
     let lowered = lower_for_target(&module, edition, target);

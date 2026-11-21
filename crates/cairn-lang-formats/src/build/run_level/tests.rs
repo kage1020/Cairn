@@ -1,18 +1,19 @@
 use super::*;
 
-/// A floor on line 2 refusing the target, with a note pointing at line 1.
+/// A floor on line 2 refusing the target, with a line of each kind under it.
 fn version_cap(at: RunLevelAt) -> RunLevelMessage {
     RunLevelMessage {
-        severity: Severity::Error,
-        code: Some("E_VERSION_CAP"),
+        kind: RunLevelKind::FloorRefusal(DiagnosticCode::VersionCap),
         at,
         primary: "this file requires version>=1.21 (target 1.20.4).".to_owned(),
         notes: vec![
-            RunLevelNote::At {
-                at: 7,
-                note: "`struct a` is what the floor holds".to_owned(),
+            RunLevelNote::Note {
+                at: Some(7),
+                text: "`struct a` is what the floor holds".to_owned(),
             },
-            RunLevelNote::Line("fix: --target 1.21, or lower the `@requires` floor".to_owned()),
+            RunLevelNote::note("the floor binds every scope"),
+            RunLevelNote::Continuation("valid java targets: 1.21".to_owned()),
+            RunLevelNote::Fix("--target 1.21, or lower the `@requires` floor".to_owned()),
         ],
     }
 }
@@ -27,6 +28,8 @@ fn a_message_prints_gcc_style_at_the_place_it_names() {
         [
             "error[E_VERSION_CAP]: hut.crn:2:1: this file requires version>=1.21 (target 1.20.4).",
             "  note: hut.crn:1:8: `struct a` is what the floor holds",
+            "  note: the floor binds every scope",
+            "  valid java targets: 1.21",
             "  fix: --target 1.21, or lower the `@requires` floor",
         ],
     );
@@ -59,12 +62,14 @@ fn a_message_renders_as_a_finding_does_with_a_position_only_where_it_points() {
             "col": 1,
             "primary": "this file requires version>=1.21 (target 1.20.4).",
             "notes": [
-                { "line": 1, "col": 8, "message": "note: `struct a` is what the floor holds" },
+                { "line": 1, "col": 8, "message": "`struct a` is what the floor holds" },
+                { "message": "the floor binds every scope" },
+                { "message": "valid java targets: 1.21" },
                 { "message": "fix: --target 1.21, or lower the `@requires` floor" },
             ],
         }),
     );
-    let nowhere = backend_refusal("struct::a", "too tall");
+    let nowhere = backend_refusal("struct::a", &"too tall");
     assert_eq!(
         serde_json::to_value(nowhere.render(SOURCE, &lines)).expect("serialises"),
         serde_json::json!({
@@ -83,14 +88,36 @@ fn a_partial_build_counts_what_was_asked_for_and_names_each_lost_scope() {
             "refusing to certify a partial build"
         ),
         RunLevelMessage {
-            severity: Severity::Error,
-            code: Some("E_PARTIAL_BUILD"),
+            kind: RunLevelKind::PartialBuild,
             at: RunLevelAt::Source,
             primary: "1 of 2 requested scopes did not lower; refusing to certify a partial build"
                 .to_owned(),
-            notes: vec![RunLevelNote::Line(
-                "note: `struct::shed` produced no voxels".to_owned()
-            )],
+            notes: vec![RunLevelNote::note("`struct::shed` produced no voxels")],
         },
+    );
+}
+
+#[test]
+fn a_kind_settles_the_code_and_severity_a_message_carries() {
+    let kinds = [
+        RunLevelKind::PartialBuild,
+        RunLevelKind::RequiresConflict,
+        RunLevelKind::IntentDegraded,
+        RunLevelKind::FloorRefusal(DiagnosticCode::VersionCap),
+        RunLevelKind::UnsupportedTarget,
+        RunLevelKind::BackendRefusal,
+        RunLevelKind::ArtifactCollision,
+    ];
+    assert_eq!(
+        kinds.map(|kind| (kind.code(), kind.severity())),
+        [
+            (Some("E_PARTIAL_BUILD"), Severity::Error),
+            (Some("E_REQUIRES_CONFLICT"), Severity::Error),
+            (Some("W_INTENT_DEGRADED"), Severity::Warning),
+            (Some("E_VERSION_CAP"), Severity::Error),
+            (None, Severity::Error),
+            (None, Severity::Error),
+            (None, Severity::Error),
+        ],
     );
 }

@@ -6,6 +6,8 @@ use std::process::ExitCode;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::build::lowering::BuildRefusal;
+use cairn_lang_formats::build::run_level::floor_refusal_message;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::info::default_lock_path;
 
@@ -38,25 +40,25 @@ pub(crate) fn run_compile(
     let structure_format = structure_format.unwrap_or_default();
     // Resolved before lowering, which checks ids against it, but reported after the source's
     // own findings.
-    let resolved_target = resolve_target(edition, target);
-    let (source, lowered) = match load_and_lower(file, edition, resolved_target.as_ref().ok()) {
+    let (source, lowered) = match load_and_lower(file, edition, resolve_target(edition, target)) {
         Ok(lowered) => lowered,
         Err(code) => return code,
     };
     let lines = LineStarts::new(&source);
-    let refused = report_diagnostics(file, &source, &lines, &lowered.block_ir.diagnostics)
-        | report_diagnostics(file, &source, &lines, &lowered.circuits);
+    report_diagnostics(file, &source, &lines, &lowered.block_ir.diagnostics);
+    report_diagnostics(file, &source, &lines, &lowered.circuits);
     for conflict in &lowered.conflicts {
         report_run_level(file, &source, &lines, conflict);
     }
-    // A conflict holds at every target, so it stops the build ahead of the target's floor check.
-    if refused || !lowered.conflicts.is_empty() {
-        return ExitCode::from(1);
-    }
-    let target = match lowered.writable_target(resolved_target) {
+    let target = match lowered.verdict() {
         Ok(target) => target,
-        Err(refusal) => {
+        Err(BuildRefusal::Findings | BuildRefusal::Conflicts) => return ExitCode::from(1),
+        Err(BuildRefusal::RunLevel(refusal)) => {
             report_run_level(file, &source, &lines, &refusal);
+            return ExitCode::from(1);
+        }
+        Err(BuildRefusal::Floor(refusal)) => {
+            report_run_level(file, &source, &lines, &floor_refusal_message(refusal));
             return ExitCode::from(1);
         }
     };
@@ -71,7 +73,7 @@ pub(crate) fn run_compile(
         &lowered.block_ir,
         &source,
         edition,
-        &target,
+        target,
         structure_format,
         &out_dir,
         &lock_path,

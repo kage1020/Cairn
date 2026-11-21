@@ -3,13 +3,14 @@
 import type { HighlighterCore } from "@shikijs/core";
 import { type Mark, loadHighlighter, render } from "./highlight";
 import type {
+  Answers,
   BlockArray,
   Compiled,
   Diagnostic,
+  Edition,
   Request,
   Response,
   RunLevelMessage,
-  Targets,
 } from "./protocol";
 import { type Strings, count, fill } from "./strings";
 import { colourOf, counts, draw } from "./view";
@@ -20,14 +21,32 @@ const examples = import.meta.glob<string>("../../../examples/*.crn", {
   eager: true,
 });
 
-const EDITIONS = ["java", "bedrock"] as const;
+const EDITIONS: readonly Edition[] = ["java", "bedrock"];
 const FIRST_EXAMPLE = "cottage";
 const SETTLE_MS = 250;
 
-type Pending = { resolve: (value: Compiled | Targets) => void; reject: (error: Error) => void };
+type Pending = {
+  resolve: (value: Answers[keyof Answers]) => void;
+  reject: (error: Unanswered) => void;
+};
 
-/** A request before it is numbered. */
-type Unnumbered<T> = T extends unknown ? Omit<T, "id"> : never;
+/** A request of kind `K` before it is numbered. */
+type Unnumbered<K extends Request["kind"]> = Omit<Extract<Request, { kind: K }>, "id"> & {
+  kind: K;
+};
+
+/**
+ * Why a request has no answer: the worker failed on it, trapped on it and was restarted, or was
+ * restarted before it answered.
+ */
+class Unanswered extends Error {
+  constructor(
+    message: string,
+    readonly reason: "failed" | "trapped" | "restarted",
+  ) {
+    super(message);
+  }
+}
 
 class Playground extends HTMLElement {
   private t!: Strings;
@@ -105,7 +124,7 @@ class Playground extends HTMLElement {
       this.input.scrollTop = 0;
       this.edited();
     });
-    this.edition.addEventListener("change", () => void this.editionChanged());
+    this.edition.addEventListener("change", () => this.listTargets());
     this.target.addEventListener("change", () => this.compileNow());
     this.structure.addEventListener("change", () => this.structureChanged());
     this.layers.addEventListener("input", () => this.redraw());
@@ -135,10 +154,18 @@ class Playground extends HTMLElement {
 
   private spawn(): void {
     this.worker?.terminate();
-    for (const pending of this.requests.values()) pending.reject(new Error("restarted"));
+    for (const pending of this.requests.values()) {
+      pending.reject(new Unanswered("restarted", "restarted"));
+    }
     this.requests.clear();
     const worker = new Worker(new URL("./worker.ts", import.meta.url), { type: "module" });
     worker.onmessage = (event: MessageEvent<Response>) => this.answered(event.data);
+    // The worker script did not load, or threw outside a request.
+    worker.onerror = (event) => {
+      event.preventDefault();
+      this.loadFailed(event.message || this.t.workerFailed);
+    };
+    worker.onmessageerror = () => this.loadFailed(this.t.workerFailed);
     this.worker = worker;
   }
 
@@ -147,33 +174,54 @@ class Playground extends HTMLElement {
       this.version = message.version;
       // After a crash, compiling the same source again would only crash again; the next edit will.
       if (this.restarted) this.restarted = false;
-      else void this.editionChanged();
+      else this.listTargets();
       return;
     }
     if (message.kind === "unavailable") {
       this.unavailable();
       return;
     }
+    if (message.kind === "load-failed") {
+      this.loadFailed(message.message);
+      return;
+    }
     const pending = this.requests.get(message.id);
     this.requests.delete(message.id);
     if (message.kind === "answer") {
       pending?.resolve(message.value);
+    } else if (message.trapped) {
+      pending?.reject(new Unanswered(message.message, "trapped"));
+      this.status.textContent = this.t.crashed;
+      this.restarted = true;
+      this.spawn();
     } else {
-      pending?.reject(new Error(message.message));
-      if (message.trapped) {
-        this.status.textContent = this.t.crashed;
-        this.restarted = true;
-        this.spawn();
-      }
+      pending?.reject(new Unanswered(message.message, "failed"));
     }
   }
 
-  private ask(request: Unnumbered<Request>): Promise<Compiled | Targets> {
+  private ask<K extends keyof Answers>(request: Unnumbered<K>): Promise<Answers[K]> {
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
-      this.requests.set(id, { resolve, reject });
+      // The worker answers a request with the value its kind names.
+      this.requests.set(id, { resolve: resolve as Pending["resolve"], reject });
       this.worker?.postMessage({ ...request, id });
     });
+  }
+
+  /** Says the worker cannot compile, and why, and stops offering what it would run. */
+  private loadFailed(message: string): void {
+    this.version = "";
+    this.status.textContent = fill(this.t.loadFailed, { message });
+    for (const control of [this.edition, this.target]) control.disabled = true;
+    this.clearDownloads();
+  }
+
+  /** Says the worker failed on a request it did not trap on, which leaves nothing current. */
+  private failed(error: unknown): void {
+    if (!(error instanceof Unanswered) || error.reason !== "failed") return;
+    console.error("cairn-lang-wasm:", error.message);
+    this.status.textContent = fill(this.t.failed, { message: error.message });
+    this.clearDownloads();
   }
 
   private unavailable(): void {
@@ -185,8 +233,15 @@ class Playground extends HTMLElement {
     for (const control of [this.edition, this.target]) control.disabled = true;
   }
 
-  private async editionChanged(): Promise<void> {
-    const targets = (await this.ask({ kind: "targets", edition: this.edition.value })) as Targets;
+  /** Lists the targets the chosen edition builds for, then compiles at the one chosen. */
+  private listTargets(): void {
+    this.ask({ kind: "targets", edition: this.edition.value as Edition }).then(
+      (targets) => this.targetsListed(targets),
+      (error: unknown) => this.failed(error),
+    );
+  }
+
+  private targetsListed(targets: Answers["targets"]): void {
     this.target.replaceChildren(
       new Option(fill(this.t.latest, { version: targets.latest }), "latest"),
       ...targets.versions
@@ -198,6 +253,8 @@ class Playground extends HTMLElement {
   }
 
   private edited(): void {
+    // An answer still on its way is for the text before this edit.
+    this.generation += 1;
     this.paint();
     window.clearTimeout(this.settle);
     this.settle = window.setTimeout(() => this.compileNow(), SETTLE_MS);
@@ -212,13 +269,15 @@ class Playground extends HTMLElement {
     this.ask({
       kind: "compile",
       source,
-      edition: this.edition.value,
+      edition: this.edition.value as Edition,
       target: this.target.value || "latest",
     }).then(
-      (value) => {
-        if (generation === this.generation) this.show(value as Compiled, source);
+      (compiled) => {
+        if (generation === this.generation) this.show(compiled, source);
       },
-      () => undefined,
+      (error: unknown) => {
+        if (generation === this.generation) this.failed(error);
+      },
     );
   }
 
@@ -382,15 +441,17 @@ class Playground extends HTMLElement {
     this.irText.textContent = this.compiled?.ir ? JSON.stringify(this.compiled.ir, null, 2) : "";
   }
 
-  private offerDownloads(compiled: Compiled): void {
+  private clearDownloads(): void {
     for (const url of this.urls) URL.revokeObjectURL(url);
     this.urls = [];
-    if (!compiled.artifacts.length) {
-      const none = document.createElement("p");
-      none.textContent = this.t.noDownloads;
-      this.downloads.replaceChildren(none);
-      return;
-    }
+    const none = document.createElement("p");
+    none.textContent = this.t.noDownloads;
+    this.downloads.replaceChildren(none);
+  }
+
+  private offerDownloads(compiled: Compiled): void {
+    this.clearDownloads();
+    if (!compiled.artifacts.length) return;
     const list = document.createElement("ul");
     for (const artifact of compiled.artifacts) {
       const url = URL.createObjectURL(

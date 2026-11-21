@@ -5,10 +5,10 @@ use std::path::Path;
 
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::{LineStarts, RenderedDiagnostic};
-use cairn_lang_core::{Edition, Module, Severity, diagnose_parse_failure};
+use cairn_lang_core::{Edition, Module, diagnose_parse_failure};
 use cairn_lang_formats::build::artifact::prepare_artifact;
-use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
-use cairn_lang_formats::build::lowering::lower_for_target;
+use cairn_lang_formats::build::finding::{Found, render_findings};
+use cairn_lang_formats::build::lowering::{BuildRefusal, lower_for_target};
 use cairn_lang_formats::build::run_level::{
     RenderedRunLevelMessage, RunLevelMessage, artifact_collision,
 };
@@ -63,8 +63,7 @@ pub fn compile(source: &str, edition: Edition, target: &str) -> Compiled {
             return compiled;
         }
     };
-    let resolved = resolve_target(edition, target);
-    let lowered = lower_for_target(&module, edition, resolved.as_ref().ok());
+    let lowered = lower_for_target(&module, edition, resolve_target(edition, target));
     let findings: Vec<Found> = lowered
         .block_ir
         .diagnostics
@@ -79,24 +78,27 @@ pub fn compile(source: &str, edition: Edition, target: &str) -> Compiled {
         .iter()
         .map(|conflict| conflict.render(source, &lines))
         .collect();
-    if findings.iter().any(|d| d.severity() == Severity::Error) {
-        return compiled;
-    }
-    // A conflict holds at every target, so it stops the build ahead of the target's floor check.
-    if lowered.conflicts.is_empty() {
-        match lowered.writable_target(resolved) {
-            Ok(target) => {
-                match artifacts(&lowered.block_ir, &target, &mut compiled.run_level, |m| {
-                    m.render(source, &lines)
-                }) {
-                    Ok(artifacts) => {
-                        compiled.ok = true;
-                        compiled.artifacts = artifacts;
-                    }
-                    Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
+    match lowered.verdict() {
+        Ok(target) => {
+            match artifacts(&lowered.block_ir, target, &mut compiled.run_level, |m| {
+                m.render(source, &lines)
+            }) {
+                Ok(artifacts) => {
+                    compiled.ok = true;
+                    compiled.artifacts = artifacts;
                 }
+                Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
             }
-            Err(refusal) => compiled.run_level.push(refusal.render(source, &lines)),
+        }
+        Err(BuildRefusal::Findings) => return compiled,
+        Err(BuildRefusal::Conflicts) => {}
+        Err(BuildRefusal::RunLevel(refusal)) => {
+            compiled.run_level.push(refusal.render(source, &lines));
+        }
+        // `cairn check --target` reports the same refusal as a finding.
+        Err(BuildRefusal::Floor(refusal)) => {
+            compiled.diagnostics.push(refusal.render(source, &lines));
+            return compiled;
         }
     }
     compiled.ir = Some(lowered.block_ir);

@@ -10,7 +10,7 @@ use crate::registry::builtin_version_tables;
 /// The finding that refuses `target` for `floors`, the floors `edition`'s build is held to, or
 /// `None` when every floor admits it.
 #[must_use]
-pub fn floor_refusal(
+pub(crate) fn floor_refusal(
     floors: &[VersionFloor],
     edition: Edition,
     target: &ResolvedTarget,

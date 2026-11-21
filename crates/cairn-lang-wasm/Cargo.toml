@@ -18,6 +18,8 @@ cairn-lang-formats.workspace = true
 js-sys = "0.3.106"
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
+# Exact: the JavaScript glue the playground imports is this version's output, so a move is an edit
+# here rather than a `cargo update`.
 wasm-bindgen = "=0.2.129"
 
 [dev-dependencies]

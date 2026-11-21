@@ -10,6 +10,7 @@
   structure layer by layer, and offers its `.nbt` or `.mcstructure` to download.
 - *(formats)* The `build` module holds what a front end runs over a source for a build: the gate
   `cairn check` applies, the lowering at a target with each struct's circuit laid, the floors the
-  registry contradicts, and the run-level refusals. The `info` report is built on it, and the
-  `target` module resolves a `--target` to the backend that writes it. `cairn`, the language
-  server and the playground all call them, so they report the same findings in the same words.
+  registry contradicts, the run-level refusals, and one verdict on whether a build writes. The
+  `info` report is built on it, and the `target` module checks a structure against the backend a
+  resolved target selects. `cairn`, the language server and the playground all call them, so they
+  report the same findings in the same words.

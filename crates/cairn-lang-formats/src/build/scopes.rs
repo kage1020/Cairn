@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 /// Scopes the source asked for that hold no block after lowering, all-air arrays included: the
 /// resolver's scopes, then one `site::SITE::FROM ↔ TO` per `connect` pair that laid none.
 #[must_use]
-pub fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -> Vec<String> {
+pub(crate) fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -> Vec<String> {
     let built = |key: &str| block_ir.structures.get(key).is_some_and(holds_a_block);
     let mut dropped: Vec<String> = resolution
         .scopes
@@ -39,7 +39,7 @@ pub fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -> Vec<S
 
 /// How many structures hold at least one block.
 #[must_use]
-pub fn built_scopes(block_ir: &BlockArrayIr) -> usize {
+pub(crate) fn built_scopes(block_ir: &BlockArrayIr) -> usize {
     block_ir
         .structures
         .values()

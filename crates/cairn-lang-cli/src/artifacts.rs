@@ -96,11 +96,9 @@ pub(crate) fn prepare_artifacts<'a>(
             for file in litematic_files(block_ir) {
                 let (scope, stem) = (file.scope.clone(), file.stem.clone());
                 let schematic = prepare_litematic(file, java).map_err(|err| {
-                    let mut refusal = backend_refusal(&scope, &err.to_string());
+                    let mut refusal = backend_refusal(&scope, &err);
                     if let Some(fix) = litematic_fix(&err) {
-                        refusal
-                            .notes
-                            .push(RunLevelNote::Line(format!("note: {fix}")));
+                        refusal.notes.push(RunLevelNote::note(fix));
                     }
                     report_structure_message(&refusal);
                     ExitCode::from(1)
@@ -115,11 +113,9 @@ pub(crate) fn prepare_artifacts<'a>(
                 let scope = file.scope;
                 let file_name = output_filename(&file.stem, OutputExt::Schem);
                 let schematic = prepare_schem(file, java).map_err(|err| {
-                    let mut refusal = backend_refusal(scope, &err.to_string());
+                    let mut refusal = backend_refusal(scope, &err);
                     if let Some(fix) = schem_fix(&err) {
-                        refusal
-                            .notes
-                            .push(RunLevelNote::Line(format!("note: {fix}")));
+                        refusal.notes.push(RunLevelNote::note(fix));
                     }
                     report_structure_message(&refusal);
                     ExitCode::from(1)
@@ -255,16 +251,15 @@ impl ArtifactCollision {
         // Only a site written as one `.litematic` takes a name a struct can also have.
         let site = first.starts_with("site::") || scope.starts_with("site::");
         if *litematic && site && first_path == path {
-            refusal.notes.push(RunLevelNote::Line(
-                "note: rename the site or the struct, or compile with `--structure-format nbt`, \
-                 which writes the site as a file per placement"
-                    .to_owned(),
+            refusal.notes.push(RunLevelNote::note(
+                "rename the site or the struct, or compile with `--structure-format nbt`, which \
+                 writes the site as a file per placement",
             ));
         }
         if first_path != path {
-            refusal.notes.push(RunLevelNote::Line(format!(
-                "note: `{}` and `{}` name one file on this file system; rename one of the scopes \
-                 so their names differ by more than case",
+            refusal.notes.push(RunLevelNote::note(format!(
+                "`{}` and `{}` name one file on this file system; rename one of the scopes so \
+                 their names differ by more than case",
                 first_path.display(),
                 path.display(),
             )));

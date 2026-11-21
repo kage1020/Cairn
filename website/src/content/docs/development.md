@@ -153,8 +153,8 @@ cargo bench -p cairn-lang-core -p cairn-lang-redstone --bench lowering --bench p
 ### The playground's module
 
 The [playground](/playground/) runs `cairn-lang-wasm` built for the browser by `wasm-pack`. With
-the `wasm32-unknown-unknown` target and `wasm-pack` installed
-(`cargo install --locked wasm-pack@0.15.0`), build it into the site from `website/`:
+the `wasm32-unknown-unknown` target and the `wasm-pack` that `WASM_PACK_VERSION` in
+`website/scripts/build-wasm.sh` names installed, build it into the site from `website/`:
 
 ```sh
 pnpm run build:wasm

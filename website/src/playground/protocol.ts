@@ -2,6 +2,8 @@
 
 export type Severity = "error" | "warning";
 
+export type Edition = "java" | "bedrock";
+
 export interface Note {
   line?: number;
   col?: number;
@@ -18,6 +20,8 @@ export interface Diagnostic {
   end_col: number;
   primary: string;
   notes?: Note[];
+  /** The fields a consumer would otherwise parse out of the message, under the code's `kind`. */
+  data?: { kind: string } & Record<string, unknown>;
 }
 
 /** A run-level refusal, or a warning that names no span. */
@@ -45,6 +49,8 @@ export interface BlockArray {
 
 export interface BlockArrayIr {
   structures: Record<string, BlockArray>;
+  /** Each structure's members, which the page shows only as JSON. */
+  members: Record<string, unknown[]>;
 }
 
 export interface Artifact {
@@ -66,11 +72,18 @@ export interface Targets {
 }
 
 export type Request =
-  | { id: number; kind: "compile"; source: string; edition: string; target: string }
-  | { id: number; kind: "targets"; edition: string };
+  | { id: number; kind: "compile"; source: string; edition: Edition; target: string }
+  | { id: number; kind: "targets"; edition: Edition };
+
+/** What the worker answers a request of each kind with. */
+export interface Answers {
+  compile: Compiled;
+  targets: Targets;
+}
 
 export type Response =
   | { kind: "ready"; version: string }
   | { kind: "unavailable" }
-  | { kind: "answer"; id: number; value: Compiled | Targets }
+  | { kind: "load-failed"; message: string }
+  | { kind: "answer"; id: number; value: Answers[keyof Answers] }
   | { kind: "failed"; id: number; message: string; trapped: boolean };

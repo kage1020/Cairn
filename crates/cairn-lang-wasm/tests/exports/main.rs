@@ -90,7 +90,7 @@ fn a_name_that_is_not_an_edition_throws_naming_the_valid_ones() {
 }
 
 #[wasm_bindgen_test]
-fn info_answers_the_report_and_throws_on_an_empty_editions_list() {
+fn info_answers_the_report_and_throws_on_an_editions_list_naming_no_edition() {
     let asked = vec!["java".to_owned(), "bedrock".to_owned()];
     let expected = report::info(BUILD, &requested_editions(&asked).expect("editions"));
     let exported = info(BUILD, asked).expect("editions");
@@ -102,6 +102,12 @@ fn info_answers_the_report_and_throws_on_an_empty_editions_list() {
     assert_eq!(
         thrown_message(thrown),
         "`editions` names no edition. Valid: java, bedrock. Fix: pass at least one edition name",
+    );
+    let thrown =
+        info(BUILD, vec!["java".to_owned(), String::new()]).expect_err("an entry names nothing");
+    assert_eq!(
+        thrown_message(thrown),
+        "`editions` holds an empty entry. Valid: java, bedrock. Fix: remove the empty entry",
     );
 }
 

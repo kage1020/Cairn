@@ -29,7 +29,7 @@ pub(crate) struct Bound {
 /// A floor above the last version that declares some id the build paints, with the ids last
 /// declared below it.
 #[derive(Debug, Clone)]
-pub struct Conflict {
+pub(crate) struct Conflict {
     pub(crate) floor: VersionFloor,
     /// The earliest `version` first, then in source order; never empty.
     pub(crate) ids: Vec<Bound>,
@@ -46,7 +46,7 @@ pub(crate) struct Lacked {
 /// lacks, while that newest meets them. `at_newest` holds the findings of a lowering already pinned
 /// there, if the caller ran one.
 #[must_use]
-pub fn requires_conflicts(
+pub(crate) fn requires_conflicts(
     ir: &IntentModule,
     resolution: &Resolution,
     pack: &RegistryPack,

@@ -5,8 +5,9 @@
 //! WebAssembly bindings that run the Cairn compiler in a browser, with the built-in registry packs
 //! embedded: `cairn compile` and `cairn info` over a source held in memory.
 //!
-//! Each export answers a plain object made from a [`report`] value, whose findings take the shape
-//! `spec/lint` "Machine-readable payload" gives; a name that is not an edition throws an `Error`.
+//! `cairn_version` answers a string, and each other export a plain object made from a [`report`]
+//! value, whose findings take the shape `spec/lint` "Machine-readable payload" gives. An edition
+//! or `editions` list an export cannot read throws an `Error`.
 
 use cairn_lang_core::Edition;
 use cairn_lang_formats::info::{EditionsRefused, requested_editions};

@@ -8,7 +8,7 @@ WebAssembly bindings for the Cairn compiler. The documentation site's [playgroun
 
 The four exports below ship, and CI builds the module and tests them in Node on every pull request. Their JavaScript API is Evolving ([compatibility "Evolving"](https://cairn.kage1020.com/spec/compatibility/)): a monthly minor may change it, and the CHANGELOG says so. The crate's Rust API, the `report` module the exports wrap, is Internal.
 
-`import_raw(bytes, format)`, a faithful transliteration of a structure file to raw-centric `.crn` ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)), waits on the readers `cairn-lang-formats` does not have yet.
+`import_raw(bytes, format)`, a faithful transliteration of a structure file to raw-centric `.crn` ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)), waits on what `cairn-lang-formats` does not do yet: its `.litematic` and `.schem` readers ship, but nothing turns what they read into the IR, or into raw-centric `.crn`.
 
 ## Build
 

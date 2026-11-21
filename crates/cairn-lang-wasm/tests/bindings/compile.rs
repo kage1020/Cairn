@@ -1,5 +1,6 @@
 //! `compile`: the findings, the run-level messages, the IR and the structure files of one build.
 
+use std::collections::BTreeSet;
 use std::io::Read;
 
 use cairn_lang_core::Edition;
@@ -153,25 +154,35 @@ fn an_unshipped_target_is_refused_beside_the_findings_with_the_ir_kept() {
 }
 
 #[test]
-fn a_floor_the_target_is_below_is_refused_at_the_line_that_declares_it() {
+fn a_floor_the_target_is_below_is_the_finding_cairn_check_reports_at_its_line() {
     let source = format!("@cairn 2026.7\n\n@requires version>=1.21\n{BUILD}");
     let compiled = compile(&source, Edition::Java, "1.20.4");
     assert!(!compiled.ok);
-    assert_eq!(codes(&compiled.diagnostics), []);
     assert_eq!(
-        compiled.run_level,
-        [RenderedRunLevelMessage {
-            code: Some("E_VERSION_CAP"),
-            severity: Severity::Error,
-            line: Some(3),
-            col: Some(1),
-            primary: "this file requires version>=1.21 (target 1.20.4).".to_owned(),
-            notes: vec![
-                note("valid java targets: 1.21, 1.21.4, 26.3"),
-                note("fix: --target 1.21, or lower the `@requires` floor"),
+        serde_json::to_value(&compiled.diagnostics).expect("serialises"),
+        json!([{
+            "code": "E_VERSION_CAP",
+            "severity": "error",
+            "line": 3,
+            "col": 1,
+            "end_line": 3,
+            "end_col": 24,
+            "primary": "this file requires version>=1.21 (target 1.20.4)",
+            "notes": [
+                { "message": "valid java targets: 1.21, 1.21.4, 26.3" },
+                { "message": "fix: --target 1.21, or lower the `@requires` floor" },
             ],
-        }],
+            "data": {
+                "kind": "version_cap",
+                "edition": "java",
+                "floor": "version>=1.21",
+                "target": "1.20.4",
+                "valid": ["1.21", "1.21.4", "26.3"],
+            },
+        }]),
     );
+    assert_eq!(compiled.run_level, []);
+    assert!(compiled.ir.is_none());
     assert_eq!(compiled.artifacts, []);
 }
 
@@ -191,7 +202,7 @@ fn a_scope_that_lowers_to_nothing_refuses_the_partial_build() {
             col: None,
             primary: "1 of 2 requested scopes did not lower; refusing to certify a partial build"
                 .to_owned(),
-            notes: vec![note("note: `struct::bad` produced no voxels")],
+            notes: vec![note("`struct::bad` produced no voxels")],
         }],
     );
     assert_eq!(compiled.artifacts, []);
@@ -213,8 +224,7 @@ fn a_floor_no_target_declaring_a_painted_block_clears_refuses_the_build_at_every
             RenderedNote {
                 line: Some(3),
                 col: Some(16),
-                message: "note: `minecraft:stonebrick` is last declared at bedrock 1.21.0"
-                    .to_owned(),
+                message: "`minecraft:stonebrick` is last declared at bedrock 1.21.0".to_owned(),
             },
             note(
                 "fix: lower the `@requires` floor to 1.21.0 or below, or replace \
@@ -274,4 +284,71 @@ fn an_intent_the_target_can_only_approximate_warns_and_still_writes() {
         }],
     );
     assert_eq!(names(&compiled), ["keep.mcstructure"]);
+}
+
+/// A lever that no route reaches the door from, as the CLI's fixture of the same name.
+const WALL_LEVER: &str = "theme t:\n  slot wall -> @oak_planks\n\nstruct room size=9x7\n  floor \
+                          mat_slot=wall\n  walls mat_slot=wall height=3\n  door id=d side=front \
+                          at=center\n  lever id=l at=inside.back offset=2 y=2 -> sig.a\n  door[id=d] \
+                          opened_by=sig.a\n  circuit region=floor void=3\n";
+
+#[test]
+fn a_circuit_the_router_cannot_lay_refuses_the_build_before_its_ir() {
+    let compiled = compile(WALL_LEVER, Edition::Java, "latest");
+    assert!(!compiled.ok);
+    assert_eq!(
+        codes(&compiled.diagnostics),
+        [("E_ROUTE_UNREACHABLE_COMPONENT", 8, 3)]
+    );
+    assert_eq!(compiled.run_level, []);
+    assert!(compiled.ir.is_none());
+    assert_eq!(compiled.artifacts, []);
+}
+
+#[test]
+fn a_laid_circuit_is_written_with_the_structure_it_is_built_in() {
+    let laid = [
+        (
+            Edition::Java,
+            "gatehouse.nbt",
+            vec![
+                "minecraft:air",
+                "minecraft:oak_door",
+                "minecraft:oak_planks",
+                "minecraft:oak_pressure_plate",
+                "minecraft:redstone_wall_torch",
+                "minecraft:redstone_wire",
+                "minecraft:repeater",
+                "minecraft:stone",
+            ],
+        ),
+        (
+            Edition::Bedrock,
+            "gatehouse.mcstructure",
+            vec![
+                "minecraft:air",
+                "minecraft:oak_planks",
+                "minecraft:redstone_torch",
+                "minecraft:redstone_wire",
+                "minecraft:stone",
+                "minecraft:unlit_redstone_torch",
+                "minecraft:unpowered_repeater",
+                "minecraft:wooden_door",
+                "minecraft:wooden_pressure_plate",
+            ],
+        ),
+    ];
+    for (edition, file, blocks) in laid {
+        let compiled = compile(&example("redstone-door"), edition, "latest");
+        assert!(compiled.ok, "{edition}: {:?}", compiled.diagnostics);
+        assert_eq!(names(&compiled), [file], "{edition}");
+        let ir = compiled.ir.as_ref().expect("a built source answers its IR");
+        let ids: BTreeSet<&str> = ir.structures["struct::gatehouse"]
+            .palette
+            .entries
+            .iter()
+            .map(|state| state.id.as_str())
+            .collect();
+        assert_eq!(ids.into_iter().collect::<Vec<_>>(), blocks, "{edition}");
+    }
 }

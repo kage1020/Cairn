@@ -35,8 +35,12 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 
 cd "$root"
-if [ "$install" = true ]; then rustup toolchain install; fi
-rustup target add wasm32-unknown-unknown
+if [ "$install" = true ]; then
+  rustup toolchain install
+  rustup target add wasm32-unknown-unknown
+elif ! rustup target list --installed | grep -qx wasm32-unknown-unknown; then
+  missing wasm32-unknown-unknown "Run \`rustup target add wasm32-unknown-unknown\`"
+fi
 
 if ! command -v wasm-pack >/dev/null 2>&1; then
   if [ "$install" = false ]; then
@@ -48,6 +52,11 @@ fi
 wasm-pack build crates/cairn-lang-wasm --target web --release --no-pack --out-dir "$out"
 
 module="$out/cairn_lang_wasm_bg.wasm"
+if [ ! -f "$module" ]; then
+  echo "error: wasm-pack wrote no $module, the file the crate's library name gives. Point \
+\`module\` in website/scripts/build-wasm.sh at the file it wrote" >&2
+  exit 1
+fi
 size=$(wc -c <"$module" | tr -d ' ')
 if [ "$size" -gt "$WASM_SIZE_BUDGET" ]; then
   echo "error: $module is $size bytes, over its $WASM_SIZE_BUDGET-byte budget. Find what grew \

@@ -4,5 +4,6 @@
 
 mod common;
 mod compile;
+mod golden;
 mod info;
 mod targets;

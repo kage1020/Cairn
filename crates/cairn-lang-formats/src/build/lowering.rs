@@ -4,16 +4,15 @@
 use cairn_lang_core::block_array::{BlockArrayIr, findings_without_target, lower_to_block_array};
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{declared_version_floors, resolve};
-use cairn_lang_core::{Diagnostic, Edition, Module, lower};
+use cairn_lang_core::{Diagnostic, Edition, Module, Severity, lower};
 use cairn_lang_redstone::Diagnostic as CircuitDiagnostic;
 
 use super::circuits::lay_circuits;
 use super::conflicts::requires_conflicts;
+use super::finding::Finding;
 use super::floors::floor_refusal;
 use super::gate::build_diagnostics;
-use super::run_level::{
-    RunLevelMessage, floor_refusal_message, partial_build, requires_conflict, unsupported_target,
-};
+use super::run_level::{RunLevelMessage, partial_build, requires_conflict, unsupported_target};
 use super::scopes::{built_scopes, dropped_scopes};
 use crate::data_version::{ResolvedTarget, UnsupportedTarget, resolve_target};
 use crate::registry::builtin_pack;
@@ -66,10 +65,12 @@ pub fn check_lowering(
     }
 }
 
-/// A source parsed, resolved and lowered for one edition's build, plus what the lowering failed
-/// to produce.
+/// A source parsed, resolved and lowered for one edition's build at a target, plus what the
+/// lowering failed to produce.
 #[derive(Debug)]
 pub struct Lowered {
+    /// The target the build was asked for, or why it does not resolve.
+    pub target: Result<ResolvedTarget, UnsupportedTarget>,
     /// The lowered structures, whose diagnostics are every finding `cairn check` reports for the
     /// build, then the lowering's.
     pub block_ir: BlockArrayIr,
@@ -84,19 +85,20 @@ pub struct Lowered {
     pub conflicts: Vec<RunLevelMessage>,
 }
 
-/// Resolve and lower `module` for `edition`'s build, its circuits laid.
+/// Resolve and lower `module` for `edition`'s build at `target`, its circuits laid.
 ///
-/// Ids are checked against `target` unless it is `None` or the source's floors refuse it: the
-/// floor refusal then explains the failed build, not an `E_UNKNOWN_ID`.
+/// Ids are checked against the target unless it does not resolve or the source's floors refuse
+/// it: the floor refusal then explains the failed build, not an `E_UNKNOWN_ID`.
 #[must_use]
 pub fn lower_for_target(
     module: &Module,
     edition: Edition,
-    target: Option<&ResolvedTarget>,
+    target: Result<ResolvedTarget, UnsupportedTarget>,
 ) -> Lowered {
     let floors = declared_version_floors(module, edition);
-    let refusal = target.and_then(|target| floor_refusal(&floors, edition, target));
-    let mc_version = target
+    let resolved = target.as_ref().ok();
+    let refusal = resolved.and_then(|target| floor_refusal(&floors, edition, target));
+    let mc_version = resolved
         .filter(|_| refusal.is_none())
         .map(ResolvedTarget::mc_version);
     let ir = lower(module);
@@ -135,6 +137,7 @@ pub fn lower_for_target(
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
     Lowered {
+        target,
         block_ir,
         circuits,
         dropped_scopes,
@@ -143,30 +146,60 @@ pub fn lower_for_target(
     }
 }
 
+/// Why a lowered build writes nothing.
+#[derive(Debug)]
+pub enum BuildRefusal<'a> {
+    /// A finding of the lowering, or of laying a circuit, is an error.
+    Findings,
+    /// A floor admits no target declaring every id the build paints: [`Lowered::conflicts`].
+    Conflicts,
+    /// A refusal no finding makes: a lost scope, or a target that does not resolve.
+    RunLevel(RunLevelMessage),
+    /// The finding by which the source's floors refuse the target.
+    Floor(&'a Diagnostic),
+}
+
 impl Lowered {
-    /// The target a build whose findings hold no error and whose floors raise no conflict writes
-    /// for, or the run-level refusal `cairn compile` makes before it writes: a lost scope, an
-    /// unshipped `--target`, then a floor that rules out the target the build was lowered for.
+    /// The target the build writes for, or the first refusal `cairn compile` makes before it
+    /// writes: an error finding, a conflicting floor, a lost scope, a target that does not
+    /// resolve, then a floor that rules the target out.
     ///
     /// # Errors
     ///
     /// The first of those refusals that holds.
-    pub fn writable_target(
-        &self,
-        target: Result<ResolvedTarget, UnsupportedTarget>,
-    ) -> Result<ResolvedTarget, RunLevelMessage> {
+    pub fn verdict(&self) -> Result<&ResolvedTarget, BuildRefusal<'_>> {
+        let errs = self
+            .block_ir
+            .diagnostics
+            .iter()
+            .map(Diagnostic::severity)
+            .chain(self.circuits.iter().map(Finding::severity))
+            .any(|severity| severity == Severity::Error);
+        if errs {
+            return Err(BuildRefusal::Findings);
+        }
+        // A conflict holds at every target, so it stops the build ahead of the target's floor.
+        if !self.conflicts.is_empty() {
+            return Err(BuildRefusal::Conflicts);
+        }
         // Every code that drops a scope is a warning, so this is what refuses a partial build.
         if !self.dropped_scopes.is_empty() {
-            return Err(partial_build(
+            return Err(BuildRefusal::RunLevel(partial_build(
                 &self.dropped_scopes,
                 built_scopes(&self.block_ir),
                 "refusing to certify a partial build",
-            ));
+            )));
         }
-        let target = target.map_err(|err| unsupported_target(&err))?;
+        let target = self
+            .target
+            .as_ref()
+            .map_err(|err| BuildRefusal::RunLevel(unsupported_target(err)))?;
         match &self.floor_refusal {
-            Some(refusal) => Err(floor_refusal_message(refusal)),
+            Some(refusal) => Err(BuildRefusal::Floor(refusal)),
             None => Ok(target),
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -19,6 +19,9 @@ export interface Strings {
   unavailable: string;
   unavailableLink: string;
   crashed: string;
+  failed: string;
+  loadFailed: string;
+  workerFailed: string;
   findings: string;
   noFindings: string;
   errors: Plural;
@@ -55,6 +58,11 @@ export const strings: Record<Lang, Strings> = {
     unavailableLink: "see the developer guide.",
     crashed:
       "The compiler stopped on this source and has been restarted. That is a bug in Cairn: please report it with the source.",
+    failed:
+      "The compiler failed on this source ({message}). That is a bug in Cairn: please report it with the source.",
+    loadFailed:
+      "The compiler did not load ({message}), so nothing on this page compiles. Reload the page; if it still fails, the site's copy of the compiler is broken.",
+    workerFailed: "the worker running it failed",
     findings: "Findings",
     noFindings: "No findings.",
     errors: { one: "{n} error", other: "{n} errors" },
@@ -88,6 +96,11 @@ export const strings: Record<Lang, Strings> = {
     unavailableLink: "開発者ガイドを参照してください。",
     crashed:
       "このソースでコンパイラが停止したため、再起動しました。Cairn の不具合なので、ソースを添えて報告してください。",
+    failed:
+      "このソースでコンパイラが失敗しました ({message})。Cairn の不具合なので、ソースを添えて報告してください。",
+    loadFailed:
+      "コンパイラを読み込めなかったため、このページでは何もコンパイルできません ({message})。ページを再読み込みしてください。それでも失敗する場合は、サイトにあるコンパイラが壊れています。",
+    workerFailed: "コンパイラを動かすワーカーが失敗しました",
     findings: "指摘",
     noFindings: "指摘はありません。",
     errors: { one: "エラー {n} 件", other: "エラー {n} 件" },

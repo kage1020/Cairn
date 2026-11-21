@@ -29,7 +29,7 @@ pub fn prepare_artifact<'a>(
     target: &ResolvedTarget,
 ) -> Result<PreparedArtifact<'a>, RunLevelMessage> {
     let (structure, notes) =
-        prepare(target, array).map_err(|reason| backend_refusal(scope, &reason))?;
+        prepare(target, array).map_err(|refusal| backend_refusal(scope, &refusal))?;
     Ok(PreparedArtifact {
         file_name: output_filename(&block_ir.artifact_stem(scope), target.output_ext()),
         structure,
