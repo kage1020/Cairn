@@ -1,11 +1,12 @@
-//! The address a member of a `struct` or `def` body takes from where it stands
-//! (`spec/syntax` "IDs, classes, addresses").
+//! The address a member of a `struct` or `def` body takes from where it stands, and that an
+//! `edit` line names it by (`spec/syntax` "IDs, classes, addresses").
 
 use std::fmt;
 
 use serde::{Serialize, Serializer};
 
-/// Where a member stands in its body, by meaning: `window@front[0]`, `level[1].window@front[0]`.
+/// Where a member stands in its body, by meaning, as addressing derives it or an `edit` line
+/// writes it: `window@front[0]`, `level[1].window@front[0]`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MemberAddress {
     segments: Vec<AddressSegment>,
@@ -47,13 +48,14 @@ impl AddressSegment {
         Self { role, side, index }
     }
 
-    /// The member's keyword.
+    /// The keyword the step names.
     #[must_use]
     pub fn role(&self) -> &str {
         &self.role
     }
 
-    /// The wall the member stands on or against, as its line writes it.
+    /// The wall after the step's `@`, as the member's line writes it or as an `edit` line does,
+    /// which may name a wall no member stands on.
     #[must_use]
     pub fn side(&self) -> Option<&str> {
         self.side.as_deref()

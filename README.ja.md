@@ -92,6 +92,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、文字を持つ看板、ベッド、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - エンティティ: 絵画、額縁、防具立て、売り物を持つ村人、display (`text_display` / `block_display` / `item_display`)、ID で置くほかのエンティティ (`spawn`)、テーマがエディションごとに組み上げる `hologram` (Java ではテキストの display、Bedrock では光る看板)
 - スロットを持つテーマと、そのエディション別バリアント
+- `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水、ブロック・ドア・ほかのエンティティにめり込むエンティティを警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
@@ -104,7 +105,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更
 - 既存の schematic の読み込み
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 

@@ -6,7 +6,7 @@ use std::ops::Deref;
 use indexmap::IndexMap;
 use serde::Serialize;
 
-use crate::ast::{Value, ValueKind};
+use crate::ast::{Arg, Value, ValueKind};
 use crate::edition::Edition;
 use crate::error::Span;
 
@@ -378,6 +378,11 @@ impl Arguments {
     pub(crate) fn insert(&mut self, key: String, value: ValueWithSpan) {
         self.fields.insert(key, value);
     }
+
+    /// Drop `key`, keeping the others in source order.
+    pub(super) fn remove(&mut self, key: &str) {
+        self.fields.shift_remove(key);
+    }
 }
 
 impl Deref for Arguments {
@@ -408,6 +413,18 @@ impl ValueWithSpan {
     }
 }
 
+/// `args` keyed by name; a repeated key keeps its last value.
+pub(crate) fn args_to_map(args: &[Arg]) -> IndexMap<String, ValueWithSpan> {
+    let mut map = IndexMap::with_capacity(args.len());
+    for arg in args {
+        map.insert(
+            arg.key.clone(),
+            ValueWithSpan::from_value(arg.value.clone()),
+        );
+    }
+    map
+}
+
 /// An identifier or string hoisted out of a member's arguments, with where it was written.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(transparent)]
@@ -417,4 +434,86 @@ pub struct Label {
     /// Byte range of the value in the original source.
     #[serde(skip)]
     pub span: Span,
+}
+
+/// A key whose label value a member keeps in a field of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LabelKey {
+    /// `id=`.
+    Id,
+    /// `class=`.
+    Class,
+    /// `mat_slot=`.
+    MatSlot,
+}
+
+impl LabelKey {
+    /// The label key spelled `key`.
+    pub(crate) fn of(key: &str) -> Option<Self> {
+        match key {
+            "id" => Some(Self::Id),
+            "class" => Some(Self::Class),
+            "mat_slot" => Some(Self::MatSlot),
+            _ => None,
+        }
+    }
+
+    /// The label `member` holds under this key.
+    pub(crate) fn read(self, member: &Member) -> Option<&str> {
+        match self {
+            Self::Id => member.id.as_deref(),
+            Self::Class => member.class.as_deref(),
+            Self::MatSlot => member.mat_slot.as_ref().map(|slot| slot.name.as_str()),
+        }
+    }
+
+    /// Put `label` in `member`'s field for this key.
+    pub(crate) fn write(self, member: &mut Member, label: Label) {
+        match self {
+            Self::Id => member.id = Some(label.name),
+            Self::Class => member.class = Some(label.name),
+            Self::MatSlot => member.mat_slot = Some(label),
+        }
+    }
+
+    /// Empty `member`'s field for this key.
+    pub(crate) fn clear(self, member: &mut Member) {
+        match self {
+            Self::Id => member.id = None,
+            Self::Class => member.class = None,
+            Self::MatSlot => member.mat_slot = None,
+        }
+    }
+}
+
+/// Where one `key=value` of a member goes, whether its line or an edit writes it
+/// (`spec/blockstate` "`intent_state` and `resolved_state`").
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Destination {
+    /// The field of a [`LabelKey`], holding the value as a label.
+    Label(LabelKey, Label),
+    /// The member's [`IntentState`].
+    State,
+    /// The member's [`Arguments`].
+    Argument,
+}
+
+/// Where `key=value` goes on a member of `role`.
+pub(crate) fn destination(role: &MemberRole, key: &str, value: &ValueWithSpan) -> Destination {
+    if let Some(label_key) = LabelKey::of(key)
+        && let Some(name) = value.value.as_label_str()
+    {
+        return Destination::Label(
+            label_key,
+            Label {
+                name: name.to_owned(),
+                span: value.span.clone(),
+            },
+        );
+    }
+    if role.state_arguments().contains(&key) {
+        Destination::State
+    } else {
+        Destination::Argument
+    }
 }
