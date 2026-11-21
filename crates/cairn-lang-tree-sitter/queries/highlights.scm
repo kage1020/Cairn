@@ -1,6 +1,6 @@
 ; keywords
 [
-  "theme" "struct" "def" "site" "slot" "logic" "assert"
+  "theme" "struct" "def" "site" "slot" "logic" "assert" "edit" "set"
 ] @keyword
 
 ; Captured through its statement: the bare literal would split the `@requires` directive name.
@@ -10,6 +10,8 @@
 (member_keyword) @keyword
 
 (selector keyword: (identifier) @keyword)
+(address_step role: (identifier) @keyword)
+(address_side) @variable.member
 
 "truth" @keyword.operator
 "always" @keyword.operator

@@ -44,10 +44,13 @@ fn range(line: u32, start_character: u32, end_character: u32) -> lsp_types::Rang
 }
 
 #[test]
-fn top_level_line_start_offers_exactly_the_item_keywords() {
+fn top_level_line_start_offers_exactly_the_item_keywords_and_edit() {
     let source = "st";
     let items = complete(source, "st");
-    assert_eq!(labels(&items), vec!["theme", "def", "site", "struct"]);
+    assert_eq!(
+        labels(&items),
+        vec!["theme", "def", "site", "struct", "edit"]
+    );
     for item in &items {
         assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::KEYWORD));
         assert_eq!(edit_range(item), range(0, 0, 2));
@@ -255,6 +258,56 @@ fn hash_inside_a_string_literal_is_not_a_comment() {
                   struct s size=2x2\n  window id=\"#front\" mat_slot=";
     let items = complete(source, "mat_slot=");
     assert_eq!(labels(&items), vec!["floor"]);
+}
+
+#[test]
+fn an_edit_target_offers_the_keywords_of_struct_and_def_bodies() {
+    let source = "struct s size=2x2\n  floor mat_slot=f\nedit wi";
+    let items = complete(source, "edit wi");
+    assert_eq!(labels(&items), BodyKind::Geometry.allowed_keywords());
+    for item in &items {
+        assert_eq!(edit_range(item), range(2, 5, 7));
+    }
+}
+
+#[test]
+fn a_written_edit_target_offers_set_and_nothing_after_it() {
+    for (source, expected) in [
+        ("edit window[class=a level=b] s", vec!["set"]),
+        ("edit level[0].door@inside.back[0] ", vec!["set"]),
+        ("edit window[class=a ", vec![]),
+        ("edit window[0] set ", vec![]),
+        ("edit window[0] set shape=arch ", vec![]),
+    ] {
+        let items = completions(source, at_end_of(source, source))
+            .expect("in the document")
+            .items;
+        assert_eq!(labels(&items), expected, "{source:?}");
+    }
+    let source = "edit window@front[0] se";
+    let items = complete(source, "] se");
+    assert_eq!(edit_range(&items[0]), range(0, 21, 23));
+    assert_eq!(items[0].detail.as_deref(), Some("keys the edit sets"));
+}
+
+#[test]
+fn mat_slot_on_an_edit_line_follows_the_edited_keyword() {
+    let theme = "theme a:\n  slot floor -> @oak_planks\n";
+    for (rest, expected) in [
+        ("edit window@front[0] set mat_slot=", vec!["floor"]),
+        (
+            "edit level[0].window@front[0] set y=2 mat_slot=",
+            vec!["floor"],
+        ),
+        ("edit circuit[0] set mat_slot=", vec![]),
+        ("edit level[0].circuit[0] set mat_slot=", vec![]),
+    ] {
+        let source = format!("{theme}{rest}");
+        let items = completions(&source, at_end_of(&source, rest))
+            .expect("in the document")
+            .items;
+        assert_eq!(labels(&items), expected, "{rest:?}");
+    }
 }
 
 #[test]
@@ -716,7 +769,10 @@ fn a_vocabulary_one_past_the_limit_drops_the_candidate_ranked_last() {
 fn a_keyword_answer_is_never_cut() {
     let list = completions("st", at_end_of("st", "st")).expect("in the document");
     assert!(!list.is_incomplete);
-    assert_eq!(labels(&list.items), ["theme", "def", "site", "struct"]);
+    assert_eq!(
+        labels(&list.items),
+        ["theme", "def", "site", "struct", "edit"]
+    );
 }
 
 #[test]
