@@ -124,7 +124,8 @@ pub struct BlockArray {
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities on the grid: a circuit's comparators, as no member lowers to one.
+    /// Block entities on the grid: a sign's text, a bed's colour and a circuit comparator's
+    /// strength.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
     /// Free entities; always empty, as no member lowers to one.
@@ -525,16 +526,158 @@ impl BlockState {
     }
 }
 
-/// A block entity on the grid, with the integer fields of its NBT payload.
+/// A block entity on the grid: what its block keeps beside its state, which each writer saves in
+/// its own edition's shape.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct BlockEntity {
     /// Voxel coordinate the block entity sits at.
     pub pos: (u32, u32, u32),
-    /// Block entity id, e.g. `minecraft:comparator`.
-    pub id: String,
-    /// Integer fields of its payload, such as a comparator's `OutputSignal`.
-    #[serde(skip_serializing_if = "IndexMap::is_empty")]
-    pub fields: IndexMap<String, i32>,
+    /// What the block entity holds.
+    #[serde(flatten)]
+    pub data: BlockEntityData,
+}
+
+/// What a [`BlockEntity`] holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BlockEntityData {
+    /// Integer fields under a Java block entity id, as a circuit comparator keeps its
+    /// `OutputSignal` under `minecraft:comparator`.
+    Fields {
+        /// Block entity id, e.g. `minecraft:comparator`.
+        id: String,
+        /// Integer fields of its payload.
+        #[serde(skip_serializing_if = "IndexMap::is_empty")]
+        fields: IndexMap<String, i32>,
+    },
+    /// A sign's two faces (`spec/entities` "Block entities").
+    Sign {
+        /// The face toward the way the sign faces, which its `text=` writes.
+        front: SignText,
+        /// The face its `back=` writes.
+        back: SignText,
+    },
+    /// One half of a bed, with the dye of the dyed bed its block is or its token stands for.
+    Bed {
+        /// The dye; `None` for a bed whose block names none and no dyed token names.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<DyeColor>,
+    },
+}
+
+/// One of the sixteen dye colours, serialized as its name, such as `light_blue`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DyeColor {
+    /// White, the game's dye 0.
+    White,
+    /// Orange, the game's dye 1.
+    Orange,
+    /// Magenta, the game's dye 2.
+    Magenta,
+    /// Light blue, the game's dye 3.
+    LightBlue,
+    /// Yellow, the game's dye 4.
+    Yellow,
+    /// Lime, the game's dye 5.
+    Lime,
+    /// Pink, the game's dye 6.
+    Pink,
+    /// Gray, the game's dye 7.
+    Gray,
+    /// Light gray, the game's dye 8.
+    LightGray,
+    /// Cyan, the game's dye 9.
+    Cyan,
+    /// Purple, the game's dye 10.
+    Purple,
+    /// Blue, the game's dye 11.
+    Blue,
+    /// Brown, the game's dye 12.
+    Brown,
+    /// Green, the game's dye 13.
+    Green,
+    /// Red, the game's dye 14.
+    Red,
+    /// Black, the game's dye 15.
+    Black,
+}
+
+impl DyeColor {
+    /// Every dye colour, in the order the game numbers them.
+    pub const ALL: [Self; 16] = [
+        Self::White,
+        Self::Orange,
+        Self::Magenta,
+        Self::LightBlue,
+        Self::Yellow,
+        Self::Lime,
+        Self::Pink,
+        Self::Gray,
+        Self::LightGray,
+        Self::Cyan,
+        Self::Purple,
+        Self::Blue,
+        Self::Brown,
+        Self::Green,
+        Self::Red,
+        Self::Black,
+    ];
+
+    /// Its name, such as `light_blue`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::White => "white",
+            Self::Orange => "orange",
+            Self::Magenta => "magenta",
+            Self::LightBlue => "light_blue",
+            Self::Yellow => "yellow",
+            Self::Lime => "lime",
+            Self::Pink => "pink",
+            Self::Gray => "gray",
+            Self::LightGray => "light_gray",
+            Self::Cyan => "cyan",
+            Self::Purple => "purple",
+            Self::Blue => "blue",
+            Self::Brown => "brown",
+            Self::Green => "green",
+            Self::Red => "red",
+            Self::Black => "black",
+        }
+    }
+
+    /// The dye named `name`, such as `light_blue`.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|dye| dye.name() == name)
+    }
+}
+
+/// The most lines a face of a sign holds.
+pub const SIGN_FACE_LINES: usize = 4;
+
+/// One face of a sign.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct SignText {
+    /// Its lines, top first.
+    lines: Vec<String>,
+    /// Whether the text glows.
+    pub glowing: bool,
+}
+
+impl SignText {
+    /// A face of `lines`, top first; `None` for more than [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn new(lines: Vec<String>, glowing: bool) -> Option<Self> {
+        (lines.len() <= SIGN_FACE_LINES).then_some(Self { lines, glowing })
+    }
+
+    /// Its lines, top first, at most [`SIGN_FACE_LINES`].
+    #[must_use]
+    pub fn lines(&self) -> &[String] {
+        &self.lines
+    }
 }
 
 /// An entity (frames, paintings, item displays, ...), without its payload.

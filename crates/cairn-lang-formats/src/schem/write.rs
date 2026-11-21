@@ -11,9 +11,7 @@ use thiserror::Error;
 
 use super::STATE_SEPARATORS;
 use crate::data_version::JavaTarget;
-use crate::java_structure::{
-    JavaStructureError, entity_nbt, placed_block_entities, prepare_structure,
-};
+use crate::java_structure::{JavaStructureError, placed_block_entities, prepare_structure};
 use crate::site_frame::site_origin;
 
 /// The Sponge Schematic version written.
@@ -281,20 +279,22 @@ impl Schem<'_> {
         let voxels = &self.file.block_array.voxels;
         let data = voxels.iter().flat_map(|index| varint(index.0));
         blocks.byte_array("Data", self.data_len, data)?;
-        let block_entities: Vec<Compound> = placed_block_entities(self.file.block_array)
-            .into_iter()
-            .map(|entity| {
-                let mut data = entity_nbt(entity);
-                data.entries.shift_remove("id");
-                let (x, y, z) = entity.pos;
-                let pos = [x, y, z].map(|v| i32::try_from(v).expect("dims checked to fit u16"));
-                let mut nbt = Compound::new();
-                nbt.insert("Pos", Tag::IntArray(pos.to_vec()));
-                nbt.insert("Id", Tag::String(entity.id.clone()));
-                nbt.insert("Data", Tag::Compound(data));
-                nbt
-            })
-            .collect();
+        let block_entities: Vec<Compound> =
+            placed_block_entities(self.file.block_array, self.data_version)
+                .into_iter()
+                .map(|((x, y, z), mut data)| {
+                    let id = data
+                        .entries
+                        .shift_remove("id")
+                        .expect("a placed block entity carries its id");
+                    let pos = [x, y, z].map(|v| i32::try_from(v).expect("dims checked to fit u16"));
+                    let mut nbt = Compound::new();
+                    nbt.insert("Pos", Tag::IntArray(pos.to_vec()));
+                    nbt.insert("Id", id);
+                    nbt.insert("Data", Tag::Compound(data));
+                    nbt
+                })
+                .collect();
         blocks.tag(
             "BlockEntities",
             &Tag::List(List::of_compounds(block_entities)),

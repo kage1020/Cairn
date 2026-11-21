@@ -26,6 +26,12 @@ themes:
       roof:
         kind: Token
         value: spruce_stairs
+      cot:
+        kind: Token
+        value: bed.brown
+      board:
+        kind: Token
+        value: sign.oak
     selectors: []
 defs: []
 sites: []
@@ -213,3 +219,46 @@ structs:
           note:
             kind: Int
             value: 12
+      - id: cot
+        address: "bed@inside.back[0]"
+        role:
+          kind: Bed
+        mat_slot: cot
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - inside
+              - back
+          offset:
+            kind: Int
+            value: 1
+          y:
+            kind: Int
+            value: 1
+        intent_state: {}
+      - id: board
+        address: "sign@front.outside[0]"
+        role:
+          kind: Sign
+        mat_slot: board
+        arguments:
+          at:
+            kind: DotRef
+            value:
+              - front
+              - outside
+          offset:
+            kind: Int
+            value: 1
+          y:
+            kind: Int
+            value: 2
+          text:
+            kind: List
+            value:
+              - kind: Str
+                value: Workshop
+              - kind: Str
+                value: open daily
+        intent_state: {}
