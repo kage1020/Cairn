@@ -3,13 +3,13 @@
 
 use std::io::Write;
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 use cairn_lang_nbt::{CompoundStream, NbtIoError, check_string, stream_java_uncompressed};
 use indexmap::IndexMap;
 use thiserror::Error;
 
-use super::{AIR_IDS, SUB_VERSION, bits_per_entry, long_count, schematic_version};
+use super::{SUB_VERSION, bits_per_entry, long_count, schematic_version};
 use crate::data_version::JavaTarget;
 use crate::java_structure::{
     JavaStructureError, palette_entry, placed_block_entities, prepare_structure,
@@ -215,7 +215,7 @@ fn count_blocks(block_array: &BlockArray) -> i64 {
         .palette
         .entries
         .iter()
-        .map(|state| !AIR_IDS.contains(&state.id.as_str()))
+        .map(|state| !BlockState::AIR_IDS.contains(&state.id.as_str()))
         .collect();
     let blocks = block_array
         .voxels

@@ -2,7 +2,9 @@
 
 pub(crate) mod check;
 pub(crate) mod compile;
+pub(crate) mod diff_blocks;
 pub(crate) mod docs;
+pub(crate) mod import;
 pub(crate) mod info;
 pub(crate) mod lower;
 pub(crate) mod parse;

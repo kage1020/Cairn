@@ -13,9 +13,11 @@ test prompt set (~50)
   → return line-numbered errors and self-correct for up to 3 turns
 ```
 
-This chapter is the methodology the project is to follow, and none of it is automated in the
-repository yet: there is no prompt set, harness, metric or geometry simulator. Of the loop above,
-only the lint step exists, as `cairn check`.
+This chapter is the methodology the project is to follow, and most of it is not automated in the
+repository yet: there is no prompt set, harness or geometry simulator, and of the metrics only
+`block_iou`, `state_accuracy` and `residual_ratio` are computed, by `cairn diff-blocks`
+([§13.2](#132-reverse-conversion-auxiliary-metrics)). Of the loop above, only the lint step exists,
+as `cairn check`.
 
 ## 13.1 Primary metrics
 
@@ -32,9 +34,11 @@ Reverse-conversion quality ([Ecosystem Interop](/spec/ecosystem-interop/)) is ke
 primary evaluation and treated as auxiliary, consistent with the lossy approach. What it measures is
 not "did it reproduce the shape" but **"did it become editable DSL"**.
 
-- `block_iou`, `state_accuracy` (facing / shape / waterlogged match), `entity_accuracy` (frame,
+- `block_iou` and `state_accuracy` (facing / shape / waterlogged match), as [Ecosystem Interop
+  §12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift) defines them; `entity_accuracy` (frame,
   sign, villager, display retention).
-- `residual_ratio`: raw volume left after the lift. `compression_ratio`: voxel count ÷ token count.
+- `residual_ratio`: the share of the lift's blocks raw members still build, as §12.2.1 defines it.
+  `compression_ratio`: voxel count ÷ token count.
 - `editability_score`: named-member count, slot-ization rate, stable-address rate.
 - `theme_extraction_score`: whether concrete blocks were separated into slot and theme rather than
   inlined.

@@ -65,8 +65,8 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
             "the guard opens here",
             "dedent the line out of the guard so that every edition builds it, and bind what \
              differs per edition from a `theme NAME_java` and a `theme NAME_bedrock`; the guard is \
-             for `raw_block`, `raw_fill` and the Tier 0 parts `repeater`, `comparator`, \
-             `redstone_torch` and `redstone_dust`",
+             for `raw_block`, `raw_fill`, `raw_repeat` and the Tier 0 parts `repeater`, \
+             `comparator`, `redstone_torch` and `redstone_dust`",
         ],
     );
     assert_eq!(
@@ -386,7 +386,7 @@ fn an_unknown_keyword_under_a_guard_is_offered_what_a_guard_body_holds() {
         [
             "did you mean `raw_block`?",
             "expected one of: repeater, comparator, redstone_torch, redstone_dust, raw_block, \
-             raw_fill"
+             raw_fill, raw_repeat"
         ],
     );
 }

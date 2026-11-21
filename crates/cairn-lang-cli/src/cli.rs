@@ -282,6 +282,87 @@ pub(crate) enum Command {
         )]
         lock: Option<PathBuf>,
     },
+    /// Write a structure file as a .crn of raw members, stamped with the target it compiles for.
+    #[command(
+        long_about = "Read a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file and write it \
+            as a `.crn` of `raw_block`, `raw_fill` and `raw_repeat` lines marked \
+            `origin=imported`, which `cairn compile` builds back into the blocks the file holds \
+            (`spec/ecosystem-interop` \"Reverse direction: the compiler transliterates, an LLM \
+            lifts\"). The extension names the format, and the format the edition: `.mcstructure` \
+            is Bedrock's, the other three Java's.\n\n\
+            The source is stamped with one shipped target, which its `@requires` and \
+            `@intended_targets` name: the one the file was saved at, the nearest after it when \
+            the file was saved between two, the earliest when it was saved before every one, or \
+            the latest when it names no version (`spec/ecosystem-interop` \"Import stamping and \
+            pitfalls\"). A file saved past every \
+            target this build ships is refused. The written source is compiled against the \
+            stamp and compared cell by cell before anything is written, so a file whose blocks \
+            the stamped target does not declare is refused with the compile's errors.\n\n\
+            An import recovers blocks and their regularity, not intent: every run warns with \
+            `W_SEMANTIC_LOSS`, once for that and once for each thing a raw member cannot carry, \
+            such as a chest's contents, an entity or a structure void. A Litematica region is a \
+            struct of its own, and a structure wider or deeper than 48 blocks is a `site` of \
+            48 by 48 chunks.\n\n\
+            Exits 0 when the source is written, warnings included; 1 when the file cannot be \
+            read as its format, is saved past every shipped target, holds blocks the stamped \
+            target refuses or that no raw member builds, or cannot be read or written for a \
+            reason other than absence; and 2 when the file cannot be located, its extension names no format this command \
+            reads, or `--out` names the file itself"
+    )]
+    Import {
+        /// Path to the structure file to import.
+        file: PathBuf,
+        /// How far the import goes; `raw` is the one mode.
+        #[arg(
+            long,
+            value_enum,
+            default_value_t = ImportMode::Raw,
+            long_help = "How far the import goes. `raw` is the compiler's ceiling: a faithful \
+                transliteration that names nothing (`spec/ecosystem-interop` \"Three tiers of \
+                transliteration\"). Naming what the raw members build, as walls, windows and \
+                material slots, is a refactor of the written source rather than a mode of this \
+                command"
+        )]
+        mode: ImportMode,
+        /// Path to write the .crn to; defaults to `<stem>.raw.crn` beside the file.
+        #[arg(
+            long,
+            long_help = "Path to write the `.crn` to, its directory created if missing. Defaults \
+                to `<stem>.raw.crn` beside the file, so `house.litematic` → `house.raw.crn`. An \
+                existing file there is replaced"
+        )]
+        out: Option<PathBuf>,
+    },
+    /// Compare a structure file with what a .crn builds at the structure's stamp.
+    #[command(
+        long_about = "Build FILE at the target STRUCTURE is stamped with and compare the two cell \
+            by cell (`spec/ecosystem-interop` \"Diffing a lift\"): the block IoU, the \
+            state_accuracy and the residual raw share, the regions of cells that differ with their \
+            material and likely cause (\"Regions and their causes\"), and up to three `edit` \
+            lines, each found by building FILE with it appended, that bring the build nearer \
+            STRUCTURE (\"The suggested patch\"). The stamp is read the way `cairn import` reads \
+            it (\"Import stamping and pitfalls\"), so FILE is built at the target the structure \
+            was saved at, or the nearest shipped one after it. Only blocks are compared, not \
+            block entity data or entities.\n\n\
+            A lift converges at block IoU >= 0.985, state_accuracy >= 0.995 and residual raw <= \
+            5%. Short of that, the run fails with `E_DECOMPILE_DIFF`: on stderr, naming each \
+            metric that falls short, or under `--format json` as the report's `code`. The text \
+            report lists the first ten regions, and the JSON report every one.\n\n\
+            Exits 0 when the lift converges; 1 when it does not, when FILE does not parse, raises \
+            an error, builds only part of itself, needs a later target than the stamp or builds \
+            something the target cannot write, or when STRUCTURE cannot be read as its format or \
+            is saved past every shipped target; and 2 when either file cannot be located or \
+            STRUCTURE's extension names no format this command reads"
+    )]
+    DiffBlocks {
+        /// Path to the structure file (`.nbt`, `.litematic`, `.schem` or `.mcstructure`).
+        structure: PathBuf,
+        /// Path to the .crn file to build and compare.
+        file: PathBuf,
+        /// Output format for the report.
+        #[arg(long, value_enum, default_value_t = DiffFormat::Text)]
+        format: DiffFormat,
+    },
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
     #[command(
         long_about = "Lower a .crn source file's `logic` bindings, sensors, and actuators through \
@@ -459,6 +540,13 @@ pub(crate) enum StructureFormat {
     Schem,
 }
 
+/// How far `cairn import` takes a structure file.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+pub(crate) enum ImportMode {
+    /// Raw members that build the file's blocks, with no name given to anything (default).
+    Raw,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum ParseFormat {
     /// Pretty JSON (default), each member line of a `struct` or `def` body carrying its address,
@@ -484,6 +572,15 @@ pub(crate) enum InfoFormat {
     Json,
 }
 
+#[derive(Copy, Clone, PartialEq, Eq, ValueEnum)]
+pub(crate) enum DiffFormat {
+    /// The metrics, the regions and the patch for humans, with `E_DECOMPILE_DIFF` on stderr
+    /// (default).
+    Text,
+    /// Pretty JSON of the whole report, every region listed, for tools.
+    Json,
+}
+
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum LowerFormat {
     /// Per-structure ASCII Y-slice plus a palette listing and the address of each member that
@@ -505,6 +602,15 @@ impl ParseFormat {
 }
 
 impl InfoFormat {
+    pub(crate) fn failure_report(self) -> FailureReport {
+        match self {
+            Self::Json => FailureReport::Json,
+            Self::Text => FailureReport::Text,
+        }
+    }
+}
+
+impl DiffFormat {
     pub(crate) fn failure_report(self) -> FailureReport {
         match self {
             Self::Json => FailureReport::Json,
