@@ -15,7 +15,7 @@ pub struct WalkwayLayout {
     pub array: BlockArray,
     /// World position of the array's `(0, 0, 0)` cell.
     pub origin: (i32, i32, i32),
-    /// Number of cells skipped because they overlapped a placement floor.
+    /// Number of cells skipped because a placement takes them up.
     pub blocked_count: usize,
 }
 
@@ -96,7 +96,7 @@ const STEP_DIRS: [StepDir; 4] = [StepDir::PosX, StepDir::NegX, StepDir::PosZ, St
 /// Why [`route_path`] found no detour, one variant per remedy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RoutePathError {
-    /// A port cell is under another placement's floor; the flags say which.
+    /// A port cell is one a placement takes up; the flags say which.
     EndpointBlocked {
         /// `from` is a blocked cell.
         from_blocked: bool,
@@ -118,7 +118,7 @@ pub enum RoutePathError {
     CoordinateOverflow,
 }
 
-/// An inclusive rectangle of ground-plane cells, as [`route_path`] searches it.
+/// An inclusive rectangle of cells on one plane, as [`route_path`] searches it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SearchRect {
     /// Lowest `x` in the rectangle.
@@ -131,7 +131,7 @@ pub struct SearchRect {
     pub max_z: i32,
 }
 
-/// The blocked-cell set with each plane's bounding rectangle, built once per lowering.
+/// The blocked-cell set with each plane's bounding rectangle, built once per site and plane.
 pub struct BlockedIndex<'a, S: BuildHasher> {
     cells: &'a HashSet<(i32, i32, i32), S>,
     /// Bounds `(min_x, max_x, min_z, max_z)` of each plane's blocked cells.
@@ -242,7 +242,7 @@ pub fn route_path<S: BuildHasher>(
     let y = from.1;
     debug_assert_eq!(
         from.1, to.1,
-        "walkway ports must share a Y; the router searches a single ground plane",
+        "walkway ports must share a Y; the router searches a single plane",
     );
     let from_blocked = blocked.contains(from);
     let to_blocked = blocked.contains(to);

@@ -9,6 +9,12 @@ use super::args::size_value;
 /// Rows a door block stands, from the row it opens at.
 pub(super) const DOOR_HEIGHT: u32 = 2;
 
+/// The row a door under `level y=level_y` opens at, one above that level's base row, or `None`
+/// past the highest row a build can address.
+pub(super) const fn door_base_row(level_y: u32) -> Option<u32> {
+    level_y.checked_add(1)
+}
+
 /// A struct wall, named as seen from outside (`spec/syntax` "Selectors").
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WallSide {
@@ -483,6 +489,12 @@ impl WindowArgs {
     /// The `offset=` the line writes, `0` when absent: the column of the window's anchor.
     pub(super) fn offset(self) -> u32 {
         self.column.saturating_add(self.column_shift())
+    }
+
+    /// The window's lowest row under `level y=level_y`, or `None` past the highest row a build
+    /// can address.
+    pub(super) const fn row_under(self, level_y: u32) -> Option<u32> {
+        self.row.checked_add(level_y)
     }
 
     /// The `y=` the line writes, relative to the member's own level: the row of its anchor.
