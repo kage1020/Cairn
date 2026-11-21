@@ -97,6 +97,57 @@ fn theme_body_offers_slot_and_selector_keywords() {
 }
 
 #[test]
+fn a_selector_rows_key_position_offers_the_keys_its_keyword_binds() {
+    for (source, needle, offered) in [
+        ("theme x:\n  window[class=small] -> fr", "-> fr", "frame"),
+        ("theme x:\n  door[class=main] -> ", "-> ", "frame"),
+        ("theme x:\n  walls[class=outer] ->", "->", "trim"),
+        ("theme x:\n  window [class=small] -> ", "-> ", "frame"),
+        (
+            "theme x:\n  window[tags=[a,\"]\"]] -> f",
+            "]] -> f",
+            "frame",
+        ),
+    ] {
+        let items = complete(source, needle);
+        assert_eq!(labels(&items), [offered], "for {source:?}");
+        let item = &items[0];
+        assert_eq!(item.kind, Some(lsp_types::CompletionItemKind::PROPERTY));
+    }
+    let items = complete("theme x:\n  walls[class=outer] -> tr", "-> tr");
+    assert_eq!(items[0].detail.as_deref(), Some("binds the corner posts"));
+    assert_eq!(edit_range(&items[0]), range(1, 24, 26));
+}
+
+#[test]
+fn a_selector_row_offers_no_key_it_binds_already_or_its_keyword_does_not_bind() {
+    for (source, needle) in [
+        (
+            "theme x:\n  window[class=small] -> frame=@spruce_wood f",
+            "wood f",
+        ),
+        ("theme x:\n  roof[kind=gable] -> t", "-> t"),
+    ] {
+        assert_eq!(labels(&complete(source, needle)), Vec::<&str>::new());
+    }
+}
+
+#[test]
+fn only_a_theme_selector_row_takes_a_binding_key() {
+    for (source, needle) in [
+        ("theme x:\n  windw[class=small] -> f", "-> f"),
+        ("theme x:\n  window[class=small f", "small f"),
+        ("struct s size=3x3\n  window[class=small] -> f", "-> f"),
+    ] {
+        assert_eq!(
+            labels(&complete(source, needle)),
+            Vec::<&str>::new(),
+            "for {source:?}",
+        );
+    }
+}
+
+#[test]
 fn nested_block_body_offers_the_enclosing_items_keywords() {
     let source = "struct t size=5x5\n  level h=4\n    flo";
     let items = complete(source, "    flo");

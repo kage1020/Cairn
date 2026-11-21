@@ -4,16 +4,17 @@
 use indexmap::IndexMap;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::Member;
+use crate::intent::{BindingKey, Member};
 
 use crate::block_array::args::diag_deferred_member_reason;
 use crate::block_array::geometry::{Declared, outer_face};
-use crate::block_array::openings::{WallSide, wall_local_to_grid};
+use crate::block_array::openings::{DOOR_HEIGHT, WallSide, wall_local_to_grid};
 use crate::block_array::roof::inward_cardinal;
 use crate::block_array::{Bbox, BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
-use super::members::{StructCtx, side_name};
+use super::frame::{Cut, Frame};
+use super::members::{StructCtx, bound_block, side_name};
 use super::opening::{DoorPlan, DoorStates, Hinge, plan_door, read_door_states};
 
 /// A door block a `door` member stood in its opening, which [`hang_doors`] hinges or counts as a
@@ -59,7 +60,8 @@ impl HungDoor {
     }
 }
 
-/// Stand a `door`'s door block in the opening it cuts, adding it to `hung` once it stands.
+/// Stand a `door`'s door block in the opening it cuts, adding it to `hung` once it stands, with the
+/// frame a theme binds on it round that opening.
 pub(super) fn fill_door(
     member: &Member,
     y_offset: u32,
@@ -68,44 +70,45 @@ pub(super) fn fill_door(
     canvas: &mut MemberCanvas<'_>,
     hung: &mut Vec<HungDoor>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> Option<Frame> {
+    let frame = bound_block(member, BindingKey::Frame, ctx, diagnostics);
     // Read before anything can refuse the door, so every unreadable state is reported now.
     let (written, unread) = read_door_states(member);
     let door = stand_door(member, canvas.member(), written, y_offset, ctx, diagnostics);
     let built = door.is_some();
-    if let Some(mut door) = door {
-        if door.hinge.is_none() {
-            canvas.hold_contests();
-        }
-        // A derived door stands hinged on the left until `hang_doors` settles it.
-        let hinge = door.hinge.unwrap_or(Hinge::Left);
-        let [(_, lower), (_, upper)] = door.cells();
-        canvas.declare(Declared {
-            anchor: lower,
-            bbox: Bbox::spanning(lower, upper),
-            host_face: Some(outer_face(door.side)),
-        });
-        let mut painted = [PaletteIndex::AIR; 2];
-        for (slot, (half, pos)) in painted.iter_mut().zip(door.cells()) {
-            canvas.paint(pos, || {
-                *slot = palette.intern(door.state(half, hinge));
-                *slot
-            });
-        }
-        door.painted = painted;
-        hung.push(door);
-    }
     for (argument, consequence) in unread {
         diagnostics.push(argument.report(if built { consequence } else { NOT_BUILT }));
     }
+    let (mut door, cut) = door?;
+    if door.hinge.is_none() {
+        canvas.hold_contests();
+    }
+    // A derived door stands hinged on the left until `hang_doors` settles it.
+    let hinge = door.hinge.unwrap_or(Hinge::Left);
+    let [(_, lower), (_, upper)] = door.cells();
+    canvas.declare(Declared {
+        anchor: lower,
+        bbox: Bbox::spanning(lower, upper),
+        host_face: Some(outer_face(door.side)),
+    });
+    let mut painted = [PaletteIndex::AIR; 2];
+    for (slot, (half, pos)) in painted.iter_mut().zip(door.cells()) {
+        canvas.paint(pos, || {
+            *slot = palette.intern(door.state(half, hinge));
+            *slot
+        });
+    }
+    door.painted = painted;
+    hung.push(door);
+    frame.map(|state| Frame::new(canvas.member(), state, vec![cut]))
 }
 
 /// The consequence an unread state of a door that is not built reports.
 const NOT_BUILT: &str = "this door is not built either way — see the finding on the same line, or \
                          on the material its `mat_slot=` names";
 
-/// The door [`fill_door`] stands for the member at `index` of the flattened paint list, or `None`
-/// after the findings that refuse it.
+/// The door [`fill_door`] stands for the member at `index` of the flattened paint list, with the
+/// opening it cuts, or `None` after the findings that refuse it.
 fn stand_door(
     member: &Member,
     index: u32,
@@ -113,7 +116,7 @@ fn stand_door(
     y_offset: u32,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<HungDoor> {
+) -> Option<(HungDoor, Cut)> {
     let DoorPlan {
         side,
         at,
@@ -144,7 +147,7 @@ fn stand_door(
         ));
         return None;
     };
-    Some(HungDoor {
+    let door = HungDoor {
         member: index,
         lower,
         side,
@@ -152,7 +155,15 @@ fn stand_door(
         hinge,
         open: written.open,
         painted: [PaletteIndex::AIR; 2],
-    })
+    };
+    let cut = Cut {
+        side,
+        offset: at,
+        y_start: base_row,
+        width: 1,
+        height: DOOR_HEIGHT,
+    };
+    Some((door, cut))
 }
 
 /// Settle the hinge of each door in `hung` whose line writes none, from the wall beside it now
