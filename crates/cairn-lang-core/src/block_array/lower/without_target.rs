@@ -10,18 +10,18 @@ use crate::intent::IntentModule;
 use crate::resolve::{Resolution, resolve};
 
 use crate::block_array::PALETTE_CAPACITY;
-use crate::block_array::material::NoTarget;
+use crate::block_array::material::{IdStanding, NoTarget};
 
 use super::lower_to_block_array_within;
 
 /// The findings every target that reads their line raises on `intent`, under `edition`'s theme
-/// variants or each edition's when it is `None` (`spec/lint` "Error vs warning"); `declared`
-/// answers whether some version of an edition declares a block id.
+/// variants or each edition's when it is `None` (`spec/lint` "Error vs warning"); `standing`
+/// answers what the versions of an edition make of a block id.
 #[must_use]
 pub fn findings_without_target(
     intent: &IntentModule,
     edition: Option<Edition>,
-    declared: &dyn Fn(Edition, &str) -> bool,
+    standing: &dyn Fn(Edition, &str) -> IdStanding,
 ) -> Vec<Diagnostic> {
     let editions = edition.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |e| vec![e]);
     let guarded = intent.has_edition_guards();
@@ -39,8 +39,14 @@ pub fn findings_without_target(
     let lowerings: Vec<(Resolution, Vec<Diagnostic>)> = shared
         .into_iter()
         .map(|(editions, resolution)| {
-            let in_each = |id: &str| editions.iter().all(|edition| declared(*edition, id));
-            let registry = NoTarget { declared: &in_each };
+            let in_each = |id: &str| {
+                editions
+                    .iter()
+                    .map(|edition| standing(*edition, id))
+                    .min()
+                    .unwrap_or(IdStanding::Declared)
+            };
+            let registry = NoTarget { standing: &in_each };
             let found =
                 lower_to_block_array_within(intent, &resolution, Some(&registry), PALETTE_CAPACITY)
                     .diagnostics;
@@ -93,11 +99,11 @@ fn agreed_lowerings(
 }
 
 /// The findings each edition's lowering raises on the lines under its `@edition` guards, which a
-/// lowering that pins no edition leaves out; `declared` is [`findings_without_target`]'s.
+/// lowering that pins no edition leaves out; `standing` is [`findings_without_target`]'s.
 #[must_use]
 pub fn findings_under_guards(
     intent: &IntentModule,
-    declared: &dyn Fn(Edition, &str) -> bool,
+    standing: &dyn Fn(Edition, &str) -> IdStanding,
 ) -> Vec<Diagnostic> {
     let guarded: Vec<&Span> = intent
         .guarded_members()
@@ -107,7 +113,7 @@ pub fn findings_under_guards(
     if guarded.is_empty() {
         return Vec::new();
     }
-    findings_without_target(intent, None, declared)
+    findings_without_target(intent, None, standing)
         .into_iter()
         .filter(|finding| finding.touches(&guarded))
         .collect()

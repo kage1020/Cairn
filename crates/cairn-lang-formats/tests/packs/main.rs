@@ -12,6 +12,7 @@ mod connections;
 mod declared_elsewhere;
 mod eave_stair_shapes;
 mod ids_exist;
+mod respelling;
 mod spelling;
 mod state_domain;
 mod states;

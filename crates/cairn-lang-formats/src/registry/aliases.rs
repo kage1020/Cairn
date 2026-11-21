@@ -1,11 +1,13 @@
 //! The aliases component of a registry pack: groups of the spellings one block has worn across
-//! editions and versions, which `E_UNKNOWN_ID` offers where a typo search finds nothing. A group
+//! editions and versions, which `E_UNKNOWN_ID` offers where a typo search finds nothing, and under
+//! which a canonical token a version renamed is written as the pinned version spells it. A group
 //! names no version; the target's `blocks` table picks its members. A spelling two editions use
 //! for different blocks, such as `snow`, gets no group, since one group would answer both.
 
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use super::blocks::BlocksIndex;
 use super::namespaced;
 
 /// The highest `aliases.schema_version` this build reads.
@@ -101,6 +103,35 @@ impl AliasIndex {
         self.by_spelling
             .get(id)
             .map_or(&[], |&at| self.groups[at].as_slice())
+    }
+
+    /// The one spelling of `id`'s group that `here`, a version's sorted ids, declares, when some
+    /// version of `blocks` declares `id` and none declares two of the group's spellings, so the
+    /// group is one block renamed across the edition's range; `None` otherwise.
+    #[must_use]
+    pub fn renamed(&self, blocks: &BlocksIndex, here: &[String], id: &str) -> Option<&str> {
+        let declares = |ids: &[String], spelling: &str| {
+            ids.binary_search_by(|known| known.as_str().cmp(spelling))
+                .is_ok()
+        };
+        let group = self.spellings_of(id);
+        let tables: Vec<&[String]> = blocks
+            .versions()
+            .filter_map(|version| blocks.ids_for(version))
+            .collect();
+        let succession = tables.iter().any(|ids| declares(ids, id))
+            && tables.iter().all(|ids| {
+                group
+                    .iter()
+                    .filter(|spelling| declares(ids, spelling))
+                    .count()
+                    <= 1
+            });
+        let mut spelled = group.iter().filter(|spelling| declares(here, spelling));
+        match (succession, spelled.next(), spelled.next()) {
+            (true, Some(spelling), None) if spelling != id => Some(spelling),
+            _ => None,
+        }
     }
 
     /// Every group, in declared order.

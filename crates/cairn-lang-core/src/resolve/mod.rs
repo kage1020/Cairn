@@ -29,9 +29,9 @@ pub use resolver::resolve;
 pub(crate) use selector::select_the_same_members;
 pub use version_axes::{
     BuildableRefusal, BuildableTargets, DeclaredFloor, DegradedEntry, DroppedIntent,
-    EditionPortability, EditionReport, FloorDeclarer, FloorOrigin, FloorPart, InferredRange,
-    LastDeclaredId, PaintedId, RefusedTarget, RegistryRange, RequiresConflict,
-    SemanticSensitiveFinding, TargetRefusal, UnsupportedEntry, UnsupportedReason, VersionAxes,
-    VersionFloor, compute_axes, declared_version_floors, unscoped_version_floors,
-    versions_satisfying,
+    EditionPortability, EditionReport, EditionRespellings, FloorDeclarer, FloorOrigin, FloorPart,
+    InferredRange, LastDeclaredId, PaintedId, RefusedTarget, RegistryRange, RequiresConflict,
+    RespelledToken, SemanticSensitiveFinding, SpellingTable, TargetRefusal, UnsupportedEntry,
+    UnsupportedReason, VersionAxes, VersionFloor, WrittenSpelling, compute_axes,
+    declared_version_floors, unscoped_version_floors, versions_satisfying,
 };
