@@ -34,7 +34,7 @@ pub enum LevelDatError {
     Missing,
     /// `level.dat` is there but cannot be read.
     #[error("has a `level.dat` that cannot be read: {0}")]
-    Io(io::Error),
+    Io(#[source] io::Error),
     /// A Bedrock world's: an 8-byte header ahead of little-endian NBT.
     #[error("is a Bedrock world")]
     Bedrock {
@@ -46,7 +46,7 @@ pub enum LevelDatError {
     NotGzip,
     /// Gzip whose NBT does not decode, or whose gzip stream does not.
     #[error("has a `level.dat` that does not decode as NBT: {0}")]
-    Nbt(NbtReadError),
+    Nbt(#[source] NbtReadError),
     /// No integer `DataVersion` in a `Data` compound.
     #[error("has a `level.dat` with no integer `Data.DataVersion`")]
     NoDataVersion,
@@ -76,20 +76,41 @@ pub fn read_level_dat(world: &Path) -> Result<WorldVersion, LevelDatError> {
 
 fn read_java(gzip: impl Read) -> Result<WorldVersion, LevelDatError> {
     let mut nbt = entries::java_gzip(gzip);
-    open_root(&mut nbt).map_err(LevelDatError::Nbt)?;
     let mut saved = None;
-    for_each_entry(&mut nbt, |nbt, entry| {
-        // The game keeps the last of two entries under one key.
-        if entry.name == "Data" {
-            saved = match entry.body {
-                Body::Compound => saved_version(nbt)?,
-                Body::List | Body::Value(_) => None,
-            };
-        }
-        Ok(())
-    })
-    .map_err(LevelDatError::Nbt)?;
+    open_root(&mut nbt)
+        .and_then(|()| {
+            for_each_entry(&mut nbt, |nbt, entry| {
+                // The game keeps the last of two entries under one key.
+                if entry.name == "Data" {
+                    saved = match entry.body {
+                        Body::Compound => saved_version(nbt)?,
+                        Body::List | Body::Value(_) => None,
+                    };
+                }
+                Ok(())
+            })
+        })
+        // The gzip trailer is read past the root, and its checksum is what finds a corrupted body.
+        .and_then(|()| nbt.finish().map(drop))
+        .map_err(undecoded)?;
     saved.ok_or(LevelDatError::NoDataVersion)
+}
+
+/// [`LevelDatError::Nbt`] for bytes that do not decode, [`LevelDatError::Io`] for a failed read.
+fn undecoded(err: NbtReadError) -> LevelDatError {
+    match err {
+        NbtReadError::Io(err)
+            if !matches!(
+                err.kind(),
+                io::ErrorKind::InvalidInput
+                    | io::ErrorKind::InvalidData
+                    | io::ErrorKind::UnexpectedEof
+            ) =>
+        {
+            LevelDatError::Io(err)
+        }
+        err => LevelDatError::Nbt(err),
+    }
 }
 
 /// The version the `Data` compound `nbt` is in records, `None` without an integer `DataVersion`.
@@ -125,7 +146,7 @@ fn release_name<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<String>, NbtRe
 }
 
 /// [`LevelDatError::Bedrock`] for a `level.dat` whose first bytes are `head`, `None` when the
-/// file is not one: its header gives the length of the NBT after it, and that NBT decodes.
+/// file is not one: a Bedrock header gives the length of the NBT after it.
 fn bedrock(head: &[u8], file_len: u64, payload: impl Read) -> Option<LevelDatError> {
     let declared = head.get(4..8)?;
     let declared = u32::from_le_bytes(declared.try_into().ok()?);
@@ -133,7 +154,7 @@ fn bedrock(head: &[u8], file_len: u64, payload: impl Read) -> Option<LevelDatErr
         return None;
     }
     let mut nbt = entries::bedrock(payload);
-    let last_opened_with = last_opened_with(&mut nbt).ok()?;
+    let last_opened_with = last_opened_with(&mut nbt).ok().flatten();
     Some(LevelDatError::Bedrock { last_opened_with })
 }
 

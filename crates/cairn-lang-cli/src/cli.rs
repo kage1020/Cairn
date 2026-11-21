@@ -286,10 +286,11 @@ pub(crate) enum Command {
     /// Install compiled Java structure files into a world, where `/place template` loads them.
     #[command(
         long_about = "Install the Java structure files `cairn compile --edition java` wrote into \
-            the world folder `--world`, each at `generated/<namespace>/structures/<name>.nbt`, \
-            where `/place template <namespace>:<name>` and a structure block load it. The name is \
-            the file's name without `.nbt`, or `--name` for a single file, and may hold `/` \
-            between folders; the namespace is `--namespace`, `minecraft` by default.\n\n\
+            the world folder `--world`, each where `/place template <namespace>:<name>` and a \
+            structure block load it: `generated/<namespace>/structure/<name>.nbt`, or \
+            `generated/<namespace>/structures/<name>.nbt` in a world saved before 26.1 Snapshot \
+            6. The name is the file's name without `.nbt`, or `--name` for a single file, and may \
+            hold `/` between folders; the namespace is `--namespace`, `minecraft` by default.\n\n\
             Each file is held to the world's version as `spec/versioning-editions` \
             \"Cross-version application\" requires, comparing the `DataVersion` the file is \
             stamped with to the `Data.DataVersion` the world's `level.dat` records. A file newer \
@@ -298,17 +299,20 @@ pub(crate) enum Command {
             world is refused too (`E_CROSS_VERSION_UPGRADE`) unless `--allow-cross-version` is \
             given; with it the file is installed as built, keeping its stamp, and \
             `W_CROSS_VERSION_UPGRADE` warns that the game upgrades it through DataFixerUpper as it \
-            loads. A file already at an id's path is refused (`E_STRUCTURE_EXISTS`) unless \
-            `--replace` is given. Every file is checked before any is written, and they are \
-            written together, so a run that refuses one installs none; `--dry-run` checks the \
-            same and writes nothing.\n\n\
+            loads. A refusal names the `--target` to recompile at where one fits. A file already \
+            at an id's path is refused (`E_STRUCTURE_EXISTS`) unless `--replace` is given, and a \
+            folder there, or a file at the path with `.tmp` or `.bak` added, is refused even \
+            with it. A path the world cannot take is refused (`E_WORLD_UNWRITABLE`). Every file \
+            is checked before any is written, and they are written together, so a run that \
+            refuses one installs none; `--dry-run` checks the same and writes nothing.\n\n\
             Only Java worlds are installed into: a Bedrock world or a `.mcstructure` file is \
             refused (`E_INSTALL_EDITION_UNSUPPORTED`). A world open in the game keeps each \
             structure it has looked up until `/reload`.\n\n\
             Exits 0 when every file is installed, or would be under `--dry-run`, warnings \
-            allowed; 1 when a file is refused, the world's `level.dat` cannot be read, or a write \
-            fails; and 2 when the world's `level.dat` or a structure file cannot be located, \
-            `--name` is given with more than one file, or two files would install under one id."
+            allowed; 1 when a file is refused, the world is a Bedrock one or its `level.dat` \
+            cannot be read, or a write fails; and 2 when the world's `level.dat` or a structure \
+            file cannot be located, `--name` is given with more than one file, or two files \
+            would install under one id."
     )]
     Install(InstallArgs),
     /// Experimental: print one stage of a .crn source file's redstone pipeline as JSON.
@@ -426,8 +430,8 @@ pub(crate) struct InstallArgs {
         long,
         long_help = "The name to install a single structure file under, in place of its file \
             name without `.nbt`. It may hold `/` between folders, as `houses/cottage` does, and \
-            holds only `a`-`z`, `0`-`9`, `_`, `-` and `.` besides, as the game requires \
-            (`E_INVALID_STRUCTURE_ID`)"
+            holds only `a`-`z`, `0`-`9`, `_`, `-` and `.` besides, as the game requires; it does \
+            not end in `.nbt`, which the game adds itself (`E_INVALID_STRUCTURE_ID`)"
     )]
     pub(crate) name: Option<String>,
     /// Overwrite a structure file already at an id's path.

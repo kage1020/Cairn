@@ -37,6 +37,7 @@ fn a_misspelled_world_is_matched_to_the_one_beside_it() {
     saves.java_world("New World", 3700, "1.20.4");
     let run = saves.install(&[&structure, "--world", "saves/New Wrld"]);
     assert_eq!(run.code, Some(2));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         format!(
@@ -53,6 +54,7 @@ fn a_folder_with_no_world_near_it_is_reported_before_any_structure_file() {
     let saves = Saves::new();
     let run = saves.install(&["missing.nbt", "--world", "nowhere"]);
     assert_eq!(run.code, Some(2));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         "error[E_WORLD_UNREADABLE]: `nowhere` holds no `level.dat`, so it is no world's folder\n  \
@@ -68,6 +70,7 @@ fn a_level_dat_that_is_not_gzip() {
     let world = saves.world_with("Broken", b"not a level.dat");
     let run = saves.install(&[&structure, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         [
@@ -80,12 +83,36 @@ fn a_level_dat_that_is_not_gzip() {
 }
 
 #[test]
+fn a_level_dat_whose_gzip_checksum_does_not_match() {
+    let saves = Saves::new();
+    let structure = saves.compiled("java", "1.20.4");
+    let mut bytes = java_level_dat(Some(3700), Some("1.20.4"));
+    let crc_at = bytes.len() - 8;
+    bytes[crc_at] ^= 1;
+    let world = saves.world_with("Corrupted", &bytes);
+    let run = saves.install(&[&structure, "--world", &world]);
+    assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
+    assert_eq!(
+        run.stderr,
+        [
+            "error[E_WORLD_UNREADABLE]: `saves/Corrupted` has a `level.dat` that does not decode \
+             as NBT: nbt I/O: corrupt gzip stream does not have a matching checksum\n",
+            RESTORE,
+        ]
+        .concat()
+    );
+    assert!(!saves.path().join(&world).join("generated").exists());
+}
+
+#[test]
 fn a_level_dat_that_records_no_data_version() {
     let saves = Saves::new();
     let structure = saves.compiled("java", "1.20.4");
     let world = saves.world_with("Before 1.9", &java_level_dat(None, None));
     let run = saves.install(&[&structure, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         "error[E_WORLD_UNREADABLE]: `saves/Before 1.9` has a `level.dat` with no integer \
@@ -101,6 +128,7 @@ fn a_bedrock_world_is_refused() {
     let world = saves.world_with("Bedrock", &bedrock_level_dat());
     let run = saves.install(&[&structure, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         "error[E_INSTALL_EDITION_UNSUPPORTED]: `saves/Bedrock` is a Bedrock world, last opened \

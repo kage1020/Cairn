@@ -205,9 +205,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `cairn install` enforces both. See
   [versioning-editions](/spec/versioning-editions/#cross-version-application).
 - **Structure id.** The `namespace:name` that `/place template` and a structure block load a
-  structure by, from `generated/<namespace>/structures/<name>.nbt` in a Java world. `cairn install`
-  takes the name from the file's name or from `--name`, and the namespace from `--namespace`,
-  `minecraft` by default. See
+  structure by, from `generated/<namespace>/structure/<name>.nbt` in a Java world saved at
+  `DataVersion` 4774 (26.1 Snapshot 6) or later, and from `generated/<namespace>/structures/` in
+  one saved before. `cairn install` takes the name from the file's name or from `--name`, and the
+  namespace from `--namespace`, `minecraft` by default. See
   [versioning-editions](/spec/versioning-editions/#cross-version-application).
 
 ## Ecosystem interop

@@ -10,13 +10,13 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::suggest::{candidate_list, did_you_mean, nearest_match};
 use cairn_lang_formats::registry::{RegistryPack, builtin_pack};
 use cairn_lang_formats::world::{
-    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, StructureFileError,
-    StructureId, StructureIdError, WorldVersion, read_level_dat, read_structure_data_version,
-    recompile_target, worlds_in,
+    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, Namespace,
+    StructureFileError, StructureId, StructureIdError, WorldVersion, read_level_dat,
+    read_structure_data_version, recompile_target, worlds_in,
 };
 
 use crate::cli::InstallArgs;
-use crate::staging::{Kind, StagedSet};
+use crate::staging::{Kind, StagedSet, reserved_paths};
 
 /// The exit code of a refused file or world.
 const REFUSED: u8 = 1;
@@ -50,16 +50,17 @@ pub(crate) fn run_install(args: &InstallArgs) -> ExitCode {
         );
         return ExitCode::from(NOT_LOCATED);
     }
-    let ids: Vec<Result<StructureId, StructureIdError>> = args
+    let names: Vec<String> = args
         .structures
         .iter()
-        .map(|path| StructureId::new(&args.namespace, &name_for(path, args.name.as_deref())))
+        .map(|path| name_for(path, args.name.as_deref()))
         .collect();
-    if let Some((first, second, id)) = shared_id(&args.structures, &ids) {
+    if let Some((first, second, name)) = shared_name(&args.structures, &names) {
         eprintln!(
-            "error: `{}` and `{}` would both install as `{id}`",
+            "error: `{}` and `{}` would both install as `{}:{name}`",
             first.display(),
             second.display(),
+            args.namespace,
         );
         eprintln!("  fix: install one of them in a run of its own, with `--name`");
         return ExitCode::from(NOT_LOCATED);
@@ -80,19 +81,14 @@ pub(crate) fn run_install(args: &InstallArgs) -> ExitCode {
         path: &args.world,
         version,
     };
+    let namespace = Namespace::new(&args.namespace)
+        .inspect_err(|err| report_invalid_namespace(&args.namespace, err))
+        .ok();
     let pack = builtin_pack(Edition::Java);
     let mut planned = Vec::new();
-    let mut refused: Option<u8> = None;
-    let mut namespace_reported = false;
-    for (path, id) in args.structures.iter().zip(ids) {
-        if let Err(err) = &id
-            && err.part() == IdPart::Namespace
-            && !namespace_reported
-        {
-            report_invalid_namespace(&args.namespace, err);
-            namespace_reported = true;
-        }
-        match check_structure(path, id, args, &world, pack) {
+    let mut refused: Option<u8> = namespace.is_none().then_some(REFUSED);
+    for (path, name) in args.structures.iter().zip(&names) {
+        match check_structure(path, name, namespace.as_ref(), args, &world, pack) {
             Ok(plan) => planned.push(plan),
             Err(code) => refused = Some(refused.map_or(code, |worst| worst.max(code))),
         }
@@ -111,55 +107,50 @@ pub(crate) fn run_install(args: &InstallArgs) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    write(&planned)
+    write(&planned, world.path)
 }
 
-/// The name `path` installs under: `name` when given, else its file name without `.nbt`.
+/// The name `path` installs under: `name` when given, else its file name, without `.nbt` when it
+/// ends in that.
 fn name_for(path: &Path, name: Option<&str>) -> String {
-    name.map_or_else(
-        || {
-            path.file_stem()
-                .unwrap_or(path.as_os_str())
-                .to_string_lossy()
-                .into_owned()
-        },
-        str::to_owned,
-    )
+    if let Some(name) = name {
+        return name.to_owned();
+    }
+    let file_name = path
+        .file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    file_name
+        .strip_suffix(".nbt")
+        .unwrap_or(&file_name)
+        .to_owned()
 }
 
-/// The first two files that would install under one id, with that id.
-fn shared_id<'a>(
+/// The first two files that would install under one name, with that name.
+fn shared_name<'a>(
     paths: &'a [PathBuf],
-    ids: &'a [Result<StructureId, StructureIdError>],
-) -> Option<(&'a Path, &'a Path, &'a StructureId)> {
-    ids.iter().enumerate().find_map(|(later, id)| {
-        let id = id.as_ref().ok()?;
-        let earlier = ids[..later]
-            .iter()
-            .position(|other| other.as_ref().ok() == Some(id))?;
-        Some((paths[earlier].as_path(), paths[later].as_path(), id))
+    names: &'a [String],
+) -> Option<(&'a Path, &'a Path, &'a str)> {
+    names.iter().enumerate().find_map(|(later, name)| {
+        let earlier = names[..later].iter().position(|other| other == name)?;
+        Some((
+            paths[earlier].as_path(),
+            paths[later].as_path(),
+            name.as_str(),
+        ))
     })
 }
 
 /// Every check one structure file must pass, each refusal reported; the exit code it earns.
 fn check_structure(
     path: &Path,
-    id: Result<StructureId, StructureIdError>,
+    name: &str,
+    namespace: Option<&Namespace>,
     args: &InstallArgs,
     world: &World<'_>,
     pack: &RegistryPack,
 ) -> Result<Planned, u8> {
-    let mut refused = false;
-    let id = match id {
-        Ok(id) => Some(id),
-        Err(err) => {
-            if err.part() == IdPart::Name {
-                report_invalid_name(path, args, &err);
-            }
-            refused = true;
-            None
-        }
-    };
+    let id = checked_id(path, name, namespace, args);
     let bytes = fs::read(path).map_err(|err| {
         eprintln!(
             "error[E_STRUCTURE_UNREADABLE]: `{}` cannot be read: {err}",
@@ -176,28 +167,66 @@ fn check_structure(
         report_structure_file(path, &err, world, pack);
         REFUSED
     })?;
-    refused |= !holds_to_world(path, stamp, args.allow_cross_version, world, pack);
+    let holds = holds_to_world(path, stamp, args.allow_cross_version, world, pack);
     let Some(id) = id else {
         return Err(REFUSED);
     };
-    let target = id.file_in(world.path);
-    let replacing = match fs::symlink_metadata(&target) {
+    let target = id.file_in(world.path, &world.version);
+    let replacing = check_target(path, &id, &target, args);
+    match replacing {
+        Some(replacing) if holds => Ok(Planned {
+            id,
+            bytes,
+            target,
+            replacing,
+        }),
+        _ => Err(REFUSED),
+    }
+}
+
+/// The id a file installs under, `None` once a refusal of its name, or of the namespace, is
+/// reported.
+fn checked_id(
+    path: &Path,
+    name: &str,
+    namespace: Option<&Namespace>,
+    args: &InstallArgs,
+) -> Option<StructureId> {
+    let checked = match namespace {
+        Some(namespace) => StructureId::new(namespace, name).map(Some),
+        None => IdPart::Name.check(name).map(|()| None),
+    };
+    match checked {
+        Err(err) => {
+            report_invalid_name(path, name, args, &err);
+            None
+        }
+        Ok(_) if Path::new(name).extension().is_some_and(|ext| ext == "nbt") => {
+            report_nbt_name(path, name, args);
+            None
+        }
+        Ok(id) => id,
+    }
+}
+
+/// Whether installing `id` at `target` replaces a file there, `None` once the reason the world
+/// cannot take it there is reported.
+fn check_target(path: &Path, id: &StructureId, target: &Path, args: &InstallArgs) -> Option<bool> {
+    let shown = path.display();
+    let replacing = match fs::symlink_metadata(target) {
         Ok(meta) if meta.is_dir() => {
             eprintln!(
-                "error[E_STRUCTURE_EXISTS]: `{}` would install as `{id}`, at `{}`, which is a \
-                 folder",
-                path.display(),
+                "error[E_STRUCTURE_EXISTS]: `{shown}` would install as `{id}`, at `{}`, which is \
+                 a folder",
                 target.display(),
             );
             eprintln!("  fix: move that folder aside, or install under another id");
-            refused = true;
-            false
+            return None;
         }
         Ok(_) if !args.replace => {
             eprintln!(
-                "error[E_STRUCTURE_EXISTS]: `{}` would install as `{id}`, and the world already \
-                 has a structure file at `{}`",
-                path.display(),
+                "error[E_STRUCTURE_EXISTS]: `{shown}` would install as `{id}`, and the world \
+                 already has a structure file at `{}`",
                 target.display(),
             );
             if args.structures.len() == 1 {
@@ -211,21 +240,79 @@ fn check_structure(
                      another namespace"
                 );
             }
-            refused = true;
-            false
+            return None;
         }
         Ok(_) => true,
-        Err(_) => false,
+        Err(err)
+            if matches!(
+                err.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            if let Some(blocked) = file_on_the_way(target) {
+                eprintln!(
+                    "error[E_WORLD_UNWRITABLE]: `{shown}` would install as `{id}`, at `{}`, and \
+                     `{}` is a file, not the folder that path goes through",
+                    target.display(),
+                    blocked.display(),
+                );
+                eprintln!("  fix: move that file aside, or install under another id");
+                return None;
+            }
+            false
+        }
+        Err(err) => {
+            report_unlookable(path, id, target, &err);
+            return None;
+        }
     };
-    if refused {
-        return Err(REFUSED);
+    for scratch in &reserved_paths(target)[1..] {
+        match fs::symlink_metadata(scratch) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                eprintln!(
+                    "error[E_STRUCTURE_EXISTS]: `{shown}` would install as `{id}`, and the world \
+                     has a file at `{}`, which the install writes through",
+                    scratch.display(),
+                );
+                eprintln!(
+                    "  note: the file is written beside its path with `.tmp` added, and one it \
+                     replaces is moved aside with `.bak` added"
+                );
+                eprintln!("  fix: move that file aside, or install under another id");
+                return None;
+            }
+            Err(err) => {
+                report_unlookable(path, id, scratch, &err);
+                return None;
+            }
+        }
     }
-    Ok(Planned {
-        id,
-        bytes,
-        target,
-        replacing,
-    })
+    Some(replacing)
+}
+
+/// The nearest existing ancestor of `target` when it is no folder, so that no folder can be made
+/// under it.
+fn file_on_the_way(target: &Path) -> Option<PathBuf> {
+    for ancestor in target.ancestors().skip(1) {
+        match fs::metadata(ancestor) {
+            Ok(meta) if meta.is_dir() => return None,
+            Ok(_) => return Some(ancestor.to_path_buf()),
+            Err(_) => {}
+        }
+    }
+    None
+}
+
+/// The refusal of a path in the world that cannot be looked at.
+fn report_unlookable(path: &Path, id: &StructureId, at: &Path, err: &io::Error) {
+    eprintln!(
+        "error[E_WORLD_UNWRITABLE]: `{}` would install as `{id}`, and `{}` cannot be looked at: \
+         {err}",
+        path.display(),
+        at.display(),
+    );
+    eprintln!("  fix: make the world's folder readable and writable, then install again");
 }
 
 /// Whether a file stamped `stamp` may go into `world`, reporting why not or the warning its
@@ -245,7 +332,7 @@ fn holds_to_world(
     );
     let worlds = world_version(&world.version);
     let newest = recompile_target(pack, world_dv);
-    match CrossVersion::of(stamp, world_dv) {
+    match world.version.cross_version(stamp) {
         CrossVersion::Same => true,
         CrossVersion::Downgrade => {
             eprintln!("error[E_CROSS_VERSION_DOWNGRADE]: {built}, newer than the world's {worlds}");
@@ -353,21 +440,28 @@ fn replacing(plan: &Planned) -> &'static str {
     }
 }
 
-fn write(planned: &[Planned]) -> ExitCode {
+fn write(planned: &[Planned], world: &Path) -> ExitCode {
     let mut staged = StagedSet::default();
+    let mut made = Vec::new();
     for plan in planned {
-        if let Some(folder) = plan.target.parent()
-            && let Err(err) = fs::create_dir_all(folder)
+        let failure = match plan
+            .target
+            .parent()
+            .map(|folder| make_folders(folder, &mut made))
         {
+            Some(Err((folder, err))) => Some(format!("creating `{}`: {err}", folder.display())),
+            _ => staged
+                .stage(&plan.target, Kind::Structure, |file| {
+                    file.write_all(&plan.bytes)
+                })
+                .err()
+                .map(|err| format!("writing `{}`: {err}", plan.target.display())),
+        };
+        if let Some(failure) = failure {
             staged.discard();
-            eprintln!("error: creating `{}`: {err}", folder.display());
-            return ExitCode::from(REFUSED);
-        }
-        if let Err(err) = staged.stage(&plan.target, Kind::Structure, |file| {
-            file.write_all(&plan.bytes)
-        }) {
-            staged.discard();
-            eprintln!("error: writing `{}`: {err}", plan.target.display());
+            remove_folders(&made);
+            eprintln!("error[E_WORLD_UNWRITABLE]: {failure}");
+            report_unwritable_fix(world);
             return ExitCode::from(REFUSED);
         }
     }
@@ -384,10 +478,45 @@ fn write(planned: &[Planned]) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(failure) => {
-            eprintln!("error: {failure}");
+            remove_folders(&made);
+            eprintln!("error[E_WORLD_UNWRITABLE]: {failure}");
+            report_unwritable_fix(world);
             ExitCode::from(REFUSED)
         }
     }
+}
+
+/// Makes `folder` and the folders above it that are missing, adding each made to `made`, the
+/// outermost first.
+///
+/// # Errors
+///
+/// The folder that could not be made, with why.
+fn make_folders(folder: &Path, made: &mut Vec<PathBuf>) -> Result<(), (PathBuf, io::Error)> {
+    let missing: Vec<&Path> = folder
+        .ancestors()
+        .take_while(|ancestor| fs::symlink_metadata(ancestor).is_err())
+        .collect();
+    for folder in missing.into_iter().rev() {
+        fs::create_dir(folder).map_err(|err| (folder.to_path_buf(), err))?;
+        made.push(folder.to_path_buf());
+    }
+    Ok(())
+}
+
+/// Removes the folders a failed run made, innermost first, leaving any that is not empty.
+fn remove_folders(made: &[PathBuf]) {
+    for folder in made.iter().rev() {
+        let _ = fs::remove_dir(folder);
+    }
+}
+
+/// The fix of a write into the world that failed.
+fn report_unwritable_fix(world: &Path) {
+    eprintln!(
+        "  fix: make `{}` writable, with room for the files, then install again",
+        world.display()
+    );
 }
 
 fn report_world(world: &Path, err: &LevelDatError) {
@@ -427,12 +556,16 @@ fn report_world(world: &Path, err: &LevelDatError) {
             eprintln!("  note: a world last saved before 1.9 records none");
             eprintln!("  fix: open the world in a current release and save it, then install again");
         }
-        _ => {
+        LevelDatError::Io(_) => {
             eprintln!("error[E_WORLD_UNREADABLE]: `{shown}` {err}");
             eprintln!(
                 "  fix: make `{}` readable, then install again",
                 world.join(LEVEL_DAT).display(),
             );
+        }
+        _ => {
+            eprintln!("error[E_WORLD_UNREADABLE]: `{shown}` {err}");
+            eprintln!("  fix: name the folder of a world a Java release saved");
         }
     }
 }
@@ -510,7 +643,8 @@ fn report_structure_file(
     eprintln!("error[E_STRUCTURE_UNREADABLE]: `{shown}` {err}");
     eprintln!(
         "  note: a Java structure file is gzip NBT whose root holds `size`, `blocks`, a `palette` \
-         and an integer `DataVersion`, as `cairn compile --edition java` writes it"
+         or `palettes` list and an integer `DataVersion`, as `cairn compile --edition java` \
+         writes it"
     );
     eprintln!("  fix: name a structure file `cairn compile --edition java` wrote");
 }
@@ -527,8 +661,7 @@ fn report_invalid_namespace(namespace: &str, err: &StructureIdError) {
     }
 }
 
-fn report_invalid_name(path: &Path, args: &InstallArgs, err: &StructureIdError) {
-    let name = name_for(path, args.name.as_deref());
+fn report_invalid_name(path: &Path, name: &str, args: &InstallArgs, err: &StructureIdError) {
     eprintln!(
         "error[E_INVALID_STRUCTURE_ID]: `{}` would install as `{}:{name}`, which the game does \
          not load: {err}",
@@ -536,7 +669,26 @@ fn report_invalid_name(path: &Path, args: &InstallArgs, err: &StructureIdError) 
         args.namespace,
     );
     eprintln!("  note: {}", rule_broken(err));
-    let Some(fixed) = suggested(IdPart::Name, &name) else {
+    report_name_fix(suggested(IdPart::Name, name), args);
+}
+
+fn report_nbt_name(path: &Path, name: &str, args: &InstallArgs) {
+    eprintln!(
+        "error[E_INVALID_STRUCTURE_ID]: `{}` would install as `{}:{name}`, whose name ends in \
+         `.nbt`",
+        path.display(),
+        args.namespace,
+    );
+    eprintln!(
+        "  note: the game adds `.nbt` to a name itself, so the file would be `{name}.nbt` and \
+         `/place template` would name it with the `.nbt` kept"
+    );
+    report_name_fix(suggested(IdPart::Name, name), args);
+}
+
+/// The fix of a name refused: `fixed`, the name the file could install under instead.
+fn report_name_fix(fixed: Option<String>, args: &InstallArgs) {
+    let Some(fixed) = fixed else {
         eprintln!("  fix: install it under another name with `--name`");
         return;
     };
@@ -564,12 +716,13 @@ fn rule_broken(err: &StructureIdError) -> &'static str {
             "each folder and the file name in a name holds at least one character"
         }
         StructureIdError::TrailingDot { .. } => {
-            "the game refuses a folder or file name that ends in `.`, as `.` and `..` do"
+            "the game refuses a folder name that ends in `.`, as `.` and `..` do"
         }
-        _ => {
+        StructureIdError::DeviceName { .. } => {
             "the game refuses a folder or file name Windows reserves for a device, such as `con` \
              or `com1`, with or without an extension"
         }
+        _ => "the game loads an id only when its namespace and name keep to its path rules",
     }
 }
 
@@ -579,11 +732,10 @@ fn suggested(part: IdPart, value: &str) -> Option<String> {
         .chars()
         .map(|ch| {
             let ch = ch.to_ascii_lowercase();
-            let kept = matches!(ch, 'a'..='z' | '0'..='9' | '_' | '-' | '.')
-                || (ch == '/' && part == IdPart::Name);
-            if kept { ch } else { '_' }
+            if part.allows(ch) { ch } else { '_' }
         })
         .collect();
+    let mapped = mapped.strip_suffix(".nbt").unwrap_or(&mapped);
     let mut segments: Vec<String> = mapped
         .split('/')
         .map(|segment| segment.trim_end_matches('.'))
@@ -592,12 +744,8 @@ fn suggested(part: IdPart, value: &str) -> Option<String> {
         .collect();
     for _ in 0..=segments.len() {
         let joined = segments.join("/");
-        let checked = match part {
-            IdPart::Namespace => StructureId::new(&joined, "structure"),
-            IdPart::Name => StructureId::new(DEFAULT_NAMESPACE, &joined),
-        };
-        match checked {
-            Ok(_) => return Some(joined),
+        match part.check(&joined) {
+            Ok(()) => return Some(joined),
             Err(StructureIdError::DeviceName { segment, .. }) => {
                 let at = segments.iter().position(|s| *s == segment)?;
                 let stem_end = segment.find('.').unwrap_or(segment.len());
@@ -607,4 +755,36 @@ fn suggested(part: IdPart, value: &str) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_write_removes_the_folders_it_made() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let world = dir.path().join("world");
+        fs::create_dir(&world).expect("mkdir");
+        fs::write(dir.path().join("file"), b"").expect("write");
+        let namespace = Namespace::new(DEFAULT_NAMESPACE).expect("valid");
+        let plan = |name: &str, target: PathBuf| Planned {
+            id: StructureId::new(&namespace, name).expect("valid"),
+            bytes: b"structure".to_vec(),
+            target,
+            replacing: false,
+        };
+        let made = world.join("generated").join("minecraft").join("structures");
+        let planned = [
+            plan("a", made.join("a.nbt")),
+            plan("b", dir.path().join("file").join("b.nbt")),
+        ];
+        assert_eq!(write(&planned, &world), ExitCode::from(REFUSED));
+        assert_eq!(
+            fs::read_dir(&world).expect("read").count(),
+            0,
+            "{:?}",
+            fs::read_dir(&world).expect("read").collect::<Vec<_>>()
+        );
+    }
 }

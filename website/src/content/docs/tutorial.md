@@ -45,7 +45,8 @@ cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 cairn install examples/cottage.nbt --world ~/.minecraft/saves/MyWorld
 ```
 
-A world saved by another release refuses the file and names the `--target` it needs
+Into a world saved by another release, `cairn install` refuses the file and names the `--target`
+to recompile at, where one fits
 ([Versioning and Editions](/spec/versioning-editions/#cross-version-application)).
 
 **The source never picks the Minecraft version.** It lives in `--target`, and `--edition` is

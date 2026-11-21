@@ -57,7 +57,7 @@ cairn compile cottage.crn --edition java --target 1.21.4
 cairn install cottage.nbt --world ~/.minecraft/saves/MyWorld
 ```
 
-別のリリースで保存したワールドは構造を拒否し、再コンパイルする `--target` を示します。ゲームは自分より新しい構造を読めず、古い構造は欠落を伴うアップグレードでしか読めないので、古い構造は `--allow-cross-version` を付けたときだけ入れます。
+別のリリースで保存したワールドには、`cairn install` は構造を入れず、当てはまるターゲットがあれば再コンパイルに使う `--target` を示します。ゲームは自分より新しい構造を読めず、古い構造は欠落を伴うアップグレードでしか読めないので、古い構造は `--allow-cross-version` を付けたときだけ入れます。
 
 同じファイルを Bedrock 向けにもビルドできます。
 

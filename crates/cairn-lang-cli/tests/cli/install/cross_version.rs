@@ -68,7 +68,7 @@ fn the_flag_installs_an_older_structure_byte_for_byte_keeping_its_stamp() {
     let structure = saves.compiled("java", "1.20.4");
     let world = saves.java_world("New World", 3953, "1.21");
     let run = saves.install(&[&structure, "--world", &world, "--allow-cross-version"]);
-    let installed = structure_at(&world, "minecraft", &["cottage.nbt"]);
+    let installed = structure_at(&world, "structures", "minecraft", &["cottage.nbt"]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
     assert_eq!(
         run.stderr,
@@ -102,7 +102,7 @@ fn a_structure_of_the_worlds_version_installs_without_a_word() {
     let structure = saves.compiled("java", "1.20.4");
     let world = saves.java_world("New World", 3700, "1.20.4");
     let run = saves.install(&[&structure, "--world", &world]);
-    let installed = structure_at(&world, "minecraft", &["cottage.nbt"]);
+    let installed = structure_at(&world, "structures", "minecraft", &["cottage.nbt"]);
     assert_eq!(run.code, Some(0), "{}", run.stderr);
     assert_eq!(run.stderr, "");
     assert_eq!(
@@ -120,6 +120,7 @@ fn a_world_between_two_targets_is_recompiled_for_at_the_older() {
     let world = saves.java_world("Patched", 3955, "1.21.1");
     let run = saves.install(&[&newer, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         [
@@ -133,6 +134,7 @@ fn a_world_between_two_targets_is_recompiled_for_at_the_older() {
     );
     let run = saves.install(&[&older, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         [
@@ -154,6 +156,7 @@ fn a_world_older_than_every_target_is_opened_in_a_newer_release() {
     let world = saves.java_world("Ancient", 3337, "1.19.4");
     let run = saves.install(&[&structure, "--world", &world, "--allow-cross-version"]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         [
@@ -174,6 +177,7 @@ fn a_world_without_a_release_name_is_named_by_its_data_version() {
     let world = saves.world_with("Unnamed", &java_level_dat(Some(3953), None));
     let run = saves.install(&[&structure, "--world", &world]);
     assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
     assert_eq!(
         run.stderr,
         [
@@ -184,4 +188,57 @@ fn a_world_without_a_release_name_is_named_by_its_data_version() {
         ]
         .concat()
     );
+}
+
+#[test]
+fn a_world_newer_than_every_target_takes_an_older_structure_with_the_flag_alone() {
+    let saves = Saves::new();
+    let structure = saves.compiled("java", "26.3");
+    let world = saves.java_world("Newest", 5100, "26.4");
+    let refusal = "`26.3/cottage.nbt` is built for DataVersion 5023 (26.3), older than the world's \
+                   5100 (26.4)";
+    let note = "  note: it keeps DataVersion 5023, so the game upgrades it through DataFixerUpper \
+                as it loads, which can lose items, signs, paintings and block entities\n";
+    let run = saves.install(&[&structure, "--world", &world]);
+    assert_eq!(run.code, Some(1));
+    assert_eq!(run.stdout, "");
+    assert_eq!(
+        run.stderr,
+        format!(
+            "error[E_CROSS_VERSION_UPGRADE]: {refusal}\n{note}  fix: pass \
+             `--allow-cross-version`; no target Cairn builds for is closer to the world\n"
+        )
+    );
+    let run = saves.install(&[&structure, "--world", &world, "--allow-cross-version"]);
+    let installed = structure_at(&world, "structure", "minecraft", &["cottage.nbt"]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        run.stderr,
+        format!(
+            "warning[W_CROSS_VERSION_UPGRADE]: {refusal}, as `--allow-cross-version` allows\n{note}"
+        )
+    );
+    assert_eq!(
+        run.stdout,
+        format!("installed minecraft:cottage at {}\n", installed.display())
+    );
+    assert_eq!(saves.read(&installed), saves.read(Path::new(&structure)));
+}
+
+#[test]
+fn a_world_saved_since_26_1_snapshot_6_takes_it_in_its_structure_folder() {
+    let saves = Saves::new();
+    let structure = saves.compiled("java", "26.3");
+    let world = saves.java_world("Current", 5023, "26.3");
+    let run = saves.install(&[&structure, "--world", &world]);
+    let installed = structure_at(&world, "structure", "minecraft", &["cottage.nbt"]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(run.stderr, "");
+    assert_eq!(
+        run.stdout,
+        format!("installed minecraft:cottage at {}\n", installed.display())
+    );
+    assert_eq!(saves.read(&installed), saves.read(Path::new(&structure)));
+    let older = structure_at(&world, "structures", "minecraft", &["cottage.nbt"]);
+    assert_eq!(saves.read(&older), None);
 }

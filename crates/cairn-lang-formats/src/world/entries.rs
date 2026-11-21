@@ -1,5 +1,5 @@
-//! The entries of an NBT compound that `cairn install` looks at, read off a pull reader so that
-//! nothing else in the file is held.
+//! The entries of an NBT compound, read off a pull reader so that nothing else in the file is
+//! held.
 
 use std::io::Read;
 
@@ -29,7 +29,7 @@ pub(super) struct Entry {
     pub(super) body: Body,
 }
 
-/// An entry's tag, a compound or list being opened rather than read.
+/// An entry's tag, a compound's or list's items left to the reader's next events.
 pub(super) enum Body {
     /// A compound whose entries are the reader's next events.
     Compound,

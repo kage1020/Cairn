@@ -1,12 +1,12 @@
 //! The `DataVersion` a structure file is stamped with, and the files that carry none.
 
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 
 use cairn_lang_core::Edition;
 use cairn_lang_formats::bedrock_structure::{build_mcstructure_tag, write_mcstructure};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{build_structure_tag, write_compound_gzip};
-use cairn_lang_formats::world::{StructureFileError, read_structure_data_version};
+use cairn_lang_formats::world::{StructureFileError, StructureList, read_structure_data_version};
 use cairn_lang_nbt::NbtReadError;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
@@ -64,15 +64,26 @@ fn a_structure_without_an_integer_data_version() {
 fn gzip_nbt_that_is_not_a_structure_names_the_lists_it_lacks() {
     let err = read_structure_data_version(&java_level_dat(saved_data(3953, "1.21")))
         .expect_err("refused");
-    assert!(
-        matches!(&err, StructureFileError::NotAStructure { missing } if missing == &["`size`", "`blocks`", "`palette`"]),
-        "{err:?}"
+    let StructureFileError::NotAStructure { missing } = &err else {
+        panic!("{err:?}");
+    };
+    assert_eq!(
+        missing.lists(),
+        [
+            StructureList::Size,
+            StructureList::Blocks,
+            StructureList::Palette
+        ]
+    );
+    assert_eq!(
+        err.to_string(),
+        "is not a structure file: its root has no `size`, `blocks`, `palette` or `palettes`"
     );
     let mut root = cottage("1.21.4");
     root.insert("blocks", Tag::Int(0));
     let err = read_structure_data_version(&gzip(&root)).expect_err("refused");
     assert!(
-        matches!(&err, StructureFileError::NotAStructure { missing } if missing == &["`blocks`"]),
+        matches!(&err, StructureFileError::NotAStructure { missing } if missing.lists() == [StructureList::Blocks]),
         "{err:?}"
     );
 }
@@ -113,6 +124,41 @@ fn gzip_that_does_not_decode() {
 }
 
 #[test]
+fn gzip_whose_trailer_does_not_match_its_body() {
+    let bytes = gzip(&cottage("1.21.4"));
+    let crc_at = bytes.len() - 8;
+    let mut wrong_checksum = bytes.clone();
+    wrong_checksum[crc_at] ^= 1;
+    let mut wrong_length = bytes.clone();
+    wrong_length[crc_at + 4] ^= 1;
+    for (corrupted, kind) in [
+        (&wrong_checksum[..], ErrorKind::InvalidInput),
+        (&wrong_length[..], ErrorKind::InvalidInput),
+        (&bytes[..crc_at], ErrorKind::UnexpectedEof),
+    ] {
+        let err = read_structure_data_version(corrupted).expect_err("refused");
+        assert!(
+            matches!(&err, StructureFileError::Nbt(NbtReadError::Io(io)) if io.kind() == kind),
+            "{kind:?}: {err:?}"
+        );
+    }
+}
+
+#[test]
+fn bytes_after_the_root_are_refused() {
+    let mut twice = gzip(&cottage("1.21.4"));
+    twice.extend(gzip(&cottage("1.21.4")));
+    let err = read_structure_data_version(&twice).expect_err("refused");
+    assert!(
+        matches!(
+            err,
+            StructureFileError::Nbt(NbtReadError::TrailingBytes { .. })
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn a_key_written_twice_is_read_as_its_last_entry() {
     let root = cottage("1.21.4");
     let mut entries: Vec<(&str, Tag)> = root
@@ -128,7 +174,7 @@ fn a_key_written_twice_is_read_as_its_last_entry() {
     entries.push(("blocks", Tag::Int(0)));
     let err = read_structure_data_version(&java_gzip_entries(&entries)).expect_err("refused");
     assert!(
-        matches!(&err, StructureFileError::NotAStructure { missing } if *missing == ["`blocks`"]),
+        matches!(&err, StructureFileError::NotAStructure { missing } if missing.lists() == [StructureList::Blocks]),
         "{err:?}"
     );
 }

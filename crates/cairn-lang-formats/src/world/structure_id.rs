@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use super::level_dat::WorldVersion;
+
 /// The namespace the game reads an id without one in.
 pub const DEFAULT_NAMESPACE: &str = "minecraft";
 
@@ -15,10 +17,18 @@ const RESERVED_STEMS: [&str; 5] = ["con", "prn", "aux", "nul", "com"];
 /// Stems the game refuses followed by one digit from `1` to `9`.
 const RESERVED_NUMBERED_STEMS: [&str; 2] = ["com", "lpt"];
 
+/// The first `DataVersion`, 26.1 Snapshot 6's, whose world loads a generated structure from
+/// `structure/`; an older world loads it from `structures/`.
+const STRUCTURE_FOLDER_FROM: i32 = 4774;
+
+/// A namespace the game loads a structure id in.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Namespace(String);
+
 /// A structure id, `namespace:name`, whose `name` may hold `/`-separated folders.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StructureId {
-    namespace: String,
+    namespace: Namespace,
     name: String,
 }
 
@@ -29,6 +39,55 @@ pub enum IdPart {
     Namespace,
     /// After the `:`.
     Name,
+}
+
+impl IdPart {
+    /// Whether the game reads `ch` in this part.
+    #[must_use]
+    pub fn allows(self, ch: char) -> bool {
+        matches!(ch, 'a'..='z' | '0'..='9' | '_' | '-' | '.') || (ch == '/' && self == Self::Name)
+    }
+
+    /// Checks `value` against the rules the game holds this part to.
+    ///
+    /// # Errors
+    ///
+    /// [`StructureIdError`], naming the first rule `value` breaks.
+    pub fn check(self, value: &str) -> Result<(), StructureIdError> {
+        if value.is_empty() {
+            return Err(StructureIdError::Empty { part: self });
+        }
+        if let Some(ch) = value.chars().find(|&ch| !self.allows(ch)) {
+            return Err(StructureIdError::Character {
+                part: self,
+                value: value.to_owned(),
+                ch,
+            });
+        }
+        let segments: Vec<&str> = value.split('/').collect();
+        for (at, segment) in segments.iter().enumerate() {
+            if segment.is_empty() {
+                return Err(StructureIdError::EmptySegment {
+                    name: value.to_owned(),
+                });
+            }
+            // A name's last segment gets `.nbt` after it, so only a folder's name ends in `.`.
+            let folder = self == Self::Namespace || at + 1 < segments.len();
+            if folder && segment.ends_with('.') {
+                return Err(StructureIdError::TrailingDot {
+                    part: self,
+                    segment: (*segment).to_owned(),
+                });
+            }
+            if is_reserved(segment) {
+                return Err(StructureIdError::DeviceName {
+                    part: self,
+                    segment: (*segment).to_owned(),
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl fmt::Display for IdPart {
@@ -66,8 +125,8 @@ pub enum StructureIdError {
         /// The name as given.
         name: String,
     },
-    /// A segment ending in `.`, which `.` and `..` both do.
-    #[error("`{segment}` in the {part} ends in `.`")]
+    /// A folder's name ending in `.`, which `.` and `..` both do.
+    #[error("the folder `{segment}` in the {part} ends in `.`")]
     TrailingDot {
         /// The part holding it.
         part: IdPart,
@@ -98,24 +157,47 @@ impl StructureIdError {
     }
 }
 
+impl Namespace {
+    /// The namespace `value`.
+    ///
+    /// # Errors
+    ///
+    /// [`StructureIdError`], naming the first rule `value` breaks.
+    pub fn new(value: &str) -> Result<Self, StructureIdError> {
+        IdPart::Namespace.check(value)?;
+        Ok(Self(value.to_owned()))
+    }
+
+    /// The namespace as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Namespace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 impl StructureId {
     /// The id `namespace:name`.
     ///
     /// # Errors
     ///
-    /// [`StructureIdError`], naming the first rule `namespace` or `name` breaks.
-    pub fn new(namespace: &str, name: &str) -> Result<Self, StructureIdError> {
-        check_part(IdPart::Namespace, namespace)?;
-        check_part(IdPart::Name, name)?;
+    /// [`StructureIdError`], naming the first rule `name` breaks.
+    pub fn new(namespace: &Namespace, name: &str) -> Result<Self, StructureIdError> {
+        IdPart::Name.check(name)?;
         Ok(Self {
-            namespace: namespace.to_owned(),
+            namespace: namespace.clone(),
             name: name.to_owned(),
         })
     }
 
     /// The part before the `:`.
     #[must_use]
-    pub fn namespace(&self) -> &str {
+    pub fn namespace(&self) -> &Namespace {
         &self.namespace
     }
 
@@ -125,14 +207,20 @@ impl StructureId {
         &self.name
     }
 
-    /// The file under the Java world folder `world` the game loads this id from:
-    /// `generated/<namespace>/structures/<name>.nbt`.
+    /// The file under the Java world folder `world`, saved at `version`, that the game loads this
+    /// id from: `generated/<namespace>/structure/<name>.nbt`, in `structures/` before 26.1
+    /// Snapshot 6.
     #[must_use]
-    pub fn file_in(&self, world: &Path) -> PathBuf {
+    pub fn file_in(&self, world: &Path, version: &WorldVersion) -> PathBuf {
+        let folder = if version.data_version >= STRUCTURE_FOLDER_FROM {
+            "structure"
+        } else {
+            "structures"
+        };
         let mut path = world
             .join("generated")
-            .join(&self.namespace)
-            .join("structures");
+            .join(self.namespace.as_str())
+            .join(folder);
         path.extend(self.name.split('/'));
         path.as_mut_os_string().push(".nbt");
         path
@@ -143,37 +231,6 @@ impl fmt::Display for StructureId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.namespace, self.name)
     }
-}
-
-fn check_part(part: IdPart, value: &str) -> Result<(), StructureIdError> {
-    if value.is_empty() {
-        return Err(StructureIdError::Empty { part });
-    }
-    let allowed = |ch: char| {
-        matches!(ch, 'a'..='z' | '0'..='9' | '_' | '-' | '.') || (ch == '/' && part == IdPart::Name)
-    };
-    if let Some(ch) = value.chars().find(|&ch| !allowed(ch)) {
-        return Err(StructureIdError::Character {
-            part,
-            value: value.to_owned(),
-            ch,
-        });
-    }
-    for segment in value.split('/') {
-        if segment.is_empty() {
-            return Err(StructureIdError::EmptySegment {
-                name: value.to_owned(),
-            });
-        }
-        let segment = segment.to_owned();
-        if segment.ends_with('.') {
-            return Err(StructureIdError::TrailingDot { part, segment });
-        }
-        if is_reserved(&segment) {
-            return Err(StructureIdError::DeviceName { part, segment });
-        }
-    }
-    Ok(())
 }
 
 /// Whether the game refuses `segment`, whose stem runs to its first `.`.

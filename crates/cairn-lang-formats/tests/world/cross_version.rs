@@ -2,13 +2,17 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_formats::registry::builtin_pack;
-use cairn_lang_formats::world::{CrossVersion, recompile_target};
+use cairn_lang_formats::world::{CrossVersion, WorldVersion, recompile_target};
 
 #[test]
 fn a_structure_stands_to_its_world_by_data_version() {
-    assert_eq!(CrossVersion::of(3953, 3953), CrossVersion::Same);
-    assert_eq!(CrossVersion::of(3700, 3953), CrossVersion::Upgrade);
-    assert_eq!(CrossVersion::of(4189, 3953), CrossVersion::Downgrade);
+    let world = WorldVersion {
+        data_version: 3953,
+        name: Some("1.21".to_owned()),
+    };
+    assert_eq!(world.cross_version(3953), CrossVersion::Same);
+    assert_eq!(world.cross_version(3700), CrossVersion::Upgrade);
+    assert_eq!(world.cross_version(4189), CrossVersion::Downgrade);
 }
 
 #[test]

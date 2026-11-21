@@ -245,7 +245,7 @@ fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
     for path in committed {
         if let Err(err) = fs::remove_file(path) {
             eprintln!(
-                "error: `{}` was written by a build that then failed, and could not be \
+                "error: `{}` was written before a later file failed, and could not be \
                  removed: {err}",
                 path.display(),
             );

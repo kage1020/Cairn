@@ -2,37 +2,88 @@
 
 use std::path::Path;
 
-use cairn_lang_formats::world::{DEFAULT_NAMESPACE, IdPart, StructureId, StructureIdError};
+use cairn_lang_formats::world::{
+    DEFAULT_NAMESPACE, IdPart, Namespace, StructureId, StructureIdError, WorldVersion,
+};
+
+fn id(namespace: &str, name: &str) -> Result<StructureId, StructureIdError> {
+    StructureId::new(&Namespace::new(namespace)?, name)
+}
 
 fn refusal(namespace: &str, name: &str) -> StructureIdError {
-    StructureId::new(namespace, name).expect_err("refused")
+    id(namespace, name).expect_err("refused")
+}
+
+/// A world the game last saved at `data_version`.
+fn saved_at(data_version: i32) -> WorldVersion {
+    WorldVersion {
+        data_version,
+        name: None,
+    }
 }
 
 #[test]
-fn an_id_names_a_file_under_the_worlds_generated_structures() {
-    let id = StructureId::new(DEFAULT_NAMESPACE, "cottage").expect("valid");
-    assert_eq!(id.to_string(), "minecraft:cottage");
+fn an_id_names_a_file_in_the_folder_its_worlds_version_loads_from() {
+    let cottage = id(DEFAULT_NAMESPACE, "cottage").expect("valid");
+    assert_eq!(cottage.to_string(), "minecraft:cottage");
     assert_eq!(
-        id.file_in(Path::new("saves/New World")),
+        cottage.file_in(Path::new("saves/New World"), &saved_at(4774)),
+        Path::new("saves/New World/generated/minecraft/structure/cottage.nbt")
+    );
+    assert_eq!(
+        cottage.file_in(Path::new("saves/New World"), &saved_at(4773)),
         Path::new("saves/New World/generated/minecraft/structures/cottage.nbt")
     );
 }
 
 #[test]
 fn a_name_holding_folders_names_a_nested_file() {
-    let id = StructureId::new("my_pack-2.0", "houses/v1.2/oak_cottage").expect("valid");
-    assert_eq!(id.namespace(), "my_pack-2.0");
-    assert_eq!(id.name(), "houses/v1.2/oak_cottage");
-    assert_eq!(id.to_string(), "my_pack-2.0:houses/v1.2/oak_cottage");
+    let nested = id("my_pack-2.0", "houses/v1.2/oak_cottage").expect("valid");
+    assert_eq!(nested.namespace().as_str(), "my_pack-2.0");
+    assert_eq!(nested.name(), "houses/v1.2/oak_cottage");
+    assert_eq!(nested.to_string(), "my_pack-2.0:houses/v1.2/oak_cottage");
     assert_eq!(
-        id.file_in(Path::new("w")),
-        Path::new("w/generated/my_pack-2.0/structures/houses/v1.2/oak_cottage.nbt")
+        nested.file_in(Path::new("w"), &saved_at(5023)),
+        Path::new("w/generated/my_pack-2.0/structure/houses/v1.2/oak_cottage.nbt")
     );
-    let dotted = StructureId::new("minecraft", "cottage.v2").expect("valid");
+    let dotted = id("minecraft", "cottage.v2").expect("valid");
     assert_eq!(
-        dotted.file_in(Path::new("w")),
+        dotted.file_in(Path::new("w"), &saved_at(4189)),
         Path::new("w/generated/minecraft/structures/cottage.v2.nbt")
     );
+}
+
+#[test]
+fn a_file_name_may_end_in_a_dot_the_game_adds_nbt_after() {
+    let dotted = id("minecraft", "houses/cottage.").expect("valid");
+    assert_eq!(
+        dotted.file_in(Path::new("w"), &saved_at(4189)),
+        Path::new("w/generated/minecraft/structures/houses/cottage..nbt")
+    );
+}
+
+#[test]
+fn the_namespace_and_the_name_are_checked_each_on_its_own() {
+    assert_eq!(
+        IdPart::Namespace.check("My Pack"),
+        Err(StructureIdError::Character {
+            part: IdPart::Namespace,
+            value: "My Pack".to_owned(),
+            ch: 'M',
+        })
+    );
+    assert_eq!(
+        IdPart::Name.check("Cottage"),
+        Err(StructureIdError::Character {
+            part: IdPart::Name,
+            value: "Cottage".to_owned(),
+            ch: 'C',
+        })
+    );
+    assert_eq!(IdPart::Name.check("houses/cottage"), Ok(()));
+    assert!(IdPart::Name.allows('/'));
+    assert!(!IdPart::Namespace.allows('/'));
+    assert!(!IdPart::Name.allows('A'));
 }
 
 #[test]
@@ -83,12 +134,13 @@ fn a_name_with_an_empty_segment() {
 }
 
 #[test]
-fn a_segment_ending_in_a_dot() {
+fn a_folder_ending_in_a_dot() {
     for (namespace, name, part, segment) in [
-        ("minecraft", "..", IdPart::Name, ".."),
+        ("minecraft", "../cottage", IdPart::Name, ".."),
         ("minecraft", "houses/./cottage", IdPart::Name, "."),
-        ("minecraft", "cottage.", IdPart::Name, "cottage."),
+        ("minecraft", "houses./cottage", IdPart::Name, "houses."),
         ("..", "cottage", IdPart::Namespace, ".."),
+        ("pack.", "cottage", IdPart::Namespace, "pack."),
     ] {
         assert_eq!(
             refusal(namespace, name),
@@ -120,6 +172,6 @@ fn a_device_name_with_or_without_an_extension() {
         );
     }
     for name in ["com0", "com10", "console", "lpt", "auxiliary"] {
-        StructureId::new("minecraft", name).expect(name);
+        id("minecraft", name).expect(name);
     }
 }

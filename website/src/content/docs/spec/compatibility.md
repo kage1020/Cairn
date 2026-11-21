@@ -62,8 +62,7 @@ Evolving surfaces:
 - New `cairn` subcommands, and new flags and flag values of `cairn compile`, `cairn check` and
   `cairn info`, during their first three monthly minors after introduction. A new subcommand's
   flags, output and exit codes are Evolving with it, and so are the codes
-  [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such a subcommand raises:
-  `cairn install`, from 2026.12.0, and the codes under [Installing](/spec/lint/#installing).
+  [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such a subcommand raises.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.

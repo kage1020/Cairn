@@ -296,13 +296,14 @@ struct の回路を組み上げるどのコマンドも、これらを報告し�
 | `E_CROSS_VERSION_DOWNGRADE` | 構造ファイルに刻まれた `DataVersion` がワールドのものより新しく、そのワールドのリリースでは読めない。`--allow-cross-version` を付けても変わらない。 |
 | `E_CROSS_VERSION_UPGRADE` | 構造ファイルに刻まれた `DataVersion` がワールドのものより古く、`--allow-cross-version` が付いていない。 |
 | `W_CROSS_VERSION_UPGRADE` | 同じ状況で `--allow-cross-version` が付いている。ファイルは刻印を保ったままインストールされ、ゲームは読み込むときに DataFixerUpper でアップグレードする。 |
-| `E_WORLD_UNREADABLE` | `--world` が `level.dat` のないフォルダを指している。または `level.dat` が読めないか、整数の `Data.DataVersion` を記録していない。 |
+| `E_WORLD_UNREADABLE` | `--world` が `level.dat` のないフォルダを指している。または `level.dat` が読めないか、デコードできないか、整数の `Data.DataVersion` を記録していない。 |
 | `E_INSTALL_EDITION_UNSUPPORTED` | `--world` が Bedrock のワールドを指しているか、構造ファイルが `.mcstructure` である。`cairn install` は Java の構造ファイルを Java のワールドにインストールする。 |
-| `E_STRUCTURE_UNREADABLE` | 構造ファイルが読めない。または、ルートに `size`、`blocks`、`palette`、整数の `DataVersion` を持つ gzip の NBT ではない。 |
-| `E_INVALID_STRUCTURE_ID` | ファイルをインストールする名前空間か名前を、ゲームが読み込めない。`a`–`z`、`0`–`9`、`_`、`-`、`.` (名前ではさらに `/`) 以外の文字、空のフォルダ名、`.` で終わるかデバイス用に予約されたフォルダ名やファイル名がある。 |
-| `E_STRUCTURE_EXISTS` | 構造の ID が指すパスに、ワールドがすでにファイルを持っていて `--replace` が付いていない。またはそこにフォルダがある。 |
+| `E_STRUCTURE_UNREADABLE` | 構造ファイルが読めない。または、ルートに `size`、`blocks`、`palette` か `palettes` のリスト、整数の `DataVersion` を持つ gzip の NBT ではない。 |
+| `E_INVALID_STRUCTURE_ID` | ファイルをインストールする名前空間か名前を、ゲームが読み込めない。空であるか、`a`–`z`、`0`–`9`、`_`、`-`、`.` (名前ではさらに `/`) 以外の文字、空のフォルダ名やファイル名、`.` で終わるフォルダ名、Windows がデバイス用に予約しているフォルダ名やファイル名がある。`.nbt` で終わる名前も、ゲームが `.nbt` を ID に残したまま読み込むので、このコードになる。 |
+| `E_STRUCTURE_EXISTS` | 構造の ID が指すパスにすでにファイルがあり、`--replace` が付いていない。または、`--replace` の有無にかかわらず、そこにフォルダがあるか、インストールが書き込みに使う、パスに `.tmp` か `.bak` を付け足した場所にファイルがある。 |
+| `E_WORLD_UNWRITABLE` | ワールドの中の構造のパスに書き込めない。パスのフォルダが来るべき場所にファイルがあるか、パス上のフォルダを読み書きできない。検査で見つかっても、書き込みで見つかっても同じ。 |
 
-どれもソースの行ではなくファイルやフォルダについての事実なので、スパンを持たず、`install` は `--format json` を受け付けません。実行は、終了する前にすべてのファイルで見つけた拒否をすべて報告し、1 つでも見つけたら何も書き込みません。`W_CROSS_VERSION_UPGRADE` が警告なのは、報告する内容をフラグが求めたからです。フラグのない同じファイルはエラーになります。
+どれもソースの行ではなくファイルやフォルダについての事実なので、スパンを持たず、`install` は `--format json` を受け付けません。`cairn install` は、終了する前にすべてのファイルで見つけた拒否をすべて報告し、1 つでも見つけたら何も書き込みません。`W_CROSS_VERSION_UPGRADE` は、報告する内容を `--allow-cross-version` で求めたものなので警告です。フラグを付けなければ、同じファイルはエラーになります。
 
 ### 意味カテゴリ
 

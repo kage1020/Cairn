@@ -1,7 +1,7 @@
-//! A Java world save, as `cairn install` places a structure file in one
-//! (`spec/versioning-editions` "Cross-version application"): the version its `level.dat` records,
-//! the `DataVersion` a structure file is stamped with, the structure id a file is installed under
-//! and the file in the world that id names, and how the two versions stand.
+//! A Java world save, as a structure file is placed in one (`spec/versioning-editions`
+//! "Cross-version application"): the version its `level.dat` records, the `DataVersion` a
+//! structure file is stamped with, the structure id a file is placed under and the file in the
+//! world that id names, and how the two versions stand.
 
 mod entries;
 mod level_dat;
@@ -9,8 +9,10 @@ mod structure_file;
 mod structure_id;
 
 pub use level_dat::{LEVEL_DAT, LevelDatError, WorldVersion, read_level_dat, worlds_in};
-pub use structure_file::{StructureFileError, read_structure_data_version};
-pub use structure_id::{DEFAULT_NAMESPACE, IdPart, StructureId, StructureIdError};
+pub use structure_file::{
+    MissingLists, StructureFileError, StructureList, read_structure_data_version,
+};
+pub use structure_id::{DEFAULT_NAMESPACE, IdPart, Namespace, StructureId, StructureIdError};
 
 use crate::registry::{DataVersionEntry, RegistryPack};
 
@@ -25,14 +27,14 @@ pub enum CrossVersion {
     Downgrade,
 }
 
-impl CrossVersion {
-    /// How a structure stamped `structure` stands to a world saved at `world`.
+impl WorldVersion {
+    /// How a structure file stamped `stamp` stands to this world.
     #[must_use]
-    pub fn of(structure: i32, world: i32) -> Self {
-        match structure.cmp(&world) {
-            std::cmp::Ordering::Equal => Self::Same,
-            std::cmp::Ordering::Less => Self::Upgrade,
-            std::cmp::Ordering::Greater => Self::Downgrade,
+    pub fn cross_version(&self, stamp: i32) -> CrossVersion {
+        match stamp.cmp(&self.data_version) {
+            std::cmp::Ordering::Equal => CrossVersion::Same,
+            std::cmp::Ordering::Less => CrossVersion::Upgrade,
+            std::cmp::Ordering::Greater => CrossVersion::Downgrade,
         }
     }
 }

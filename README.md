@@ -57,7 +57,7 @@ Put the structure into a Java world saved by 1.21.4, and `/place template minecr
 cairn install cottage.nbt --world ~/.minecraft/saves/MyWorld
 ```
 
-A world saved by another release refuses it and names the `--target` to recompile at: the game cannot read a structure newer than itself, and upgrades an older one only with losses, so an older one goes in only with `--allow-cross-version`.
+Into a world saved by another release, `cairn install` refuses the file and names the `--target` to recompile at, where one fits: the game cannot read a structure newer than itself, and upgrades an older one only with losses, so an older one goes in only with `--allow-cross-version`.
 
 The same file builds for Bedrock:
 

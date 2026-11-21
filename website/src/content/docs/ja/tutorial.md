@@ -36,13 +36,13 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
-`cairn install` は、Java のビルドを 1.21.4 で保存したワールドに入れます。そこで `/place template minecraft:cottage` を実行すると建ちます。
+`cairn install` で、Java のビルドを 1.21.4 で保存したワールドに入れます。そのワールドで `/place template minecraft:cottage` を実行すると建ちます。
 
 ```sh
 cairn install examples/cottage.nbt --world ~/.minecraft/saves/MyWorld
 ```
 
-別のリリースで保存したワールドはファイルを拒否し、必要な `--target` を示します ([バージョンとエディション](/ja/spec/versioning-editions/#バージョンをまたいだ適用))。
+別のリリースで保存したワールドには、`cairn install` はファイルを入れず、当てはまるターゲットがあれば再コンパイルに使う `--target` を示します ([バージョンとエディション](/ja/spec/versioning-editions/#バージョンをまたいだ適用))。
 
 **Minecraft のバージョンはソースでは決めません。** バージョンは `--target` で指定し、`--edition` も必ず一緒に指定します。ソースに書けるのは、ターゲットが満たすべき下限を示す `@requires`、作者が想定しているバージョンをヒントとして示す `@intended_targets`、このファイルが対象とする言語バージョンを示す `@cairn` です。
 

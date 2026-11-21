@@ -3,6 +3,7 @@
 
 mod cross_version;
 mod files;
+mod ids;
 mod world;
 
 use std::fs;
@@ -96,13 +97,14 @@ impl Saves {
     }
 }
 
-/// The file `world` holds a structure id's file at, `generated/<namespace>/structures/<parts>`,
-/// joined as the platform joins paths.
-pub fn structure_at(world: &str, namespace: &str, parts: &[&str]) -> PathBuf {
+/// The file `world` holds a structure id's file at, `generated/<namespace>/<folder>/<parts>`,
+/// joined as the platform joins paths: `folder` is `structure`, or `structures` in a world saved
+/// before 26.1 Snapshot 6.
+pub fn structure_at(world: &str, folder: &str, namespace: &str, parts: &[&str]) -> PathBuf {
     let mut path = Path::new(world)
         .join("generated")
         .join(namespace)
-        .join("structures");
+        .join(folder);
     path.extend(parts);
     path
 }

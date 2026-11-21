@@ -1,9 +1,12 @@
 //! A world folder's `level.dat`: the Java version it records, and each way it fails to be a Java
 //! world's.
 
+use std::io::ErrorKind;
+
 use cairn_lang_formats::world::{
     LEVEL_DAT, LevelDatError, WorldVersion, read_level_dat, worlds_in,
 };
+use cairn_lang_nbt::NbtReadError;
 use cairn_lang_nbt::tag::{Compound, Tag};
 use tempfile::TempDir;
 
@@ -123,6 +126,25 @@ fn gzip_that_does_not_decode() {
 }
 
 #[test]
+fn gzip_whose_trailer_does_not_match_its_body() {
+    let bytes = java_level_dat(saved_data(3953, "1.21"));
+    let mut wrong_checksum = bytes.clone();
+    let crc_at = bytes.len() - 8;
+    wrong_checksum[crc_at] ^= 1;
+    let err = read(&wrong_checksum).expect_err("refused");
+    assert!(
+        matches!(&err, LevelDatError::Nbt(NbtReadError::Io(io)) if io.kind() == ErrorKind::InvalidInput),
+        "{err:?}"
+    );
+    let without_trailer = &bytes[..crc_at];
+    let err = read(without_trailer).expect_err("refused");
+    assert!(
+        matches!(&err, LevelDatError::Nbt(NbtReadError::Io(io)) if io.kind() == ErrorKind::UnexpectedEof),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn a_bedrock_level_dat_names_the_release_that_last_opened_it() {
     let err = read(&bedrock_level_dat(&bedrock_root([1, 21, 60, 2, 0]))).expect_err("refused");
     assert!(
@@ -136,6 +158,22 @@ fn a_bedrock_level_dat_without_a_release() {
     let mut root = Compound::new();
     root.insert("LevelName", Tag::String("Bedrock level".to_owned()));
     let err = read(&bedrock_level_dat(&root)).expect_err("refused");
+    assert!(
+        matches!(
+            err,
+            LevelDatError::Bedrock {
+                last_opened_with: None
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_bedrock_level_dat_whose_nbt_does_not_decode() {
+    let mut bytes = bedrock_level_dat(&bedrock_root([1, 21, 60, 2, 0]));
+    bytes[8] = 0xff;
+    let err = read(&bytes).expect_err("refused");
     assert!(
         matches!(
             err,

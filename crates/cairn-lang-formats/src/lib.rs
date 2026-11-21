@@ -53,7 +53,7 @@ pub use schem::{
 };
 pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};
 pub use world::{
-    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, StructureFileError,
-    StructureId, StructureIdError, WorldVersion, read_level_dat, read_structure_data_version,
-    recompile_target, worlds_in,
+    CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, MissingLists, Namespace,
+    StructureFileError, StructureId, StructureIdError, StructureList, WorldVersion, read_level_dat,
+    read_structure_data_version, recompile_target, worlds_in,
 };
