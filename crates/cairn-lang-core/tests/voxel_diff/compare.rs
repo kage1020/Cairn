@@ -2,7 +2,7 @@ use cairn_lang_core::block_array::BlockState;
 use cairn_lang_core::voxel_diff::{Counts, compare};
 
 use crate::common::{only_structure, read_example, solid_cells};
-use crate::{THEME, build, hut, report, unit_edited, unit_of, units};
+use crate::{THEME, build, hut, region_lines, report, unit_edited, unit_of, units};
 
 /// Counts of `blocks` cells that agree in every way, `residual` of them built by raw members.
 fn agreeing(blocks: u64, residual: u64) -> Counts {
@@ -195,5 +195,37 @@ fn bodies_pair_by_name_and_an_unpaired_body_counts_every_cell() {
             states_matched: 9,
             residual: 0,
         }
+    );
+}
+
+#[test]
+fn a_site_spread_far_apart_is_compared_without_filling_the_space_between() {
+    let lift = format!(
+        "{THEME}def hut size=3x3:\n  raw_block mat=minecraft:stone at=1,0,1\n\n\
+         site far:\n  place id=a use=hut theme=t at=origin\n  \
+         place id=b use=hut theme=t east_of=a gap=1000000\n  \
+         place id=c use=hut theme=t north_of=a gap=1000000\n"
+    );
+    let structure = format!("{THEME}struct s size=3x3\n  raw_block mat=minecraft:stone at=1,0,1\n");
+    let report = report(&units(&structure), &lift);
+    assert_eq!(
+        report.counts,
+        Counts {
+            structure_blocks: 1,
+            built_blocks: 3,
+            both_blocks: 1,
+            matched: 1,
+            states_matched: 1,
+            residual: 3,
+        }
+    );
+    assert_eq!(
+        region_lines(&report),
+        [
+            "extra far (1,0,1000004)..(1,0,1000004): 1 cell of minecraft:stone → built by \
+             `raw_block[0]` (line 8)",
+            "extra far (1000004,0,1000004)..(1000004,0,1000004): 1 cell of minecraft:stone → \
+             built by `raw_block[0]` (line 8)",
+        ]
     );
 }

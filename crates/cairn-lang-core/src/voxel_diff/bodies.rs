@@ -18,10 +18,22 @@ const WATERLOGGED: &str = "waterlogged";
 /// A cell, `(x, y, z)`.
 pub(super) type Cell = (u32, u32, u32);
 
+/// A box of cells, its low corner included and its high corner not.
+type Extent = (Cell, Cell);
+
+/// What a comparison keeps of each pair beyond its counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Detail {
+    /// The counts alone.
+    Counts,
+    /// The counts, each cell that differs and the cells each member holds.
+    Cells,
+}
+
 /// What last wrote a cell of a built body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum By {
-    /// Nothing: the cell is air no member wrote.
+    /// Nothing: no member or walkway owns the cell.
     Nothing,
     /// The member at this index of [`BuiltBody::members`].
     Member(usize),
@@ -42,19 +54,56 @@ pub(super) struct Owned {
     pub(super) span: Span,
     /// Whether it is a `raw_block` or a `raw_fill`.
     pub(super) raw: bool,
-    /// Each block id other than air it holds, with its cells in the body.
+    /// The low corner of the box its line declares, in the body.
+    pub(super) declared_low: Cell,
+    /// Each block id other than air it holds, with its cells in the body; empty under
+    /// [`Detail::Counts`].
     pub(super) blocks: Vec<(String, Vec<Cell>)>,
+}
+
+/// One array of a body, laid where it stands.
+#[derive(Debug, Clone)]
+struct LaidPart {
+    /// Where the array's `(0, 0, 0)` cell stands in the body.
+    shift: Cell,
+    dims: Dims,
+    /// Each cell's state as an index into [`BuiltBody::palette`], `0` being air.
+    slots: Vec<u32>,
+    /// What wrote each cell.
+    by: Vec<By>,
+}
+
+impl LaidPart {
+    /// The offset of the body's `cell` into this part's cells, `None` outside it.
+    fn index(&self, (x, y, z): Cell) -> Option<usize> {
+        let (sx, sy, sz) = self.shift;
+        self.dims
+            .index(x.checked_sub(sx)?, y.checked_sub(sy)?, z.checked_sub(sz)?)
+    }
+
+    /// The box the part fills in the body.
+    fn extent(&self) -> Extent {
+        let (sx, sy, sz) = self.shift;
+        let Dims { x, y, z } = self.dims;
+        (
+            self.shift,
+            (
+                sx.saturating_add(x),
+                sy.saturating_add(y),
+                sz.saturating_add(z),
+            ),
+        )
+    }
 }
 
 /// One body of the build: a `struct`'s array, or a `site`'s arrays laid where they stand.
 #[derive(Debug, Clone)]
 pub(super) struct BuiltBody {
     pub(super) name: String,
-    pub(super) dims: Dims,
-    /// The states the cells index, `0` being air.
+    /// The states the parts' cells index, `0` being air.
     palette: Vec<BlockState>,
-    cells: Vec<u32>,
-    by: Vec<By>,
+    /// The arrays, in the order they are laid.
+    parts: Vec<LaidPart>,
     pub(super) members: Vec<Owned>,
 }
 
@@ -62,23 +111,28 @@ impl BuiltBody {
     fn empty(name: String) -> Self {
         Self {
             name,
-            dims: Dims { x: 0, y: 0, z: 0 },
             palette: vec![BlockState::air()],
-            cells: Vec::new(),
-            by: Vec::new(),
+            parts: Vec::new(),
             members: Vec::new(),
         }
     }
 
-    /// The block at `cell` other than air, and what wrote the cell.
-    pub(super) fn at(&self, cell: Cell) -> (Option<&BlockState>, By) {
-        match self.dims.index(cell.0, cell.1, cell.2) {
-            Some(i) => {
-                let slot = self.cells[i] as usize;
-                ((slot != 0).then(|| &self.palette[slot]), self.by[i])
+    /// The state at `cell` as an index into the palette, `0` being air, and what wrote the cell:
+    /// the last part laid with a block there, else the last one owning the cell.
+    fn at(&self, cell: Cell) -> (u32, By) {
+        let mut owner = By::Nothing;
+        for part in self.parts.iter().rev() {
+            let Some(i) = part.index(cell) else {
+                continue;
+            };
+            if part.slots[i] != 0 {
+                return (part.slots[i], part.by[i]);
             }
-            None => (None, By::Nothing),
+            if owner == By::Nothing {
+                owner = part.by[i];
+            }
         }
+        (0, owner)
     }
 }
 
@@ -92,7 +146,7 @@ struct Part<'a> {
 
 /// The bodies `built` holds, in the order their first array is listed: each `struct`, and each
 /// `site` with its placements and walkways laid at their origins.
-pub(super) fn built_bodies(built: &BlockArrayIr) -> Vec<BuiltBody> {
+pub(super) fn built_bodies(built: &BlockArrayIr, detail: Detail) -> Vec<BuiltBody> {
     let mut order: IndexMap<String, Vec<Part<'_>>> = IndexMap::new();
     for (key, array) in &built.structures {
         let at = |(x, y, z): (i32, i32, i32)| (i64::from(x), i64::from(y), i64::from(z));
@@ -115,42 +169,51 @@ pub(super) fn built_bodies(built: &BlockArrayIr) -> Vec<BuiltBody> {
     }
     order
         .into_iter()
-        .map(|(name, parts)| lay(name, &parts, built))
+        .map(|(name, parts)| lay(name, &parts, built, detail))
         .collect()
 }
 
 /// A body of `parts`, shifted so its lowest corner is `(0, 0, 0)`; a later part's block replaces
 /// an earlier one's, and its air replaces nothing.
-fn lay(name: String, parts: &[Part<'_>], built: &BlockArrayIr) -> BuiltBody {
+fn lay(name: String, parts: &[Part<'_>], built: &BlockArrayIr, detail: Detail) -> BuiltBody {
     let low = |axis: fn(&Part<'_>) -> i64| parts.iter().map(axis).min().unwrap_or(0);
     let low = (
         low(|p| p.origin.0),
         low(|p| p.origin.1),
         low(|p| p.origin.2),
     );
-    let high = |axis: fn(&Part<'_>) -> i64| parts.iter().map(axis).max().unwrap_or(0);
-    let extent = |v: i64| u32::try_from(v).unwrap_or(0);
-    let dims = Dims {
-        x: extent(high(|p| p.origin.0 + i64::from(p.array.dims.x)) - low.0),
-        y: extent(high(|p| p.origin.1 + i64::from(p.array.dims.y)) - low.1),
-        z: extent(high(|p| p.origin.2 + i64::from(p.array.dims.z)) - low.2),
-    };
-    let mut body = BuiltBody {
-        cells: vec![0; dims.volume()],
-        by: vec![By::Nothing; dims.volume()],
-        dims,
-        ..BuiltBody::empty(name)
-    };
+    // Origins are `i32`, so one less the lowest fits a `u32`.
+    let offset = |v: i64| u32::try_from(v).expect("an origin less the lowest one fits a u32");
+    let mut body = BuiltBody::empty(name);
     let mut slots: HashMap<String, u32> = HashMap::new();
     for part in parts {
         let shift = (
-            extent(part.origin.0 - low.0),
-            extent(part.origin.1 - low.1),
-            extent(part.origin.2 - low.2),
+            offset(part.origin.0 - low.0),
+            offset(part.origin.1 - low.1),
+            offset(part.origin.2 - low.2),
         );
-        let first = body.members.len();
-        let mut owner = vec![None; part.array.dims.volume()];
+        let mut remap = Vec::with_capacity(part.array.palette.entries.len());
+        for state in &part.array.palette.entries {
+            if is_air(&state.id) {
+                remap.push(0);
+                continue;
+            }
+            let next = u32::try_from(body.palette.len()).unwrap_or(u32::MAX);
+            let slot = *slots.entry(spelled(state)).or_insert_with(|| {
+                body.palette.push(state.clone());
+                next
+            });
+            remap.push(slot);
+        }
+        let dims = part.array.dims;
+        let unowned = if part.walkway {
+            By::Walkway
+        } else {
+            By::Nothing
+        };
+        let mut by = vec![unowned; dims.volume()];
         if !part.walkway {
+            let first = body.members.len();
             for (m, member) in built
                 .members
                 .get(part.key)
@@ -158,58 +221,49 @@ fn lay(name: String, parts: &[Part<'_>], built: &BlockArrayIr) -> BuiltBody {
                 .flatten()
                 .enumerate()
             {
-                body.members
-                    .push(owned(member, shift, &mut owner, part.array.dims, first + m));
+                let owned = owned(member, shift, dims, detail, first + m, &mut by);
+                body.members.push(owned);
             }
         }
-        for (i, slot) in part.array.voxels.iter().enumerate() {
-            let Some((x, y, z)) = part.array.dims.position(i) else {
-                continue;
-            };
-            let at = dims
-                .index(x + shift.0, y + shift.1, z + shift.2)
-                .expect("a part lies inside the body laid around it");
-            let state = &part.array.palette.entries[usize::from(slot.0)];
-            let by = match owner[i] {
-                Some(member) => By::Member(member),
-                None if part.walkway => By::Walkway,
-                None => By::Nothing,
-            };
-            if !is_air(&state.id) {
-                let next = u32::try_from(body.palette.len()).unwrap_or(u32::MAX);
-                let slot = *slots.entry(spelled(state)).or_insert_with(|| {
-                    body.palette.push(state.clone());
-                    next
-                });
-                body.cells[at] = slot;
-                body.by[at] = by;
-            } else if body.cells[at] == 0 && by != By::Nothing {
-                body.by[at] = by;
-            }
-        }
+        let slots = part
+            .array
+            .voxels
+            .iter()
+            .map(|slot| remap[usize::from(slot.0)])
+            .collect();
+        body.parts.push(LaidPart {
+            shift,
+            dims,
+            slots,
+            by,
+        });
     }
     body
 }
 
-/// `member` as a body holds it, its cells moved by `shift`, each of its cells of `dims` marked in
-/// `owner` as `index`'s.
+/// `member` as a body holds it, its cells moved by `shift`; each of its cells of `dims` is marked
+/// in `by` as the member at `index`'s.
 fn owned(
     member: &ResolvedMember,
     shift: Cell,
-    owner: &mut [Option<usize>],
     dims: Dims,
+    detail: Detail,
     index: usize,
+    by: &mut [By],
 ) -> Owned {
     let mut blocks: Vec<(String, Vec<Cell>)> = Vec::new();
     for resolved in &member.resolved_state {
+        let keep = detail == Detail::Cells && !is_air(&resolved.state.id);
         let mut moved = Vec::new();
-        for (x, y, z) in resolved.cells() {
-            if let Some(i) = dims.index(x, y, z) {
-                owner[i] = Some(index);
+        for cell in resolved.cells() {
+            if let Some(i) = dims.index(cell.0, cell.1, cell.2) {
+                by[i] = By::Member(index);
             }
-            moved.push((x + shift.0, y + shift.1, z + shift.2));
+            if keep {
+                moved.push(shifted(cell, shift));
+            }
         }
-        if is_air(&resolved.state.id) {
+        if !keep {
             continue;
         }
         match blocks.iter_mut().find(|(id, _)| *id == resolved.state.id) {
@@ -222,9 +276,19 @@ fn owned(
         id: member.id.clone(),
         address: member.address.clone(),
         span: member.span.clone(),
-        raw: matches!(member.role.as_str(), "raw_block" | "raw_fill"),
+        raw: member.is_raw(),
+        declared_low: shifted(member.geometry.declared_bbox.min(), shift),
         blocks,
     }
+}
+
+/// `cell` moved by `shift`.
+fn shifted((x, y, z): Cell, (dx, dy, dz): Cell) -> Cell {
+    (
+        x.saturating_add(dx),
+        y.saturating_add(dy),
+        z.saturating_add(dz),
+    )
 }
 
 /// Each unit with the body it is compared with: the one with the one when each side holds one,
@@ -249,75 +313,73 @@ pub(super) fn pair(
     out
 }
 
-/// The cells of `unit` and `body` compared over the box both lie in, from `(0, 0, 0)`.
-pub(super) fn compare_pair(unit: Option<&GridUnit>, body: Option<BuiltBody>) -> BodyComparison {
+/// The cells of `unit` and `body` compared over the boxes their arrays fill, from `(0, 0, 0)`,
+/// keeping what `detail` asks for.
+pub(super) fn compare_pair(
+    unit: Option<&GridUnit>,
+    body: Option<BuiltBody>,
+    detail: Detail,
+) -> BodyComparison {
     let structure = unit.map(|unit| unit.name.clone());
     let source = body.as_ref().map(|body| body.name.clone());
     let built = body.unwrap_or_else(|| BuiltBody::empty(String::new()));
-    let grid_dims = unit.map_or(Dims { x: 0, y: 0, z: 0 }, |unit| unit.grid.dims());
-    let extent = Dims {
-        x: grid_dims.x.max(built.dims.x),
-        y: grid_dims.y.max(built.dims.y),
-        z: grid_dims.z.max(built.dims.z),
-    };
-    let expected_at = |(x, y, z): Cell| -> Option<&GridEntry> {
+    let mut boxes: Vec<Extent> = built.parts.iter().map(LaidPart::extent).collect();
+    if let Some(unit) = unit {
+        let Dims { x, y, z } = unit.grid.dims();
+        boxes.push(((0, 0, 0), (x, y, z)));
+    }
+    let expected_at = |(x, y, z): Cell| -> Option<(u16, &GridEntry)> {
         let grid = &unit?.grid;
-        let slot = grid.voxels().get(grid.dims().index(x, y, z)?)?;
-        grid.palette()
-            .get(usize::from(slot.0))
-            .filter(|entry| !is_air(&entry.state.id))
+        let slot = *grid.voxels().get(grid.dims().index(x, y, z)?)?;
+        let entry = grid.palette().get(usize::from(slot.0))?;
+        (!is_air(&entry.state.id)).then_some((slot.0, entry))
     };
     let mut counts = Counts::default();
     let mut differences = Vec::new();
-    for y in 0..extent.y {
-        for z in 0..extent.z {
-            for x in 0..extent.x {
-                let cell = (x, y, z);
-                let expected = expected_at(cell);
-                let (block, by) = built.at(cell);
-                counts.structure_blocks += u64::from(expected.is_some());
-                if block.is_some() {
-                    counts.built_blocks += 1;
-                    let raw = matches!(by, By::Member(m) if built.members[m].raw);
-                    counts.residual += u64::from(raw);
-                }
-                let kind = match (expected, block) {
-                    (None, None) => continue,
-                    (Some(_), None) => RegionKind::Missing,
-                    (None, Some(_)) => RegionKind::Extra,
-                    (Some(expected), Some(block)) => {
-                        counts.both_blocks += 1;
-                        if expected.state.id == block.id {
-                            counts.matched += 1;
-                            let states = differing_states(expected, block);
-                            if states.is_empty() {
-                                counts.states_matched += 1;
-                                continue;
-                            }
-                            differences.push(Difference {
-                                cell,
-                                kind: RegionKind::State,
-                                expected: Some(expected.state.clone()),
-                                built: Some(block.clone()),
-                                states,
-                                by,
-                            });
-                            continue;
-                        }
-                        RegionKind::Replaced
-                    }
-                };
-                differences.push(Difference {
-                    cell,
-                    kind,
-                    expected: expected.map(|entry| entry.state.clone()),
-                    built: block.cloned(),
-                    states: Vec::new(),
-                    by,
-                });
-            }
+    let mut states: HashMap<(u16, u32), Vec<StateDifference>> = HashMap::new();
+    each_cell(&boxes, |cell| {
+        let expected = expected_at(cell);
+        let (slot, by) = built.at(cell);
+        let block = (slot != 0).then(|| &built.palette[slot as usize]);
+        counts.structure_blocks += u64::from(expected.is_some());
+        if block.is_some() {
+            counts.built_blocks += 1;
+            let raw = matches!(by, By::Member(m) if built.members[m].raw);
+            counts.residual += u64::from(raw);
         }
-    }
+        let mut differing: &[StateDifference] = &[];
+        let kind = match (expected, block) {
+            (None, None) => return,
+            (Some(_), None) => RegionKind::Missing,
+            (None, Some(_)) => RegionKind::Extra,
+            (Some((_, expected)), Some(block)) if expected.state.id != block.id => {
+                counts.both_blocks += 1;
+                RegionKind::Replaced
+            }
+            (Some((expected_slot, expected)), Some(block)) => {
+                counts.both_blocks += 1;
+                counts.matched += 1;
+                differing = states
+                    .entry((expected_slot, slot))
+                    .or_insert_with(|| differing_states(expected, block));
+                if differing.is_empty() {
+                    counts.states_matched += 1;
+                    return;
+                }
+                RegionKind::State
+            }
+        };
+        if detail == Detail::Cells {
+            differences.push(Difference {
+                cell,
+                kind,
+                expected: expected.map(|(_, entry)| entry.state.clone()),
+                built: block.cloned(),
+                states: differing.to_vec(),
+                by,
+            });
+        }
+    });
     BodyComparison {
         structure,
         source,
@@ -325,6 +387,45 @@ pub(super) fn compare_pair(unit: Option<&GridUnit>, body: Option<BuiltBody>) -> 
         built,
         differences,
     }
+}
+
+/// Visit each cell that lies in one of `boxes` once, in `(y, z, x)` order.
+fn each_cell(boxes: &[Extent], mut visit: impl FnMut(Cell)) {
+    for (low_y, high_y) in merged(boxes.iter().map(|(low, high)| (low.1, high.1))) {
+        for y in low_y..high_y {
+            let row: Vec<&Extent> = boxes
+                .iter()
+                .filter(|(low, high)| (low.1..high.1).contains(&y))
+                .collect();
+            for (low_z, high_z) in merged(row.iter().map(|(low, high)| (low.2, high.2))) {
+                for z in low_z..high_z {
+                    let runs = row
+                        .iter()
+                        .filter(|(low, high)| (low.2..high.2).contains(&z))
+                        .map(|(low, high)| (low.0, high.0));
+                    for (low_x, high_x) in merged(runs) {
+                        for x in low_x..high_x {
+                            visit((x, y, z));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// The spans `start..end`, the empty ones left out, joined where they meet or overlap, in order.
+fn merged(spans: impl Iterator<Item = (u32, u32)>) -> Vec<(u32, u32)> {
+    let mut sorted: Vec<(u32, u32)> = spans.filter(|(start, end)| start < end).collect();
+    sorted.sort_unstable();
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for (start, end) in sorted {
+        match out.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => out.push((start, end)),
+        }
+    }
+    out
 }
 
 /// Each property `built` holds otherwise than `expected`, as the target builds them: a property

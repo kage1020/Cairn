@@ -1,3 +1,5 @@
+use cairn_lang_core::block_array::{BlockState, Dims, PaletteIndex};
+use cairn_lang_core::transliterate::{BlockGrid, GridEntry, GridUnit};
 use cairn_lang_core::voxel_diff::{Cause, MemberRef, RegionKind};
 
 use crate::common::read_example;
@@ -190,5 +192,68 @@ fn a_body_the_build_lacks_is_one_unpaired_region() {
     assert_eq!(
         region_lines(&report),
         ["missing b (0,0,0)..(2,0,2): 9 cells of minecraft:cobblestone → the source builds no `b`"]
+    );
+}
+
+#[test]
+fn of_two_members_owning_as_many_cells_the_one_written_first_is_named() {
+    let structure = format!(
+        "{THEME}struct s size=3x3\n  raw_fill mat=minecraft:granite from=0,0,1 to=2,0,1\n  \
+         raw_fill mat=minecraft:granite from=0,0,0 to=2,0,0\n"
+    );
+    let lift = structure.replace("granite", "diorite");
+    let report = report(&units(&structure), &lift);
+    let causes: Vec<_> = report.regions.iter().map(|r| r.cause.clone()).collect();
+    // Addresses count by position, so the line written first, the farther row, is `raw_fill[1]`.
+    assert_eq!(
+        causes,
+        [Cause::BuiltBy {
+            member: MemberRef {
+                keyword: "raw_fill".into(),
+                id: None,
+                address: Some("raw_fill[1]".into()),
+                line: 8,
+            }
+        }]
+    );
+}
+
+#[test]
+fn a_site_is_laid_as_one_body_moved_to_its_lowest_corner() {
+    let air = GridUnit {
+        name: "nothing".into(),
+        grid: BlockGrid::new(
+            Dims { x: 1, y: 1, z: 1 },
+            vec![GridEntry::exact(BlockState::air())],
+            vec![PaletteIndex(0)],
+        )
+        .expect("one cell of air"),
+        comment: Vec::new(),
+    };
+    let report = report(&[air], &read_example("l-walkway.crn"));
+    // The walkway's box covers part of `home1`, laid before it, whose floor its air leaves whole.
+    assert_eq!(
+        region_lines(&report),
+        [
+            "extra duo (1,0,1)..(12,0,16): 27 cells of minecraft:gravel → laid by a walkway",
+            "extra duo (13,1,0)..(15,3,2): 20 cells of minecraft:cobblestone → likely \
+             `walls[id=walls]` `height=3` too large",
+            "extra duo (0,1,13)..(2,3,15): 20 cells of minecraft:cobblestone → built by \
+             `walls[id=walls]` (line 12)",
+            "extra duo (13,1,13)..(15,3,15): 20 cells of minecraft:cobblestone → built by \
+             `walls[id=walls]` (line 12)",
+            "extra duo (13,0,0)..(15,0,2): 9 cells of minecraft:oak_planks → built by \
+             `floor[id=floor]` (line 11)",
+            "extra duo (0,0,13)..(2,0,15): 9 cells of minecraft:oak_planks → built by \
+             `floor[id=floor]` (line 11)",
+            "extra duo (13,0,13)..(15,0,15): 9 cells of minecraft:oak_planks → built by \
+             `floor[id=floor]` (line 11)",
+            "extra duo (13,1,1)..(14,2,2): 4 cells of minecraft:oak_door → built by \
+             `door[id=entry]` (line 13)",
+            "extra duo (0,1,14)..(1,2,15): 4 cells of minecraft:oak_door → built by \
+             `door[id=entry]` (line 13)",
+            "extra duo (13,1,14)..(14,2,15): 4 cells of minecraft:oak_door → built by \
+             `door[id=entry]` (line 13)",
+        ]
     );
 }

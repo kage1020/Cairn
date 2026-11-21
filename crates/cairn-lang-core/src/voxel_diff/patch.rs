@@ -9,14 +9,15 @@ use crate::ast::ValueKind;
 use crate::intent::{Member, MemberRole};
 use crate::transliterate::spelled;
 
-use super::regions::{Fix, Region};
-use super::{Comparison, Counts, DiffInput, Metrics, RegionKind, compare};
+use super::bodies::{Detail, Owned};
+use super::regions::{Fix, Region, edit_target};
+use super::{Comparison, Counts, DiffInput, Metrics, RegionKind, compare_keeping};
 
 /// The most lines a patch holds.
-pub const MAX_EDITS: usize = 3;
+const MAX_EDITS: usize = 3;
 
 /// The most candidate sources one patch search builds.
-pub const BUILD_BUDGET: usize = 48;
+const BUILD_BUDGET: usize = 48;
 
 /// The `edit` lines found to bring the build nearer the structure, and what it reaches with them.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -40,7 +41,7 @@ struct Candidate {
 /// no earlier region named, the candidate line that most lowers the cells that differ, kept when
 /// it lowers them; each kept line is written into its region.
 #[must_use]
-pub fn suggest_patch(
+pub(super) fn suggest_patch(
     input: &DiffInput<'_>,
     comparison: &Comparison,
     regions: &mut [Region],
@@ -71,7 +72,7 @@ pub fn suggest_patch(
         }
         let slots = slots_building(comparison, b, &members, &region.mat);
         let mut best: Option<(Candidate, Counts)> = None;
-        for candidate in candidates(member, region, input.source, &slots) {
+        for candidate in candidates(member, owned, region, input.source, &slots) {
             if builds == BUILD_BUDGET {
                 break;
             }
@@ -80,7 +81,7 @@ pub fn suggest_patch(
             let Some(built) = (input.build)(&text) else {
                 continue;
             };
-            let counts = compare(input.units, &built).counts;
+            let counts = compare_keeping(input.units, &built, Detail::Counts).counts;
             let bar = best.as_ref().map_or(reached, |(_, counts)| *counts);
             if counts.differing() < bar.differing() {
                 best = Some((candidate, counts));
@@ -137,21 +138,31 @@ fn slots_building(
     out
 }
 
-/// The candidate lines for `member`, the member `region`'s cause names, in the order they are
-/// tried: its block or states set to the structure's, then each whole number its line writes one
-/// and two either way, then a `repeat=` its line leaves out, then a `from=`/`to=` box grown over
-/// a missing region or cut back from an extra one.
-fn candidates(member: &Member, region: &Region, source: &str, slots: &[String]) -> Vec<Candidate> {
-    let target = match (&member.id, &member.address) {
-        (Some(id), _) => format!("{}[id={id}]", member.role.keyword()),
-        (None, Some(address)) => address.to_string(),
-        (None, None) => return Vec::new(),
+/// The candidate lines for `member`, the member `region`'s cause names and `owned` lays, in the
+/// order they are tried: its block or states set to the structure's, its `mat_slot=` swapped for
+/// each of `slots`, each whole number its line writes one and two either way, a `repeat=` its line
+/// leaves out, then a `from=`/`to=` box grown over a missing region or cut back from an extra one.
+fn candidates(
+    member: &Member,
+    owned: &Owned,
+    region: &Region,
+    source: &str,
+    slots: &[String],
+) -> Vec<Candidate> {
+    let address = member.address.as_ref().map(ToString::to_string);
+    let Some(target) = edit_target(
+        member.role.keyword(),
+        member.id.as_deref(),
+        address.as_deref(),
+    ) else {
+        return Vec::new();
     };
-    let written = |key: &str| {
-        member
+    let written = |key: &str| match key {
+        "mat_slot" => member.read_slot().map(str::to_owned),
+        _ => member
             .written(key)
             .and_then(|value| source.get(value.span.clone()))
-            .map(str::to_owned)
+            .map(str::to_owned),
     };
     let mut out = Vec::new();
     let mut push = |changes: Vec<(String, String)>| {
@@ -204,8 +215,7 @@ fn candidates(member: &Member, region: &Region, source: &str, slots: &[String]) 
             continue;
         };
         for delta in [1, -1, 2, -2] {
-            let to = n + delta;
-            if to >= 0 {
+            if let Some(to) = n.checked_add(delta).filter(|to| *to >= 0) {
                 push(vec![(key.clone(), to.to_string())]);
             }
         }
@@ -219,30 +229,41 @@ fn candidates(member: &Member, region: &Region, source: &str, slots: &[String]) 
             push(vec![("repeat".to_owned(), to.to_string())]);
         }
     }
-    if let Some(changes) = moved_box(member, region) {
+    if let Some(changes) = moved_box(member, owned, region) {
         push(changes);
     }
     out
 }
 
 /// The `from=`/`to=` of `member`'s box grown over a missing `region` beside it, or cut back from
-/// an extra one at one end of it; `None` when neither applies.
-fn moved_box(member: &Member, region: &Region) -> Option<Vec<(String, String)>> {
+/// an extra one at one end of it, as its line measures them; `None` when neither applies.
+fn moved_box(member: &Member, owned: &Owned, region: &Region) -> Option<Vec<(String, String)>> {
     let corner = |key: &str| match member.written(key)?.value.kind {
         ValueKind::Coord { x, y, z } => {
-            Some([x, y, z].map(|v| u32::try_from(v).unwrap_or(u32::MAX)))
+            let [x, y, z] = [x, y, z].map(|v| u32::try_from(v).ok());
+            Some([x?, y?, z?])
         }
         _ => None,
     };
     let (a, b) = (corner("from")?, corner("to")?);
     let low: [u32; 3] = std::array::from_fn(|i| a[i].min(b[i]));
     let high: [u32; 3] = std::array::from_fn(|i| a[i].max(b[i]));
+    // The region's cells are the body's, where `low` stands at the declared box's low corner.
+    let (fx, fy, fz) = owned.declared_low;
+    let frame = [fx, fy, fz];
+    let measured = |cell: [u32; 3]| {
+        let at: [Option<u32>; 3] = std::array::from_fn(|i| {
+            u32::try_from(i64::from(cell[i]) - i64::from(frame[i]) + i64::from(low[i])).ok()
+        });
+        Some([at[0]?, at[1]?, at[2]?])
+    };
+    let (from, to) = (measured(region.from)?, measured(region.to)?);
     let (new_low, new_high) = match region.kind {
         RegionKind::Missing => (
-            std::array::from_fn(|i| low[i].min(region.from[i])),
-            std::array::from_fn(|i| high[i].max(region.to[i])),
+            std::array::from_fn(|i| low[i].min(from[i])),
+            std::array::from_fn(|i| high[i].max(to[i])),
         ),
-        RegionKind::Extra => cut_back(low, high, region.from, region.to)?,
+        RegionKind::Extra => cut_back(low, high, from, to)?,
         RegionKind::Replaced | RegionKind::State => return None,
     };
     if (new_low, new_high) == (low, high) {
@@ -282,3 +303,6 @@ fn cut_back(
     }
     None
 }
+
+#[cfg(test)]
+mod tests;

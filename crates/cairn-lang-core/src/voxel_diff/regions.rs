@@ -37,24 +37,35 @@ pub struct MemberRef {
 }
 
 impl MemberRef {
-    /// The member as an `edit` line names it: by its `id=` when it has one, else by its address.
+    /// The member as an `edit` line names it, else by its keyword.
     #[must_use]
     pub fn target(&self) -> String {
-        match (&self.id, &self.address) {
-            (Some(id), _) => format!("{}[id={id}]", self.keyword),
-            (None, Some(address)) => address.clone(),
-            (None, None) => format!("{}[]", self.keyword),
-        }
+        edit_target(&self.keyword, self.id.as_deref(), self.address.as_deref())
+            .unwrap_or_else(|| self.keyword.clone())
+    }
+}
+
+/// A member as an `edit` line names it: by its `id=` when it has one, else by its address; `None`
+/// when it has neither.
+pub(super) fn edit_target(
+    keyword: &str,
+    id: Option<&str>,
+    address: Option<&str>,
+) -> Option<String> {
+    match (id, address) {
+        (Some(id), _) => Some(format!("{keyword}[id={id}]")),
+        (None, Some(address)) => Some(address.to_owned()),
+        (None, None) => None,
     }
 }
 
 /// What one `edit` line changes, as a region's cause reads it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fix {
+pub(super) struct Fix {
     /// The member, as the line names it.
-    pub target: String,
+    pub(super) target: String,
     /// Each key it sets, with the value the member held before, if its line wrote one.
-    pub changes: Vec<(String, Option<String>, String)>,
+    pub(super) changes: Vec<(String, Option<String>, String)>,
 }
 
 impl fmt::Display for Fix {
@@ -220,10 +231,19 @@ impl fmt::Display for Region {
 /// The differing cells of `comparison` clustered into regions, the largest first, each with its
 /// likely cause; `source` gives each member its line.
 #[must_use]
-pub fn regions(comparison: &Comparison, source: &str) -> Vec<Region> {
+pub(super) fn regions(comparison: &Comparison, source: &str) -> Vec<Region> {
     let lines = LineStarts::new(source);
     let mut out = Vec::new();
     for (b, body) in comparison.bodies.iter().enumerate() {
+        let member_ref = |m: usize| {
+            let owned = &body.built.members[m];
+            MemberRef {
+                keyword: owned.role.clone(),
+                id: owned.id.clone(),
+                address: owned.address.as_ref().map(ToString::to_string),
+                line: lines.position(source, owned.span.start).line.get(),
+            }
+        };
         let mut groups: IndexMap<(RegionKind, &str, &str), Vec<&Difference>> = IndexMap::new();
         for difference in &body.differences {
             let expected = difference.expected.as_ref().map_or("", |s| s.id.as_str());
@@ -237,10 +257,7 @@ pub fn regions(comparison: &Comparison, source: &str) -> Vec<Region> {
         }
         for ((kind, mat, built), cells) in groups {
             for cluster in clusters(&cells) {
-                out.push((
-                    b,
-                    region(body, b, kind, mat, built, &cluster, source, &lines),
-                ));
+                out.push((b, region(body, b, kind, mat, built, &cluster, &member_ref)));
             }
         }
     }
@@ -306,11 +323,7 @@ fn root(parent: &mut [usize], mut i: usize) -> usize {
     i
 }
 
-/// The region `cells` make, with its cause.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the pair's parts are read once here, where one struct would be built to be undone"
-)]
+/// The region `cells` of pair `b` make, with its cause, whose member `member_ref` names.
 fn region(
     body: &BodyComparison,
     b: usize,
@@ -318,8 +331,7 @@ fn region(
     mat: &str,
     built: &str,
     cells: &[&Difference],
-    source: &str,
-    lines: &LineStarts,
+    member_ref: &impl Fn(usize) -> MemberRef,
 ) -> Region {
     let mut from = [u32::MAX; 3];
     let mut to = [0; 3];
@@ -345,29 +357,24 @@ fn region(
         .enumerate()
         .max_by_key(|(i, (n, _))| (*n, Reverse(*i)))
         .map(|(_, (_, state))| (*state).clone());
-    let (cause, culprit) = cause(body, kind, mat, cells, from, to);
-    let member_ref = |m: usize| {
-        let owned = &body.built.members[m];
-        MemberRef {
-            keyword: owned.role.clone(),
-            id: owned.id.clone(),
-            address: owned.address.as_ref().map(ToString::to_string),
-            line: lines.position(source, owned.span.start).line.get(),
-        }
+    let found = cause(body, kind, mat, cells, from, to);
+    let culprit = match found {
+        Found::BuiltBy(m) | Found::ClearedBy(m) | Found::ShortOf(m) => Some(m),
+        Found::Walkway | Found::NoMember | Found::Unpaired => None,
     };
-    let cause = match (cause, culprit) {
-        (Found::BuiltBy, Some(m)) => Cause::BuiltBy {
+    let cause = match found {
+        Found::BuiltBy(m) => Cause::BuiltBy {
             member: member_ref(m),
         },
-        (Found::ClearedBy, Some(m)) => Cause::ClearedBy {
+        Found::ClearedBy(m) => Cause::ClearedBy {
             member: member_ref(m),
         },
-        (Found::ShortOf, Some(m)) => Cause::ShortOf {
+        Found::ShortOf(m) => Cause::ShortOf {
             member: member_ref(m),
         },
-        (Found::Walkway, _) => Cause::Walkway,
-        (Found::Unpaired, _) => Cause::Unpaired,
-        _ => Cause::NoMember,
+        Found::Walkway => Cause::Walkway,
+        Found::NoMember => Cause::NoMember,
+        Found::Unpaired => Cause::Unpaired,
     };
     Region {
         kind,
@@ -386,17 +393,17 @@ fn region(
     }
 }
 
-/// A cause before its member is named.
+/// A cause, naming its member by its index in the pair's built members.
 enum Found {
-    BuiltBy,
-    ClearedBy,
-    ShortOf,
+    BuiltBy(usize),
+    ClearedBy(usize),
+    ShortOf(usize),
     Walkway,
     NoMember,
     Unpaired,
 }
 
-/// What likely made `cells` differ, and the member it names.
+/// What likely made `cells` differ.
 fn cause(
     body: &BodyComparison,
     kind: RegionKind,
@@ -404,9 +411,9 @@ fn cause(
     cells: &[&Difference],
     from: [u32; 3],
     to: [u32; 3],
-) -> (Found, Option<usize>) {
+) -> Found {
     if body.structure.is_none() || body.source.is_none() {
-        return (Found::Unpaired, None);
+        return Found::Unpaired;
     }
     let mut tally: IndexMap<usize, usize> = IndexMap::new();
     let mut walkway = false;
@@ -417,19 +424,20 @@ fn cause(
             By::Nothing => {}
         }
     }
+    let members = &body.built.members;
     let most = tally
         .iter()
-        .max_by_key(|(m, n)| (**n, Reverse(**m)))
+        .max_by_key(|(m, n)| (**n, Reverse(members[**m].span.start), Reverse(**m)))
         .map(|(m, _)| *m);
     match (kind, most) {
-        (RegionKind::Missing, Some(m)) => (Found::ClearedBy, Some(m)),
-        (RegionKind::Missing, None) => match nearest(&body.built.members, mat, from, to) {
-            Some(m) => (Found::ShortOf, Some(m)),
-            None => (Found::NoMember, None),
+        (RegionKind::Missing, Some(m)) => Found::ClearedBy(m),
+        (RegionKind::Missing, None) => match nearest(members, mat, from, to) {
+            Some(m) => Found::ShortOf(m),
+            None => Found::NoMember,
         },
-        (_, Some(m)) => (Found::BuiltBy, Some(m)),
-        (_, None) if walkway => (Found::Walkway, None),
-        (_, None) => (Found::NoMember, None),
+        (_, Some(m)) => Found::BuiltBy(m),
+        (_, None) if walkway => Found::Walkway,
+        (_, None) => Found::NoMember,
     }
 }
 
@@ -449,8 +457,8 @@ fn nearest(members: &[Owned], mat: &str, from: [u32; 3], to: [u32; 3]) -> Option
         .filter_map(|(m, member)| {
             let cells = &member.blocks.iter().find(|(id, _)| id == mat)?.1;
             let d = cells.iter().copied().map(distance).min()?;
-            (d <= REACH).then_some((d, m))
+            (d <= REACH).then_some((d, member.span.start, m))
         })
         .min()
-        .map(|(_, m)| m)
+        .map(|(_, _, m)| m)
 }

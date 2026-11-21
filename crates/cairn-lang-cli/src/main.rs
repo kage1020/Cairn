@@ -18,6 +18,7 @@ mod name_case;
 mod pipeline;
 mod report;
 mod staging;
+mod structure_file;
 
 use std::process::ExitCode;
 

@@ -8,21 +8,25 @@ use std::process::ExitCode;
 use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::voxel_diff::{
-    CONVERGENCE, DiffInput, DiffReport, Metrics, diff, floor3, percent,
+    DiffInput, DiffReport, Metrics, Thresholds, diff, floor3, percent,
 };
 use cairn_lang_core::{Edition, parse};
+use cairn_lang_formats::build::artifact::prepare_artifact;
 use cairn_lang_formats::build::finding::Found;
 use cairn_lang_formats::build::lowering::{BuildRefusal, Lowered, lower_for_target};
-use cairn_lang_formats::build::run_level::{floor_refusal_message, partial_build};
+use cairn_lang_formats::build::run_level::{RunLevelMessage, floor_refusal_message, partial_build};
 use cairn_lang_formats::build::scopes::built_scopes;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
+use cairn_lang_formats::import::{DecodedStructure, ImportFormat, LossKind, decode_structure};
 use serde::Serialize;
 
 use crate::cli::DiffFormat;
-use crate::commands::import::{file_name, open_structure, refuse_extension};
 use crate::pipeline::load_module;
-use crate::report::{print_json, report_diagnostics, report_failure_document, report_run_level};
+use crate::report::{
+    print_json, report_diagnostics, report_failure_document, report_run_level,
+    report_structure_message,
+};
+use crate::structure_file::{file_name, open_structure, refuse_extension};
 
 /// How many regions the text report lists before it counts the rest.
 const LISTED_REGIONS: usize = 10;
@@ -45,7 +49,7 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
         Ok(decoded) => decoded,
         Err(err) => {
             eprintln!("error: cannot compare `{}`: {err}", structure.display());
-            return ExitCode::from(1);
+            return refused(file, &source, format);
         }
     };
     let edition = decoded.stamp.edition();
@@ -58,6 +62,19 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
         Ok(target) => target,
         Err(code) => return code,
     };
+    match checked_by_backend(&lowered.block_ir, target) {
+        Ok(degraded) => degraded.iter().for_each(report_structure_message),
+        Err(refusal) => {
+            report_structure_message(&refusal);
+            return refused(file, &source, format);
+        }
+    }
+    if let Some(unread) = uncompared(&decoded) {
+        eprintln!(
+            "note: only blocks are compared, not the {unread} `{}` holds",
+            structure.display()
+        );
+    }
     let build = |text: &str| build_candidate(text, edition, target);
     let verdict = diff(&DiffInput {
         units: &decoded.units,
@@ -156,20 +173,52 @@ fn compared_target<'a>(
             }
         }
     }
-    // One document per input under `--format json`: the refusal is stderr's, the warnings too.
-    let none: [Found; 0] = [];
-    Err(match format {
-        DiffFormat::Json => report_failure_document(file, source, report, &none),
-        DiffFormat::Text => ExitCode::from(1),
-    })
+    Err(refused(file, source, format))
 }
 
-/// What `text` builds at `target`, `None` when the build is refused.
+/// The exit of a refusal reported on stderr; under `--format json`, one document per input
+/// still, `{"diagnostics": []}`.
+fn refused(file: &Path, source: &str, format: DiffFormat) -> ExitCode {
+    let none: [Found; 0] = [];
+    match format {
+        DiffFormat::Json => report_failure_document(file, source, format.failure_report(), &none),
+        DiffFormat::Text => ExitCode::from(1),
+    }
+}
+
+/// Each structure of `block_ir` checked by `target`'s backend as `cairn compile` checks it before
+/// writing: the `W_INTENT_DEGRADED` warnings, or the first refusal.
+fn checked_by_backend(
+    block_ir: &BlockArrayIr,
+    target: &ResolvedTarget,
+) -> Result<Vec<RunLevelMessage>, RunLevelMessage> {
+    let mut degraded = Vec::new();
+    for (scope, array) in &block_ir.structures {
+        degraded.extend(prepare_artifact(block_ir, scope, array, target)?.degraded);
+    }
+    Ok(degraded)
+}
+
+/// What `decoded` holds besides blocks, which the comparison leaves out, `None` when nothing.
+fn uncompared(decoded: &DecodedStructure) -> Option<&'static str> {
+    let holds = |kinds: &[LossKind]| decoded.losses.iter().any(|loss| kinds.contains(&loss.kind));
+    let data = holds(&[LossKind::BlockEntities, LossKind::PositionData]);
+    match (data, holds(&[LossKind::Entities])) {
+        (true, true) => Some("block entity data and entities"),
+        (true, false) => Some("block entity data"),
+        (false, true) => Some("entities"),
+        (false, false) => None,
+    }
+}
+
+/// What `text` builds at `target`, `None` when the build or the backend refuses it.
 fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Option<BlockArrayIr> {
     let module = parse(text).ok()?;
     let lowered = lower_for_target(&module, edition, Ok(target.clone()));
-    let refused = lowered.verdict().is_err();
-    (!refused).then_some(lowered.block_ir)
+    if lowered.verdict().is_err() || checked_by_backend(&lowered.block_ir, target).is_err() {
+        return None;
+    }
+    Some(lowered.block_ir)
 }
 
 /// The document `--format json` prints.
@@ -191,23 +240,23 @@ struct TargetDocument<'a> {
     version: &'a str,
 }
 
-/// The metrics as three report lines.
-fn metric_lines(metrics: &Metrics) -> [String; 3] {
+/// The metrics as three report lines, each with the threshold it converges at.
+fn metric_lines(metrics: &Metrics, at: &Thresholds) -> [String; 3] {
     [
         format!(
             "block IoU       {:<6} converges at >= {}",
             floor3(metrics.block_iou),
-            CONVERGENCE.block_iou
+            at.block_iou
         ),
         format!(
             "state_accuracy  {:<6} converges at >= {}",
             floor3(metrics.state_accuracy),
-            CONVERGENCE.state_accuracy
+            at.state_accuracy
         ),
         format!(
             "residual raw    {:<6} converges at <= {}",
             percent(metrics.residual_ratio),
-            percent(CONVERGENCE.residual_ratio)
+            percent(at.residual_ratio)
         ),
     ]
 }
@@ -232,7 +281,7 @@ fn print_text(structure: &Path, file: &Path, decoded: &DecodedStructure, verdict
         decoded.stamp.mc_version(),
         decoded.stamp.reason()
     );
-    for line in metric_lines(&verdict.metrics) {
+    for line in metric_lines(&verdict.metrics, &verdict.thresholds) {
         outln!("{line}");
     }
     if verdict.bodies.len() > 1 {
@@ -274,15 +323,16 @@ fn print_text(structure: &Path, file: &Path, decoded: &DecodedStructure, verdict
 
 /// `E_DECOMPILE_DIFF` on stderr, with what would converge and how to get there.
 fn report_unconverged(file: &Path, verdict: &DiffReport) {
+    let at = &verdict.thresholds;
     eprintln!(
         "error[E_DECOMPILE_DIFF]: {}",
-        verdict.metrics.shortfalls(&CONVERGENCE).join(", ")
+        verdict.metrics.shortfalls(at).join(", ")
     );
     eprintln!(
         "  note: a lift converges at block IoU >= {}, state_accuracy >= {} and residual raw <= {}",
-        CONVERGENCE.block_iou,
-        CONVERGENCE.state_accuracy,
-        percent(CONVERGENCE.residual_ratio)
+        at.block_iou,
+        at.state_accuracy,
+        percent(at.residual_ratio)
     );
     let file = file.display();
     if verdict.patch.is_some() {

@@ -13,11 +13,11 @@ use crate::block_array::{BlockArrayIr, BlockState};
 use crate::intent::IntentModule;
 use crate::transliterate::GridUnit;
 
-pub use patch::{BUILD_BUDGET, MAX_EDITS, Patch, suggest_patch};
-pub use regions::{Cause, Fix, MemberRef, Region, regions};
-
-/// The ids a cell holds no block at, whichever of them the file or the build writes.
-pub const AIR_IDS: [&str; 3] = ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
+use bodies::Detail;
+pub use patch::Patch;
+use patch::suggest_patch;
+use regions::regions;
+pub use regions::{Cause, MemberRef, Region};
 
 /// What a lift converges at (`spec/ecosystem-interop` "Reverse direction: the compiler
 /// transliterates, an LLM lifts").
@@ -85,8 +85,8 @@ impl Counts {
         }
     }
 
-    /// The cells that keep a comparison from being exact: the voxel XOR and the matched cells
-    /// whose states differ.
+    /// The cells that keep the comparison from being exact: those where only one side has a block,
+    /// those of two different ids, and the matched cells whose states differ.
     #[must_use]
     pub fn differing(&self) -> u64 {
         let union = self.structure_blocks + self.built_blocks - self.both_blocks;
@@ -280,11 +280,16 @@ struct Difference {
 /// holds, as `spec/ecosystem-interop` "Diffing a lift" pairs and counts them.
 #[must_use]
 pub fn compare(units: &[GridUnit], built: &BlockArrayIr) -> Comparison {
-    let built_bodies = bodies::built_bodies(built);
+    compare_keeping(units, built, Detail::Cells)
+}
+
+/// [`compare`], keeping what `detail` asks for of each pair.
+fn compare_keeping(units: &[GridUnit], built: &BlockArrayIr, detail: Detail) -> Comparison {
+    let built_bodies = bodies::built_bodies(built, detail);
     let mut out = Vec::new();
     let mut counts = Counts::default();
     for (unit, body) in bodies::pair(units, built_bodies) {
-        let compared = bodies::compare_pair(unit, body);
+        let compared = bodies::compare_pair(unit, body, detail);
         counts.add(&compared.counts);
         out.push(compared);
     }
@@ -345,7 +350,8 @@ pub struct DiffInput<'a> {
     pub module: &'a IntentModule,
     /// What the source builds at the structure's target.
     pub built: &'a BlockArrayIr,
-    /// What a source text builds at the same target, `None` when any pass raises an error.
+    /// What a source text builds at the same target, `None` when it does not parse, a pass raises
+    /// an error, a scope is dropped or the target's backend refuses what it builds.
     pub build: &'a dyn Fn(&str) -> Option<BlockArrayIr>,
 }
 
@@ -380,5 +386,5 @@ pub fn diff(input: &DiffInput<'_>) -> DiffReport {
 
 /// Whether `id` names air.
 fn is_air(id: &str) -> bool {
-    AIR_IDS.contains(&id)
+    BlockState::AIR_IDS.contains(&id)
 }

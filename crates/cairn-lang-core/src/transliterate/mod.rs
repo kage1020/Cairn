@@ -148,7 +148,10 @@ impl GridEntry {
 
     /// Whether `built` builds the same block as this entry at the target.
     fn is_built_as(&self, built: &BlockState) -> bool {
-        built.id == self.state.id && self.differing_states(built).is_empty()
+        built.id == self.state.id
+            && self
+                .compared_keys(built)
+                .all(|key| self.read(&self.state, key) == self.read(built, key))
     }
 
     /// Each property `built` holds at another value than this entry, as `(key, this entry's
@@ -157,30 +160,30 @@ impl GridEntry {
         &self,
         built: &BlockState,
     ) -> Vec<(String, Option<String>, Option<String>)> {
-        let read = |state: &BlockState, key: &str| {
-            state
-                .properties
-                .get(key)
-                .or_else(|| self.defaults.get(key))
-                .cloned()
-        };
-        let mut keys: Vec<&String> = Vec::new();
-        for key in built
+        let mut out: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+        for key in self.compared_keys(built) {
+            let (expected, got) = (self.read(&self.state, key), self.read(built, key));
+            if expected != got && !out.iter().any(|(seen, _, _)| seen == key) {
+                out.push((key.clone(), expected.cloned(), got.cloned()));
+            }
+        }
+        out
+    }
+
+    /// Every property either side writes or the target gives a default for, but those the target
+    /// does not read; a key both sides name comes up more than once.
+    fn compared_keys<'a>(&'a self, built: &'a BlockState) -> impl Iterator<Item = &'a String> {
+        built
             .properties
             .keys()
             .chain(self.state.properties.keys())
             .chain(self.defaults.keys())
-        {
-            if !self.unread.contains(key) && !keys.contains(&key) {
-                keys.push(key);
-            }
-        }
-        keys.into_iter()
-            .filter_map(|key| {
-                let (expected, got) = (read(&self.state, key), read(built, key));
-                (expected != got).then(|| (key.clone(), expected, got))
-            })
-            .collect()
+            .filter(|key| !self.unread.contains(key))
+    }
+
+    /// The value `state` builds for `key`: its own, else the target's default.
+    fn read<'a>(&'a self, state: &'a BlockState, key: &str) -> Option<&'a String> {
+        state.properties.get(key).or_else(|| self.defaults.get(key))
     }
 }
 
