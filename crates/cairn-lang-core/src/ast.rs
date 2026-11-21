@@ -6,6 +6,7 @@ use std::num::NonZeroU32;
 
 use serde::Serialize;
 
+use crate::address::{AddressSegment, MemberAddress};
 use crate::edition::Edition;
 use crate::error::Span;
 use crate::logic_library::{LogicPrimitive, StageCount};
@@ -68,13 +69,105 @@ impl MemberRequires {
     }
 }
 
-/// A whole `.crn` source file: leading directives, then top-level items, in source order.
+/// A whole `.crn` source file: leading directives, then top-level items and `edit` lines.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Module {
     /// Leading `@cairn` / `@requires` / `@intended_targets` directives.
     pub headers: Vec<Header>,
     /// Top-level items in source order.
     pub items: Vec<Item>,
+    /// Top-level `edit` lines in source order, wherever they stand among the items.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub edits: Vec<Edit>,
+}
+
+/// A top-level `edit TARGET set key=value …` line (`spec/components-editing-sites` "Editing
+/// model").
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[non_exhaustive]
+pub struct Edit {
+    /// The members it selects.
+    pub target: EditTarget,
+    /// The `key=value` pairs after `set`, in source order; never empty.
+    pub set: Vec<Arg>,
+    /// Byte range of the whole line.
+    #[serde(skip)]
+    pub span: Span,
+}
+
+/// What an [`Edit`] selects: by a selector, or by an address.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind")]
+#[non_exhaustive]
+pub enum EditTarget {
+    /// `KEYWORD[attr=value]…`, the members of the keyword whose lines every attribute matches.
+    Selector {
+        /// The member keyword.
+        keyword: String,
+        /// Every bracket's attributes, the brackets' in turn.
+        attrs: Vec<Arg>,
+        /// Byte range of the keyword alone.
+        #[serde(skip)]
+        keyword_span: Span,
+        /// Byte range of the whole selector.
+        #[serde(skip)]
+        span: Span,
+    },
+    /// `ROLE@SIDE[N]`, steps joined by `.`, the member the address names in each body.
+    Address {
+        /// The address as written.
+        address: MemberAddress,
+        /// Byte range of each step's keyword, outermost first.
+        #[serde(skip)]
+        keyword_spans: Vec<Span>,
+        /// Byte range of the whole address.
+        #[serde(skip)]
+        span: Span,
+    },
+}
+
+impl EditTarget {
+    /// The keyword of the members it selects: the selector's, or the address's last step's.
+    #[must_use]
+    pub fn keyword(&self) -> &str {
+        match self {
+            Self::Selector { keyword, .. } => keyword,
+            Self::Address { address, .. } => {
+                address.segments().last().map_or("", AddressSegment::role)
+            }
+        }
+    }
+
+    /// Each keyword the target names, with its byte range: the selector's, or each address
+    /// step's, outermost first.
+    #[must_use]
+    pub fn keywords(&self) -> Vec<(&str, &Span)> {
+        match self {
+            Self::Selector {
+                keyword,
+                keyword_span,
+                ..
+            } => vec![(keyword.as_str(), keyword_span)],
+            Self::Address {
+                address,
+                keyword_spans,
+                ..
+            } => address
+                .segments()
+                .iter()
+                .map(AddressSegment::role)
+                .zip(keyword_spans)
+                .collect(),
+        }
+    }
+
+    /// Byte range of the whole target.
+    #[must_use]
+    pub fn span(&self) -> &Span {
+        match self {
+            Self::Selector { span, .. } | Self::Address { span, .. } => span,
+        }
+    }
 }
 
 /// A leading directive line introduced by `@`, its value captured verbatim.

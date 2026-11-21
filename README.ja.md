@@ -93,6 +93,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント。部位のブロックを割り当てるセレクタ行 (`walls` の隅柱と、ドアや窓を囲む枠)
+- `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックスを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
@@ -103,7 +104,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 **未実装の機能。**
 
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更
 - 既存の schematic の読み込み
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 
