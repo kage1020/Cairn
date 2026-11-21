@@ -95,6 +95,35 @@ jobs:
       - name: Rustdoc (private items)
         run: cargo doc --workspace --no-deps --locked --all-features --document-private-items
 
+  wasm:
+    # Meant to become a required check, which matches this name literally, so keep it stable.
+    name: WebAssembly
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust toolchain
+        run: rustup show
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: wasm
+          save-if: ${{ github.ref == 'refs/heads/canary' || github.ref == 'refs/heads/main' }}
+
+      # Installs the wasm32 target and wasm-pack, and fails when the module outgrows the budget
+      # the script sets.
+      - name: Build the module
+        run: sh website/scripts/build-wasm.sh --install
+
+      # The other jobs build for the host, which leaves out the tests only wasm32 compiles.
+      - name: Clippy (wasm32)
+        run: cargo clippy -p cairn-lang-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
+
+      - name: Test the exports in Node
+        run: wasm-pack test --node crates/cairn-lang-wasm
+
   msrv:
     # Meant to become a required check, which matches this name literally, so keep it stable.
     name: MSRV

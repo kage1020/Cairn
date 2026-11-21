@@ -3,12 +3,12 @@
 
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims, Palette, PaletteIndex};
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use cairn_lang_core::lock::{
     HashHex, HashParseError, LOCK_SCHEMA_VERSION, LockError, LockInputs, LockPlacement,
-    LockReading, LockTarget, LockWalkway, Lockfile, MemberSensitivity, UnreadableKind,
-    hash_resolved_ir, hash_source,
+    LockReading, LockTarget, LockWalkway, Lockfile, LockfileRead, MemberSensitivity,
+    UnreadableKind, hash_resolved_ir, hash_source,
 };
 use cairn_lang_core::{
     CAIRN_VERSION, Edition, IdError, PlaceId, PortId, SiteName, WalkwayEndpoint, lower, parse,
@@ -551,6 +551,15 @@ fn a_lock_this_build_writes_reads_back() {
 fn no_file_at_the_path_reads_as_missing() {
     let path = scratch("missing").join("s.crn.lock");
     assert_eq!(LockReading::of(&path, SOURCE), LockReading::Missing);
+}
+
+#[test]
+fn an_empty_path_names_no_file_and_reads_as_missing() {
+    assert_eq!(LockReading::of(Path::new(""), SOURCE), LockReading::Missing);
+    assert!(
+        matches!(LockfileRead::from_path(Path::new("")), Ok(None)),
+        "a compile reading it finds no lock either",
+    );
 }
 
 #[test]

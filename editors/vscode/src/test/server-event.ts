@@ -5,6 +5,17 @@ export interface Pin {
 }
 
 /**
+ * How a test runs `Cairn: Show Info`: the file it writes what the command did
+ * to, as `{ opened?, message? }` JSON, and the editor it runs in, which is the
+ * `.crn` file the window opened unless it names a new `plaintext` document or
+ * an `untitled` `.crn` one.
+ */
+export interface ShowInfo {
+  readonly to: string;
+  readonly editor?: "plaintext" | "untitled";
+}
+
+/**
  * A line a stand-in appends to the shared record: its launch, a lifecycle
  * method it received, the client commands `initialize` declared, the pin a
  * configuration change carried, or its exit code.
