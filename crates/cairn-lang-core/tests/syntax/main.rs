@@ -13,6 +13,7 @@ pub mod common;
 mod block_ids;
 mod coordinates;
 mod decimal_literals;
+mod edit_lines;
 mod edition_guards;
 mod lex;
 mod line_positions;

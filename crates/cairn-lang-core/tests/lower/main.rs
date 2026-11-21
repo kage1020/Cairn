@@ -15,6 +15,7 @@ mod door_block;
 mod door_column;
 mod door_wall_fit;
 mod eave_stair_shape;
+mod edit;
 mod edition_guard;
 mod fill;
 mod intent;

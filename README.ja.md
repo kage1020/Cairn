@@ -92,6 +92,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - `cairn import`。この 4 つのどのファイルも、同じブロックへコンパイルし直せる生のメンバーの `.crn` として読み戻します。復元するのはブロックとその規則性で、意図ではないことを `W_SEMANTIC_LOSS` で示します。
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill` / `raw_repeat`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント
+- `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID と改名前の旧名を収めたレジストリパック
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックスを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
@@ -103,7 +104,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `edit` による部分的な変更
 - `cairn diff-blocks` と、取り込んだものを壁や窓やテーマへリフトするループ
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
 

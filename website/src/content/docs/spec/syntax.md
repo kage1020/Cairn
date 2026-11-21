@@ -37,7 +37,8 @@ after the end of its form: a bare value there is the same finding, and a `key=va
 `E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
 expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
 expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
-its missing `=`.
+its missing `=`. An `edit` line keeps no positional list yet, so a bare value after its `set` is
+`E_PARSE`, which ends the parse: `edit window[0] set shape arch` is refused with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
@@ -463,10 +464,6 @@ error.
 
 ## 5.5 IDs, classes, addresses
 
-**Subject to change.** The `edit` patch DSL that would select a member by its address is not built
-yet ([Compatibility Tiers](/spec/compatibility/#subject-to-change)). Today a top-level `edit` is
-`E_PARSE`.
-
 Important members MAY declare `id=`, and `class=` groups members. Every member of a `struct` or
 `def` body also gets an **address**, which the compiler derives from where the member stands
 (parent, role, side, level and offset) and from what its line writes, not from the order lines are
@@ -528,6 +525,11 @@ theirs when their lines trade places. Adding a member of another role, on anothe
 another parent, or further along the wall moves none either. A member added ahead of others of its
 role on its wall renumbers those after it, so a member an edit must keep naming across such a
 change carries an `id=`.
+
+An `edit` line names a member by its address, `edit window@front[0] set y=2`, and selects the
+member whose line gives it that address as written. An edit that moves a member, by setting its
+`side=` or `offset=`, keeps its address, so the next edit names it the same way ([Components,
+Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
 
 `cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
 lists those of the members that built a cell. The `resolved_state` record of each member that
