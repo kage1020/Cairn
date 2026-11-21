@@ -123,7 +123,7 @@ fn check_statements(body: &[Statement], sink: &mut DiagnosticSink) {
 
 /// A line other than a member line, as an `E_UNEXPECTED_POSITIONAL` on it words it.
 enum Line<'a> {
-    /// A `struct` or `def` header, which reads `key=value` arguments such as `class=` and `size=`.
+    /// A `struct` or `def` header, which reads `size=` alone.
     KeyedHeader(&'static str),
     /// A `site` or `theme` header, which reads nothing after its name.
     BareHeader(&'static str),
@@ -173,8 +173,8 @@ impl Line<'_> {
             ("them", "each")
         };
         match self {
-            Self::KeyedHeader(_) => "give each value the key it belongs to (`class=house`, \
-                                     `size=3x3`); a missing `=` lands here too"
+            Self::KeyedHeader(_) => "a header takes only `size=`: write the size as `size=3x3` \
+                                     and delete any other value; a missing `=` lands here too"
                 .to_owned(),
             Self::BareHeader(keyword) => format!(
                 "delete {them}: a `{keyword}` header is its name, with an optional `:` after it"
