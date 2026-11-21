@@ -1,5 +1,5 @@
 //! A `sign` hangs on the wall it stands by or stands on the block under it, and its block entity
-//! holds the text its line writes (`spec/entities` "Two tiers").
+//! holds the text its line writes (`spec/entities` "Block entities").
 
 use cairn_lang_core::block_array::{
     BlockEntity, BlockEntityData, BlockIdSet, BlockState, SignText, TargetRegistry,
