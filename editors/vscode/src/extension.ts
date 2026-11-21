@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import {
   ConfigurationTarget,
   ExtensionContext,
+  LogOutputChannel,
   OutputChannel,
   TextDocument,
   Uri,
@@ -15,6 +16,7 @@ import {
 } from "vscode";
 import {
   ClientCapabilities,
+  ExecuteCommandParams,
   ExecuteCommandRequest,
   FeatureState,
   LanguageClient,
@@ -39,16 +41,31 @@ const STRUCTURE_EXTENSIONS = ["nbt", "litematic", "schem", "mcstructure"];
 const SET_TARGET = "cairn.setTarget";
 
 let client: LanguageClient | undefined;
+/** Settles once the server has started, or is known not to start. */
+let ready: Promise<void> = Promise.resolve();
+
+/** What a report command did: the report it opened, and the message it showed. */
+export interface ReportShown {
+  readonly opened?: TextDocument;
+  readonly message?: string;
+}
 
 export async function activate(context: ExtensionContext): Promise<void> {
   const output = window.createOutputChannel("Cairn Language Server", { log: true });
   context.subscriptions.push(output);
-  // Before the server is found, so the command can say it is missing.
+  // Before the server is found, so the commands can say it is missing.
   context.subscriptions.push(commands.registerCommand(SHOW_INFO, showInfo));
   context.subscriptions.push(
     commands.registerCommand(SHOW_DIFF_BLOCKS, showDiffBlocks),
   );
+  ready = startServer(context, output);
+  await ready;
+}
 
+async function startServer(
+  context: ExtensionContext,
+  output: LogOutputChannel,
+): Promise<void> {
   const serverPath = await resolveServerPath(output);
   if (!serverPath) {
     return;
@@ -108,33 +125,34 @@ export async function deactivate(): Promise<void> {
 
 /**
  * Opens what `cairn.info` answers for the active `.crn` editor beside it,
- * and returns the opened document.
+ * waiting out a server that is still starting.
  */
-async function showInfo(): Promise<TextDocument | undefined> {
-  const source = activeSource(
+async function showInfo(): Promise<ReportShown> {
+  const source = await activeSource(
     "Cairn: Show Info",
     "reads the lockfile beside the source",
   );
-  if (!source) {
-    return undefined;
+  if (typeof source === "string") {
+    return refuse(source);
   }
-  return showReport(source.client, INFO, { uri: source.uri });
+  return showReport(source.client, "Cairn: Show Info", "cairn info", {
+    command: INFO,
+    arguments: [{ uri: source.uri }],
+  });
 }
 
 /**
  * Opens what `cairn.diffBlocks` answers for the active `.crn` editor and a
- * structure file beside it, and returns the opened document. The structure
- * file is `structure` when a caller passes one, else the file the user picks.
+ * structure file beside it. The structure file is `structure` when a caller
+ * passes one, else the file the user picks.
  */
-async function showDiffBlocks(
-  structure?: Uri,
-): Promise<TextDocument | undefined> {
-  const source = activeSource(
+async function showDiffBlocks(structure?: Uri): Promise<ReportShown> {
+  const source = await activeSource(
     "Cairn: Diff Blocks",
     "needs the document's text in cairn-lsp, which the extension sends only for a file",
   );
-  if (!source) {
-    return undefined;
+  if (typeof source === "string") {
+    return refuse(source);
   }
   const picked =
     structure ??
@@ -147,43 +165,42 @@ async function showDiffBlocks(
       })
     )?.[0];
   if (!picked) {
-    return undefined;
+    return {};
   }
-  return showReport(source.client, DIFF_BLOCKS, {
-    uri: source.uri,
-    structure: source.client.code2ProtocolConverter.asUri(picked),
+  return showReport(source.client, "Cairn: Diff Blocks", "cairn diff-blocks", {
+    command: DIFF_BLOCKS,
+    arguments: [
+      {
+        uri: source.uri,
+        structure: source.client.code2ProtocolConverter.asUri(picked),
+      },
+    ],
   });
 }
 
 /**
- * The active `.crn` file's URI and the running client `title` asks, or
- * `undefined` after saying why there is none. `whyFile` says why the
- * document must be a saved file.
+ * The running client and the active `.crn` file's URI for the command `title`
+ * names, or why there are none. `whyFile` says why the document must be a
+ * saved file.
  */
-function activeSource(
+async function activeSource(
   title: string,
   whyFile: string,
-): { client: LanguageClient; uri: string } | undefined {
+): Promise<{ client: LanguageClient; uri: string } | string> {
   const editor = window.activeTextEditor;
   if (editor?.document.languageId !== "cairn") {
-    void window.showErrorMessage(
-      `${title} reports on the active editor, which is not a .crn file. Open one first.`,
-    );
-    return undefined;
+    return `${title} reports on the active editor, which is not a .crn file. Open one first.`;
   }
   if (editor.document.uri.scheme !== "file") {
-    void window.showErrorMessage(
-      `${title} ${whyFile}. Save the document to a file first.`,
-    );
-    return undefined;
+    return `${title} ${whyFile}. Save the document to a file first.`;
   }
+  await ready.catch(() => undefined);
   const current = client;
   if (!current?.isRunning()) {
-    void window.showErrorMessage(
+    return (
       `${title} needs cairn-lsp, which is not running. ` +
-        "See the Output panel (Cairn Language Server) for why.",
+      "See the Output panel (Cairn Language Server) for why."
     );
-    return undefined;
   }
   return {
     client: current,
@@ -192,35 +209,70 @@ function activeSource(
 }
 
 /**
- * Runs `command` on `cairn-lsp` with `argument` and opens its answer beside
- * the editor as JSON, returning the opened document.
+ * Sends `request` to `cairn-lsp` and opens its answer beside the editor as
+ * JSON, saying when the answer is the failure document `cli` prints.
  */
 async function showReport(
   current: LanguageClient,
-  command: string,
-  argument: object,
-): Promise<TextDocument | undefined> {
+  title: string,
+  cli: string,
+  request: ExecuteCommandParams,
+): Promise<ReportShown> {
   let report: unknown;
   try {
-    report = await current.sendRequest(ExecuteCommandRequest.type, {
-      command,
-      arguments: [argument],
+    report = await current.sendRequest(ExecuteCommandRequest.type, request);
+  } catch (err) {
+    return refuse(
+      `cairn-lsp answered ${request.command} with an error: ${describeError(err)}`,
+    );
+  }
+  let opened: TextDocument;
+  try {
+    opened = await workspace.openTextDocument({
+      language: "json",
+      content: `${JSON.stringify(report, null, 2)}\n`,
+    });
+    await window.showTextDocument(opened, {
+      viewColumn: ViewColumn.Beside,
+      preserveFocus: true,
     });
   } catch (err) {
-    void window.showErrorMessage(
-      `cairn-lsp did not run ${command}: ${describeError(err)}`,
-    );
+    return refuse(`${title} could not open the report: ${describeError(err)}`);
+  }
+  const findings = failureFindings(report);
+  if (findings === undefined) {
+    return { opened };
+  }
+  const message =
+    findings > 0
+      ? `${cli} refused the source, so there is no report. ` +
+        "The document beside it lists the findings that refused it."
+      : `${cli} refused the run as a whole, so there is no report. ` +
+        `Run ${cli} in a terminal to see why.`;
+  void window.showWarningMessage(message);
+  return { opened, message };
+}
+
+/** Shows `message` as an error and returns it as what the command did. */
+function refuse(message: string): ReportShown {
+  void window.showErrorMessage(message);
+  return { message };
+}
+
+/**
+ * How many findings `report` lists when it is the `{"diagnostics": [...]}`
+ * document of a refused run, else `undefined`.
+ */
+function failureFindings(report: unknown): number | undefined {
+  if (
+    typeof report !== "object" ||
+    report === null ||
+    Object.keys(report).length !== 1
+  ) {
     return undefined;
   }
-  const shown = await workspace.openTextDocument({
-    language: "json",
-    content: `${JSON.stringify(report, null, 2)}\n`,
-  });
-  await window.showTextDocument(shown, {
-    viewColumn: ViewColumn.Beside,
-    preserveFocus: true,
-  });
-  return shown;
+  const { diagnostics } = report as { diagnostics?: unknown };
+  return Array.isArray(diagnostics) ? diagnostics.length : undefined;
 }
 
 /**
@@ -331,7 +383,8 @@ async function resolveServerPath(
   );
 
   if (probe.category === "not-found") {
-    await promptForInstall();
+    // Not awaited: Show Info waits on the start, not on the reader's answer.
+    void promptForInstall();
     return undefined;
   }
 

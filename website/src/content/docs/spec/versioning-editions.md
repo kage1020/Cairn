@@ -1150,9 +1150,13 @@ from the editor rather than a command line:
 - The lock is `<source>.lock` beside the file, the path `cairn info` reads without `--lock`.
 
 What `cairn info` writes on stderr is not sent: a response has no place for it, and the stderr of a
-JSON run is prose outside the contract. An argument the command cannot read, a document the editor
-does not have open, a URI that names no local file, or an `editions` list `--editions` would refuse
-is answered with an `InvalidParams` error that says which.
+JSON run is prose outside the contract. Arguments other than that one object, an object the command
+cannot read, a document the editor does not have open, a URI that names no file path, or an
+`editions` list `--editions` would refuse is answered with an `InvalidParams` error that says which.
+A `file:` URI with a host names a UNC path on Windows and no path elsewhere. A run a palette alone
+refuses has a document with no element ([Lint §11.2](/spec/lint/#112-machine-readable-payload)),
+and no exit code to say it was refused, so it is answered with a `RequestFailed` error carrying the
+lines `cairn info` writes on stderr about the palette instead.
 
 ## 10.6 Provenance and lock
 

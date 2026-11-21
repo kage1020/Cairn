@@ -1,8 +1,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { type TextDocument, Uri, commands, extensions, workspace } from "vscode";
-import type { ServerEvent } from "./server-event";
+import { Uri, commands, extensions, window, workspace } from "vscode";
+import type { ReportShown } from "../extension";
+import type { DiffBlocks, ServerEvent, ShowInfo } from "./server-event";
 
 const EXTENSION_ID = "kage1020.cairn-lang";
 const ACTIVATION_TIMEOUT_MS = 30_000;
@@ -11,11 +12,10 @@ const PIN_TIMEOUT_MS = 30_000;
 /**
  * Waits for the `.crn` document the window opened with to activate the
  * extension, runs `cairn.setTarget` with the edition and version
- * `CAIRN_TEST_SET_TARGET` holds as JSON, runs `Cairn: Show Info` when
- * `CAIRN_TEST_SHOW_INFO` names a file for what it shows, and `Cairn: Diff
- * Blocks` on the structure file `CAIRN_TEST_STRUCTURE` names when
- * `CAIRN_TEST_DIFF_BLOCKS` names one, then stops its language client through
- * `deactivate`.
+ * `CAIRN_TEST_SET_TARGET` holds as JSON, runs `Cairn: Show Info` as the
+ * `ShowInfo` `CAIRN_TEST_SHOW_INFO` holds as JSON says, and `Cairn: Diff
+ * Blocks` as the `DiffBlocks` `CAIRN_TEST_DIFF_BLOCKS` holds says, then stops
+ * its language client through `deactivate`.
  */
 export async function run(): Promise<void> {
   const extension = extensions.getExtension(EXTENSION_ID);
@@ -40,21 +40,27 @@ export async function run(): Promise<void> {
       await pinReached(version);
     }
   }
-  const shownTo = process.env.CAIRN_TEST_SHOW_INFO;
-  if (shownTo) {
-    const shown = await commands.executeCommand<TextDocument | undefined>(
-      "cairn.showInfo",
-    );
-    writeFileSync(shownTo, shown?.getText() ?? "");
+  const showInfo = process.env.CAIRN_TEST_SHOW_INFO;
+  if (showInfo) {
+    const { to, editor } = JSON.parse(showInfo) as ShowInfo;
+    if (editor) {
+      const language = editor === "untitled" ? "cairn" : "plaintext";
+      await window.showTextDocument(
+        await workspace.openTextDocument({ language, content: "" }),
+      );
+    }
+    writeShown(to, await commands.executeCommand<ReportShown>("cairn.showInfo"));
   }
-  const diffShownTo = process.env.CAIRN_TEST_DIFF_BLOCKS;
-  const structure = process.env.CAIRN_TEST_STRUCTURE;
-  if (diffShownTo && structure) {
-    const shown = await commands.executeCommand<TextDocument | undefined>(
-      "cairn.showDiffBlocks",
-      Uri.file(structure),
+  const diffBlocks = process.env.CAIRN_TEST_DIFF_BLOCKS;
+  if (diffBlocks) {
+    const { to, structure } = JSON.parse(diffBlocks) as DiffBlocks;
+    writeShown(
+      to,
+      await commands.executeCommand<ReportShown>(
+        "cairn.showDiffBlocks",
+        Uri.file(structure),
+      ),
     );
-    writeFileSync(diffShownTo, shown?.getText() ?? "");
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];
@@ -65,6 +71,14 @@ export async function run(): Promise<void> {
   // kill the stand-in before it records shutdown and exit.
   const { deactivate } = loaded.exports as typeof import("../extension");
   await deactivate();
+}
+
+/** Writes what a report command did to `to`, as `{ opened?, message? }` JSON. */
+function writeShown(to: string, shown: ReportShown): void {
+  writeFileSync(
+    to,
+    JSON.stringify({ opened: shown.opened?.getText(), message: shown.message }),
+  );
 }
 
 /**

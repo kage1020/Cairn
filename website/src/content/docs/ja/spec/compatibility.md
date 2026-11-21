@@ -23,6 +23,7 @@ Stable な面:
 - [14 章](/ja/spec/redstone/) のレッドストーンの DSL (`logic`・`circuit`・`assert` の行、組み込みの論理ライブラリ、信号バインディングとそれが結ぶセンサーやアクチュエーター、Tier 0 の部品)。ただし、節が[変更の余地あり](#変更の余地あり)と示したものは除きます。
 - ロックファイル (`<source>.lock`) の形式 (フィールド、ハッシュの入力、[§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック) が定める `verified` の意味)。
 - `cairn compile`、`cairn check`、`cairn info` のフラグ名、引数の形、JSON 出力のスキーマ、終了コード。ただし、追加から最初の 3 か月分の月次マイナーリリースにあるフラグとフラグの値は除きます。
+- `cairn.info` のような言語サーバーのコマンドの名前と引数の形。ただし、追加から最初の 3 か月分の月次マイナーリリースにあるコマンドは除きます。コマンドが返すものは、それが運ぶ CLI の出力のティアに従います。
 - tier-1 のトークン。組み込みの `materials` カタログが宣言する抽象トークンで、[§7.2](/ja/spec/materials-themes/#tier-1-のトークン) に挙げています。トークンを足すことは破壊的変更ではありません。
 - [Lint §11.1](/ja/spec/lint/#111-診断コード) が挙げるエラーと警告のコード (`E_*`、`W_*`) と、仕様が予約済みのコードに定めている意味 ([§C.3](#c3-破壊的変更の告知方法))。
 
@@ -37,7 +38,7 @@ Stable な面:
 Evolving な面:
 
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/))。また、節が[変更の余地あり](#変更の余地あり)と示した構文。
-- 新しく追加された `cairn` サブコマンド、`cairn compile`、`cairn check`、`cairn info` に新しく追加されたフラグとフラグの値、`cairn.info` ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) や `cairn.diffBlocks` ([§12.2.5](/ja/spec/ecosystem-interop/#1225-エディタでのレポート)) のような言語サーバーの新しいコマンドの、最初の 3 か月分の月次マイナーリリース。そうしたコマンドが返すのは、それが実行するサブコマンドの JSON 文書で、その文書のティアに従います。
+- 新しく追加された `cairn` サブコマンドと、`cairn compile`・`cairn check`・`cairn info` に新しく追加されたフラグとフラグの値と、`cairn.info` ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) や `cairn.diffBlocks` ([§12.2.5](/ja/spec/ecosystem-interop/#1225-エディタでのレポート)) のような言語サーバーの新しいコマンドの、最初の 3 か月分の月次マイナーリリース。そうしたコマンドが返すのは、それが実行するサブコマンドの JSON 文書で、その文書のティアに従います。
 - レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)。制約カタログはまだ同梱しておらず、ロックにはそのハッシュとしてゼロを記録します。
 - tier-2 のブロック。各 tier-1 のトークンが、ターゲットごとに解決するブロックです ([§7.2](/ja/spec/materials-themes/#tier-1-のトークン))。
 - 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。
@@ -69,6 +70,7 @@ Internal な面:
 | `.crn` の構文 (5〜9 章、§10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
+| 言語サーバーのコマンド (`cairn.info`、`cairn.diffBlocks`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | tier-1 のトークン | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP の通信プロトコル (LSP 標準) | — | — | — | **Stable** | Stable |

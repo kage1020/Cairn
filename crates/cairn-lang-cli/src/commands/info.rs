@@ -7,7 +7,9 @@ use std::process::ExitCode;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::lock::LockReading;
 use cairn_lang_core::resolve::{BuildableTargets, InferredRange, VersionAxes};
-use cairn_lang_formats::info::{InfoRequest, default_lock_path, info, requested_editions};
+use cairn_lang_formats::info::{
+    EditionsRefused, InfoRequest, ReportFormat, info, requested_editions,
+};
 
 use crate::cli::InfoFormat;
 use crate::lockfile::describe_verified;
@@ -22,8 +24,8 @@ pub(crate) fn run_info(
 ) -> ExitCode {
     let editions = match requested_editions(editions) {
         Ok(editions) => editions,
-        Err(message) => {
-            eprintln!("error: {message}");
+        Err(refused) => {
+            eprintln!("error: {}", editions_refused(&refused));
             return ExitCode::from(2);
         }
     };
@@ -31,14 +33,16 @@ pub(crate) fn run_info(
         Ok(source) => source,
         Err(code) => return code,
     };
-    let lock = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
     let lines = LineStarts::new(&source);
     let request = InfoRequest {
         file,
         source: &source,
         editions: &editions,
-        lock: &lock,
-        errors_in_document: matches!(format, InfoFormat::Json),
+        lock,
+        format: match format {
+            InfoFormat::Text => ReportFormat::Text,
+            InfoFormat::Json => ReportFormat::Json,
+        },
     };
     let mut stderr = Stderr {
         file,
@@ -48,7 +52,12 @@ pub(crate) fn run_info(
     let document = match info(&request, &mut stderr) {
         Ok(document) => document,
         Err(refused) => {
-            return report_failure_document(file, &source, format.failure_report(), &refused);
+            return report_failure_document(
+                file,
+                &source,
+                format.failure_report(),
+                &refused.findings,
+            );
         }
     };
     match format {
@@ -64,6 +73,18 @@ pub(crate) fn run_info(
             Ok(()) => ExitCode::SUCCESS,
             Err(code) => code,
         },
+    }
+}
+
+/// Why `--editions` names nothing to report on.
+fn editions_refused(refused: &EditionsRefused) -> String {
+    match refused {
+        // clap's comma delimiter turns `java,,bedrock` into an empty entry.
+        EditionsRefused::EmptyEntry => "--editions value must not contain empty entries".to_owned(),
+        EditionsRefused::Empty => {
+            "--editions value must name at least one of java, bedrock".to_owned()
+        }
+        EditionsRefused::Unknown(unknown) => unknown.to_string(),
     }
 }
 

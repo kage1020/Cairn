@@ -4,11 +4,11 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
-use cairn_lang_core::Edition;
 use cairn_lang_formats::diff_blocks::diff_blocks;
 use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
 use cairn_lang_formats::info::{
-    FailureDocument, Found, InfoRequest, InfoSink, default_lock_path, info, requested_editions,
+    EditionsRefused, Found, InfoRequest, InfoSink, ReportFormat, RequestedEditions, info,
+    requested_editions,
 };
 use lsp_server::ErrorCode;
 
@@ -23,7 +23,7 @@ pub const INFO: &str = "cairn.info";
 pub const DIFF_BLOCKS: &str = "cairn.diffBlocks";
 
 /// Every command the server runs, as `initialize` advertises them.
-pub const COMMANDS: [&str; 2] = [INFO, DIFF_BLOCKS];
+pub const COMMANDS: &[&str] = &[INFO, DIFF_BLOCKS];
 
 /// Why a command did not run: the JSON-RPC error its response carries.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,9 +48,8 @@ impl CommandRefused {
 #[serde(deny_unknown_fields)]
 struct InfoArguments {
     uri: lsp_types::Uri,
-    /// The list `cairn info --editions` takes.
-    #[serde(default = "every_edition")]
-    editions: Vec<String>,
+    /// The list `cairn info --editions` takes, or `None` for its default.
+    editions: Option<Vec<String>>,
 }
 
 /// `cairn.diffBlocks`' one argument.
@@ -60,13 +59,6 @@ struct DiffBlocksArguments {
     uri: lsp_types::Uri,
     /// The structure file's `file:` URI.
     structure: lsp_types::Uri,
-}
-
-/// `--editions`' default.
-fn every_edition() -> Vec<String> {
-    [Edition::Java, Edition::Bedrock]
-        .map(|edition| edition.as_str().to_owned())
-        .to_vec()
 }
 
 /// Runs the command `params` names over the documents `store` holds, returning its result.
@@ -90,7 +82,11 @@ pub fn execute_command(
         DIFF_BLOCKS => run_diff_blocks(store, params.arguments),
         other => Err(CommandRefused::invalid_params(format!(
             "unknown command `{other}`; this server runs {}",
-            COMMANDS.map(|command| format!("`{command}`")).join(", "),
+            COMMANDS
+                .iter()
+                .map(|command| format!("`{command}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
         ))),
     }
 }
@@ -106,12 +102,12 @@ fn run_info(
     })?;
     let InfoArguments { uri, editions } = serde_json::from_value(argument)
         .map_err(|err| CommandRefused::invalid_params(format!("`{INFO}` {usage}: {err}")))?;
-    let editions = requested_editions(&editions).map_err(|message| {
-        CommandRefused::invalid_params(format!("`{INFO}` `editions`: {message}"))
-    })?;
-    let source = store.get(&uri).ok_or_else(|| {
-        CommandRefused::invalid_params(format!("document not open: {}", uri.as_str()))
-    })?;
+    let editions = match editions {
+        None => RequestedEditions::default(),
+        Some(editions) => requested_editions(&editions)
+            .map_err(|refused| CommandRefused::invalid_params(editions_refused(&refused)))?,
+    };
+    let source = open_document(store, INFO, &uri)?;
     let file = file_path(&uri).ok_or_else(|| {
         CommandRefused::invalid_params(format!(
             "`{INFO}` reads the lock beside the source, so it needs a local `file:` URI, and got \
@@ -119,17 +115,27 @@ fn run_info(
             uri.as_str(),
         ))
     })?;
-    let lock = default_lock_path(&file);
     let request = InfoRequest {
         file: &file,
         source,
         editions: &editions,
-        lock: &lock,
-        errors_in_document: true,
+        lock: None,
+        format: ReportFormat::Json,
     };
     let document = match info(&request, &mut Unsent) {
         Ok(document) => serde_json::to_value(document),
-        Err(refused) => serde_json::to_value(FailureDocument::new(source, &refused)),
+        // No finding to put in the document, and no exit code to say the run was refused.
+        Err(refused) if refused.findings.is_empty() => {
+            return Err(CommandRefused {
+                code: ErrorCode::RequestFailed as i32,
+                message: format!(
+                    "`{INFO}` has no report for {}, and no finding refused it:\n{}",
+                    uri.as_str(),
+                    refused.palettes.join("\n"),
+                ),
+            });
+        }
+        Err(refused) => serde_json::to_value(refused.document(source)),
     };
     document.map_err(|err| unserialisable(INFO, &err))
 }
@@ -148,9 +154,7 @@ fn run_diff_blocks(
     })?;
     let DiffBlocksArguments { uri, structure } = serde_json::from_value(argument)
         .map_err(|err| CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` {usage}: {err}")))?;
-    let source = store.get(&uri).ok_or_else(|| {
-        CommandRefused::invalid_params(format!("document not open: {}", uri.as_str()))
-    })?;
+    let source = open_document(store, DIFF_BLOCKS, &uri)?;
     let path = file_path(&structure).ok_or_else(|| {
         CommandRefused::invalid_params(format!(
             "`{DIFF_BLOCKS}` reads the structure file from disk, so `structure` needs a local \
@@ -196,6 +200,35 @@ fn unserialisable(command: &str, err: &serde_json::Error) -> CommandRefused {
     }
 }
 
+/// Why `cairn.info`'s `editions` names nothing to report on.
+fn editions_refused(refused: &EditionsRefused) -> String {
+    match refused {
+        EditionsRefused::Empty => format!(
+            "`{INFO}` `editions` names no edition; list at least one of \"java\", \"bedrock\", \
+             or leave it out for both"
+        ),
+        EditionsRefused::EmptyEntry => format!(
+            "`{INFO}` `editions` holds an empty entry; each entry is \"java\" or \"bedrock\""
+        ),
+        EditionsRefused::Unknown(unknown) => format!("`{INFO}` `editions`: {unknown}"),
+    }
+}
+
+/// The text the editor holds for `uri`, or the refusal saying `command` needs it open.
+fn open_document<'a>(
+    store: &'a DocumentStore,
+    command: &str,
+    uri: &lsp_types::Uri,
+) -> Result<&'a str, CommandRefused> {
+    store.get(uri).ok_or_else(|| {
+        CommandRefused::invalid_params(format!(
+            "`{command}` reports on a document the editor has open, and {} is not open; send \
+             `textDocument/didOpen` for it first",
+            uri.as_str(),
+        ))
+    })
+}
+
 /// What `cairn info` writes on stderr, which a response has no place for.
 struct Unsent;
 
@@ -205,31 +238,43 @@ impl InfoSink for Unsent {
     fn line(&mut self, _: &str) {}
 }
 
-/// The local path a `file:` URI names, or `None` for another scheme, a remote host, or a path
-/// that is relative or does not decode to UTF-8.
+/// The path a `file:` URI names, or `None` for another scheme, a remote host off Windows, or a
+/// path that is relative or does not decode to UTF-8.
 fn file_path(uri: &lsp_types::Uri) -> Option<PathBuf> {
     if !uri
         .scheme()
         .is_some_and(|scheme| scheme.eq_lowercase("file"))
-        || !uri
-            .authority()
-            .is_none_or(|authority| matches!(authority.as_str(), "" | "localhost"))
     {
         return None;
     }
+    let host = match uri.authority() {
+        None => None,
+        Some(authority) if authority.userinfo().is_some() || authority.port().is_some() => {
+            return None;
+        }
+        Some(authority) => match authority.host().as_str() {
+            "" | "localhost" => None,
+            host => Some(host),
+        },
+    };
     let path = uri.path().as_estr().decode().into_string().ok()?;
     if !path.starts_with('/') {
         return None;
     }
     if cfg!(windows) {
+        let path = path.replace('/', "\\");
+        // `file://server/share/shop.crn` names `\\server\share\shop.crn`.
+        if let Some(host) = host {
+            return Some(PathBuf::from(format!(r"\\{host}{path}")));
+        }
         // `file:///C:/site/shop.crn` names `C:\site\shop.crn`.
-        let path = match path.strip_prefix('/') {
+        let path = match path.strip_prefix('\\') {
             Some(drive) if drive.as_bytes().get(1) == Some(&b':') => drive,
             _ => &path,
         };
-        return Some(PathBuf::from(path.replace('/', "\\")));
+        return Some(PathBuf::from(path));
     }
-    Some(PathBuf::from(path.into_owned()))
+    host.is_none().then(|| PathBuf::from(path.into_owned()))
 }
 
 #[cfg(test)]

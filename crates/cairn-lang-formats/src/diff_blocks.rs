@@ -69,10 +69,16 @@ impl DiffBlocksRun {
     /// findings, and none for a refusal of the whole run.
     #[must_use]
     pub fn failure_document(&self, source: &str) -> FailureDocument {
-        match self.outcome {
-            Err(DiffBlocksRefusal::Findings) => FailureDocument::new(source, &self.findings),
-            _ => FailureDocument::new(source, &[]),
-        }
+        let Err(DiffBlocksRefusal::Findings) = self.outcome else {
+            return FailureDocument::new(Vec::new());
+        };
+        let lines = LineStarts::new(source);
+        FailureDocument::new(
+            self.findings
+                .iter()
+                .map(|d| d.render(source, &lines))
+                .collect(),
+        )
     }
 }
 
