@@ -273,6 +273,7 @@ fn form(id: &str, states: &[(&str, StateValue)]) -> BedrockForm {
         waterlogged: false,
         dropped: Vec::new(),
         rederived: Vec::new(),
+        in_entity: None,
     }
 }
 

@@ -283,6 +283,8 @@ const PAINTERS: &[(&str, &str, &str)] = &[
     ("chest", "chest id=c at=inside.front offset=1 y=0", ""),
     ("trapdoor", "trapdoor id=t at=inside.front offset=1 y=1", ""),
     ("note_block", "note_block at=1,1,1 note=12", ""),
+    ("sign", "sign at=1,1,1 text=\"Inn\"", ""),
+    ("bed", "bed at=inside.front offset=1 y=1", ""),
     ("repeater", "repeater at=1,1,1 facing=east", ""),
     ("comparator", "comparator at=inside.front offset=1 y=1", ""),
     ("redstone_torch", "redstone_torch at=1,1,1", ""),
@@ -385,6 +387,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Chest
             | MemberRole::Trapdoor
             | MemberRole::NoteBlock
+            | MemberRole::Sign
+            | MemberRole::Bed
             | MemberRole::Repeater
             | MemberRole::Comparator
             | MemberRole::RedstoneTorch
@@ -421,6 +425,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         MemberRole::Chest,
         MemberRole::Trapdoor,
         MemberRole::NoteBlock,
+        MemberRole::Sign,
+        MemberRole::Bed,
         MemberRole::Repeater,
         MemberRole::Comparator,
         MemberRole::RedstoneTorch,

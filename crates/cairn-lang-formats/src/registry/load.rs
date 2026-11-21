@@ -159,6 +159,10 @@ impl TargetRegistry for PackView<'_> {
         self.materials.tokens().map(str::to_owned).collect()
     }
 
+    fn canonical_block(&self, token: &str) -> Option<String> {
+        self.materials.canonical_id(token).map(str::to_owned)
+    }
+
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         self.ids.map(|ids| BlockIdSet::new(&self.label, ids))
     }
@@ -581,6 +585,37 @@ pub enum RegistryError {
         token: String,
         /// The version it named.
         mc_version: String,
+    },
+    /// A Java pack's `materials` names a `canonical`, though its blocks are the canonical ones.
+    #[error(
+        "registry pack materials token `{token}` names `canonical` for java, whose blocks are the canonical ones; only a bedrock pack names one"
+    )]
+    CanonicalOnJava {
+        /// The token naming it.
+        token: String,
+    },
+    /// A Bedrock pack's `materials` names a `canonical` its state map does not map onto the
+    /// token's block.
+    #[error(
+        "registry pack materials token `{token}` names `canonical` `{canonical}`, which `states` does not map onto `{block}` at `{mc_version}`"
+    )]
+    CanonicalUnmapped {
+        /// The token naming it.
+        token: String,
+        /// The canonical block it names.
+        canonical: String,
+        /// The block the token resolves to at `mc_version`.
+        block: String,
+        /// The version whose map lacks it.
+        mc_version: String,
+    },
+    /// A Bedrock pack's `materials` names a `canonical` with no state map to check it against.
+    #[error(
+        "registry pack materials token `{token}` names `canonical`, but the pack names no `states` to map it onto the token's block"
+    )]
+    CanonicalWithoutStates {
+        /// The token naming it.
+        token: String,
     },
     /// The pack's `blocks` table failed to validate.
     #[error("registry pack `blocks`: {source}")]
@@ -1263,6 +1298,7 @@ fn load_pack(
     )?;
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
     validate_meanings(&meanings, &blocks, states.as_ref())?;
+    validate_material_canonicals(&materials, states.as_ref(), expected_edition)?;
     match &states {
         Some(states) => validate_states_cover_versions(states, &data_versions)?,
         None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
@@ -1574,6 +1610,41 @@ fn validate_material_overrides(
                 token: token.to_owned(),
                 mc_version: mc_version.to_owned(),
             });
+        }
+    }
+    Ok(())
+}
+
+/// Refuses a materials `canonical` in a Java pack, and one in a Bedrock pack that a version of
+/// `states` does not map onto the block the token resolves to there.
+fn validate_material_canonicals(
+    materials: &MaterialsIndex,
+    states: Option<&StateMapIndex>,
+    edition: Edition,
+) -> Result<(), RegistryError> {
+    for (token, canonical) in materials.canonicals() {
+        let token = token.to_owned();
+        if edition == Edition::Java {
+            return Err(RegistryError::CanonicalOnJava { token });
+        }
+        let Some(states) = states else {
+            return Err(RegistryError::CanonicalWithoutStates { token });
+        };
+        for mc_version in states.versions() {
+            let map = states
+                .at(mc_version)
+                .expect("a version the index lists has a map");
+            let block = materials
+                .lookup_id_for(&token, Some(mc_version))
+                .expect("a token the catalog lists resolves");
+            if !map.java_ids(block, &IndexMap::new()).contains(&canonical) {
+                return Err(RegistryError::CanonicalUnmapped {
+                    token,
+                    canonical: canonical.to_owned(),
+                    block: block.to_owned(),
+                    mc_version: mc_version.to_owned(),
+                });
+            }
         }
     }
     Ok(())
