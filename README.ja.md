@@ -31,6 +31,8 @@ theme medieval:
   slot wall  -> @cobblestone
   slot roof  -> @spruce_stairs
   slot glass -> @glass_pane
+  walls[class=outer]  -> trim=@spruce_log
+  window[class=small] -> frame=@spruce_wood
 
 struct cottage size=9x7
   floor  mat_slot=floor
@@ -78,7 +80,7 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 $ cairn info cottage.crn
 registry compatibility:  1.20 .. latest
 inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
-edition portability:     Java: portable: 6  degraded: 0  unsupported: 0   Bedrock: portable: 6  degraded: 0  unsupported: 0
+edition portability:     Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
 respelled:               Java: none   Bedrock: none
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
@@ -92,7 +94,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、文字を持つ看板、ベッド、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill`)、`level` による階ごとのまとまり
 - エンティティ: 絵画、額縁、防具立て、売り物を持つ村人、display (`text_display` / `block_display` / `item_display`)、ID で置くほかのエンティティ (`spawn`)、テーマがエディションごとに組み上げる `hologram` (Java ではテキストの display、Bedrock では光る看板)
-- スロットを持つテーマと、そのエディション別バリアント
+- スロットを持つテーマと、そのエディション別バリアント。部位のブロックを割り当てるセレクタ行 (`walls` の隅柱と、ドアや窓を囲む枠)
 - `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID、改名前の旧名、意味トークンを収めたレジストリパック。正規トークンはターゲットごとの綴りで書き出されます
 - パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水、ブロック・ドア・ほかのエンティティにめり込むエンティティを警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します
@@ -104,7 +106,6 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 **未実装の機能。**
 
-- テーマのセレクタ束縛。`window[class=small] -> frame=@spruce_wood` は窓にマッチしますが何も塗らず、`cairn check` がそのことを報告します。
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
 - 既存の schematic の読み込み
 - ブラウザで動くプレイグラウンド (`cairn-lang-wasm` クレートは、まだ何も export しないプレースホルダです)
@@ -113,7 +114,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - **ブロックステートではなく意図を書く。** 切妻屋根は、自分の階段がどちらを向き、それぞれがブロックの上半分と下半分のどちらに置かれるかを知っているので、`facing=` を書く必要はありません。ブロックステートはコンパイラが導出します。自分で指定するのは、その値自体が意図であるときだけです。
 - **書く順番は問わない。** メンバーはどの順に書いても構いません。コンパイラが固定のフェーズ (massing → envelope → openings → fixtures → fluids → redstone → raw) に並べ替えます。
-- **テーマで「どこに」と「何で」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットに素材を割り当てます。スタイルシートがクラスにスタイルを割り当てるのと同じ関係です。
+- **テーマで「どこに」と「何で」を分ける。** 構造は `mat_slot` を持ち、テーマがそのスロットに素材を割り当てます。スタイルシートがクラスにスタイルを割り当てるのと同じ関係です。セレクタ行は、選んだメンバーの細部を決めます。上のコテージでは、`walls[class=outer] -> trim=@spruce_log` が壁の隅にトウヒの原木の柱を立て、`window[class=small] -> frame=@spruce_wood` が 2 つの窓をトウヒの木の枠で囲みます。この 2 行を消すと、コテージは隅まで丸石になります。
 - **変換せず、再コンパイルする。** 持ち運べる成果物は `.crn` ソースです。構造ファイルは特定のエディションとバージョン向けのビルド出力で、プログラムでいえば実行バイナリにあたります。
 - **黙って置き換えない。** 未知のブロック、解決できないスロット、意図を表現できないターゲットは、エラーか名前の付いた劣化 (degradation) として報告します。
 

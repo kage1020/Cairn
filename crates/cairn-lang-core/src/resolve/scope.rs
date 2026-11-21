@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberBody, ValueWithSpan, levels_under};
 
-use super::binding::ThemeBinding;
+use super::binding::{ThemeBinding, TokenKind, classify_token, member_form};
 use super::resolution::{ResolvedMemberBinding, ScopeResolution};
 use super::selector::selector_matches;
 use super::slots::unresolved_slot_diag;
@@ -87,6 +87,8 @@ fn resolve_members(
         {
             match slots.get(slot_name) {
                 Some(v) => {
+                    binding.refused = classify_token(&v.value) == TokenKind::NotAToken
+                        && member_form(&v.value).is_none();
                     binding.slot_value = Some(v.clone());
                     if let Some(arguments) = ctx
                         .themes
@@ -99,6 +101,7 @@ fn resolve_members(
                 None if sibling_slots.contains(slot_name) => {}
                 // INVARIANT(already-reported): an identical triple is already in `ctx.diagnostics`.
                 None => {
+                    binding.refused = true;
                     let said = (member.span.start, slot_name.to_owned(), tname.to_owned());
                     if ctx.diagnosed.insert(said) {
                         ctx.diagnostics.push(unresolved_slot_diag(

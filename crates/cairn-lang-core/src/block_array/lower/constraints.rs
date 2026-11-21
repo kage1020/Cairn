@@ -5,7 +5,7 @@
 
 use std::collections::HashSet;
 
-use crate::block_array::constraint::{Constraint, EntityBox, Support};
+use crate::block_array::constraint::{Constraint, Contents, EntityBox, Support};
 use crate::block_array::joins::Face;
 use crate::block_array::material::TargetRegistry;
 use crate::block_array::{
@@ -21,9 +21,6 @@ type Cell = (u32, u32, u32);
 
 /// The ways water flows out of the cell holding it.
 const FLOWS: [Face; 5] = [Face::Down, Face::North, Face::East, Face::South, Face::West];
-
-/// The fluids a gravity block falls through as it does through air.
-const FLUIDS: [&str; 2] = [BlockState::WATER_ID, "minecraft:lava"];
 
 /// One lowered body the checks read: its members, its array, and where its interior starts along
 /// x and z.
@@ -56,8 +53,14 @@ struct Grid<'a> {
 }
 
 impl<'a> Grid<'a> {
-    /// The cell `face` leads to from `cell`, with its slot and state; `None` outside the array.
-    fn beside(&self, cell: Cell, face: Face) -> Option<(Cell, PaletteIndex, &'a BlockState)> {
+    /// The cell `face` leads to from `cell`, with its state and what `registry` says it holds;
+    /// `None` outside the array or where the registry cannot say.
+    fn beside(
+        &self,
+        registry: &dyn TargetRegistry,
+        cell: Cell,
+        face: Face,
+    ) -> Option<(Cell, &'a BlockState, Contents)> {
         let (dx, dy, dz) = face.step();
         let next = (
             cell.0.checked_add_signed(dx)?,
@@ -65,7 +68,13 @@ impl<'a> Grid<'a> {
             cell.2.checked_add_signed(dz)?,
         );
         let slot = self.array.voxels[self.array.dims.index(next.0, next.1, next.2)?];
-        Some((next, slot, &self.array.palette.entries[usize::from(slot.0)]))
+        let state = &self.array.palette.entries[usize::from(slot.0)];
+        let contents = if slot == PaletteIndex::AIR {
+            Contents::Air
+        } else {
+            registry.contents(state)?
+        };
+        Some((next, state, contents))
     }
 
     /// `cell` as a member's `at=` names it, counted from the interior's corner.
@@ -88,6 +97,8 @@ struct Failed<'a> {
     toward: Face,
     beside: &'a BlockState,
     beside_cell: Cell,
+    /// Whether the cell it fails against holds air.
+    air: bool,
 }
 
 /// The first block of a member one check fails on, and how many it fails on.
@@ -124,7 +135,7 @@ fn member_findings(
     for block in &member.resolved_state {
         let state = &block.state;
         let constraint = registry.constraint(state);
-        let water = holds_water(state);
+        let water = holds_water(registry, state);
         if constraint.is_none() && !water {
             continue;
         }
@@ -136,12 +147,12 @@ fn member_findings(
                     }
                 }
                 Some(Constraint::Rests { host, needs }) => {
-                    if let Some(failed) = unheld(grid, registry, state, cell, host) {
+                    if let Some(failed) = unheld(grid, registry, state, cell, host.face()) {
                         Tally::add(&mut rests, (failed, needs));
                     }
                 }
                 Some(Constraint::Falls) => {
-                    if let Some(failed) = falling(grid, state, cell) {
+                    if let Some(failed) = falling(grid, registry, state, cell) {
                         Tally::add(&mut falls, failed);
                     }
                 }
@@ -172,9 +183,9 @@ fn member_findings(
     found
 }
 
-/// Whether `state` holds water: a water block, or one waterlogged.
-fn holds_water(state: &BlockState) -> bool {
-    state.id == BlockState::WATER_ID
+/// Whether `state` holds water: a block `registry` reads as water, or one waterlogged.
+fn holds_water(registry: &dyn TargetRegistry, state: &BlockState) -> bool {
+    registry.contents(state) == Some(Contents::Water)
         || state
             .properties
             .get(WATERLOGGED)
@@ -190,26 +201,34 @@ fn unheld<'a>(
     cell: Cell,
     host: Face,
 ) -> Option<Failed<'a>> {
-    let (beside_cell, slot, beside) = grid.beside(cell, host)?;
-    let holds = slot != PaletteIndex::AIR && registry.holds(state, beside)?;
+    let (beside_cell, beside, contents) = grid.beside(registry, cell, host)?;
+    let air = contents == Contents::Air;
+    let holds = !air && registry.holds(state, beside)?;
     (!holds).then_some(Failed {
         state,
         cell,
         toward: host,
         beside,
         beside_cell,
+        air,
     })
 }
 
 /// The gravity block at `cell` as failing, when the cell below it holds air or a fluid.
-fn falling<'a>(grid: &Grid<'a>, state: &'a BlockState, cell: Cell) -> Option<Failed<'a>> {
-    let (beside_cell, slot, beside) = grid.beside(cell, Face::Down)?;
-    (slot == PaletteIndex::AIR || FLUIDS.contains(&beside.id.as_str())).then_some(Failed {
+fn falling<'a>(
+    grid: &Grid<'a>,
+    registry: &dyn TargetRegistry,
+    state: &'a BlockState,
+    cell: Cell,
+) -> Option<Failed<'a>> {
+    let (beside_cell, beside, contents) = grid.beside(registry, cell, Face::Down)?;
+    (contents != Contents::Block).then_some(Failed {
         state,
         cell,
         toward: Face::Down,
         beside,
         beside_cell,
+        air: contents == Contents::Air,
     })
 }
 
@@ -222,8 +241,8 @@ fn spilling<'a>(
     cell: Cell,
 ) -> impl Iterator<Item = Failed<'a>> {
     FLOWS.into_iter().filter_map(move |face| {
-        let (beside_cell, slot, beside) = grid.beside(cell, face)?;
-        if slot != PaletteIndex::AIR {
+        let (beside_cell, beside, contents) = grid.beside(registry, cell, face)?;
+        if contents != Contents::Air {
             return None;
         }
         let open = registry.keeps_water(state, face) == Some(false);
@@ -233,6 +252,7 @@ fn spilling<'a>(
             toward: face,
             beside,
             beside_cell,
+            air: true,
         })
     })
 }
@@ -258,7 +278,7 @@ fn counted(count: usize, [one, many]: [&str; 2], first: &str) -> String {
 
 /// What a failing block meets: air, or the face of the block it meets.
 fn met(failed: &Failed<'_>) -> String {
-    if failed.beside.id == BlockState::AIR_ID {
+    if failed.air {
         "air".to_owned()
     } else {
         format!(
@@ -353,7 +373,7 @@ fn diag_unsupported(
 
 fn diag_falls(member: &ResolvedMember, grid: &Grid<'_>, tally: &Tally<Failed<'_>>) -> Diagnostic {
     let first = &tally.first;
-    let under = if first.beside.id == BlockState::AIR_ID {
+    let under = if first.air {
         "air".to_owned()
     } else {
         format!("`{}`", written(first.beside))
@@ -578,10 +598,9 @@ pub(super) fn entity_findings(
                 .cells(built.array)
                 .into_iter()
                 .filter_map(|cell| {
-                    let (behind, slot, state) =
-                        grid.beside(cell, placed.entity.facing.opposite())?;
-                    (slot == PaletteIndex::AIR || FLUIDS.contains(&state.id.as_str()))
-                        .then_some((behind, state))
+                    let (behind, state, contents) =
+                        grid.beside(registry, cell, placed.entity.facing.opposite())?;
+                    (contents != Contents::Block).then_some((behind, state))
                 })
                 .collect();
             if let Some(&first) = unheld.first() {

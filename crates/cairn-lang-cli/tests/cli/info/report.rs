@@ -562,7 +562,8 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
     let fixture = Fixture::new(
         "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  floor mat_slot=wall\n  \
          walls mat_slot=wall height=3\n  raw_block id=pot mat=minecraft:cauldron at=1,1,1\n  \
-         raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n",
+         raw_fill mat=minecraft:chest from=2,1,1 to=3,1,1\n  \
+         raw_block mat=minecraft:chest at=1,1,3\n  raw_block mat=minecraft:chest at=3,1,3\n",
     );
     let stdout = info_rows(&fixture.source(), "java,bedrock");
     let row = stdout
@@ -571,7 +572,8 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
         .unwrap_or_else(|| panic!("no semantic row: {stdout}"));
     assert_eq!(
         row,
-        "semantic-sensitive:      Java: pot(cauldron split @1.17), raw_fill(item format @1.20.5)   \
+        "semantic-sensitive:      Java: pot(cauldron split @1.17), raw_fill[0](item format \
+         @1.20.5), raw_block[1](item format @1.20.5), raw_block[2](item format @1.20.5)   \
          Bedrock: (none)",
     );
     let out = cairn(
@@ -591,7 +593,11 @@ fn the_semantic_row_names_each_editions_sensitive_members() {
         serde_json::json!([
             {"edition": "java", "member": "pot", "reason": "cauldron split",
              "boundary_version": "1.17"},
-            {"edition": "java", "member": "raw_fill", "reason": "item format",
+            {"edition": "java", "member": "raw_fill[0]", "reason": "item format",
+             "boundary_version": "1.20.5"},
+            {"edition": "java", "member": "raw_block[1]", "reason": "item format",
+             "boundary_version": "1.20.5"},
+            {"edition": "java", "member": "raw_block[2]", "reason": "item format",
              "boundary_version": "1.20.5"},
         ]),
     );

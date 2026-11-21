@@ -45,7 +45,7 @@ pub use portability::{
 };
 pub use registry::{
     ConstraintIndex, ConstraintsError, PackFiles, PackManifest, PackSource, RegistryError,
-    RegistryPack, builtin_constraints, builtin_pack, builtin_version_tables,
+    RegistryPack, builtin_constraints, builtin_pack, builtin_version_tables, builtin_view,
     load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use schem::{

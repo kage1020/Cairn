@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberRole, ValueWithSpan};
+use crate::intent::{BindingKey, Member, MemberRole, ValueWithSpan};
 use crate::resolve::{ScopeResolution, form_word, member_form};
 
 use crate::block_array::args::{
@@ -21,8 +21,8 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    IdSite, MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
-    diag_undeclared_id, diag_unknown_abstract_token,
+    IdSite, MemberFallback, NamedBy, TokenSite, check_state_literal, diag_abstract_token,
+    diag_state_unmapped, diag_undeclared_id, diag_unknown_abstract_token,
 };
 use super::written::Written;
 
@@ -423,6 +423,64 @@ fn diag_member_form_bound(member: &Member, slot_value: &ValueWithSpan) -> Diagno
     );
     diagnostic.span = member_or_slot_span(member, slot_value);
     diagnostic
+}
+
+/// The block a theme selector row binds `key` to on `member`, or `None` when no row does or after
+/// the finding that says the target cannot build its value.
+pub(super) fn bound_block(
+    member: &Member,
+    key: BindingKey,
+    ctx: &StructCtx<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<BlockState> {
+    let value = ctx
+        .scope?
+        .members
+        .get(&member.span.start)?
+        .selector_extras
+        .get(key.key())?;
+    let site = TokenSite::Binding(key);
+    let unbound = match resolve_block_state(value, ctx.registry) {
+        Ok(state) => {
+            if !check_state_literal(value, &state, ctx.registry, diagnostics) {
+                return None;
+            }
+            let unmapped = ctx.registry.and_then(|registry| {
+                diag_state_unmapped(value.span.clone(), &state, registry, NamedBy::Part(key))
+            });
+            return match unmapped {
+                Some(finding) => {
+                    diagnostics.push(finding);
+                    None
+                }
+                None => Some(state),
+            };
+        }
+        Err(unbound) => unbound,
+    };
+    match unbound {
+        MaterialDeferred::Abstract(token) => {
+            diagnostics.push(diag_abstract_token(value.span.clone(), &token, site));
+        }
+        MaterialDeferred::UnknownAbstract { token, suggestion } => {
+            diagnostics.push(diag_unknown_abstract_token(
+                value.span.clone(),
+                &token,
+                suggestion.as_deref(),
+                site,
+            ));
+        }
+        MaterialDeferred::UnknownId(unknown) => {
+            diagnostics.push(diag_undeclared_id(
+                value.span.clone(),
+                &unknown,
+                IdSite::Semantic(site),
+            ));
+        }
+        // INVARIANT(upstream-diagnosed): `check_slot_targets` reports `E_UNKNOWN_SLOT_TARGET`.
+        MaterialDeferred::AlreadyDiagnosed => {}
+    }
+    None
 }
 
 /// The block a member is built from when no `mat_slot=` binds one: the pack's `token`, or

@@ -1,12 +1,12 @@
 //! The constraint catalog: what the game requires of the cells around a block to keep it where a
 //! build puts it, and the boundary versions across which a block means something else
-//! (`spec/lint` "Constraint catalog"). It is edition-neutral, written in canonical ids, and
-//! hashed apart from the registry packs.
+//! (`spec/lint` "Constraint catalog"). One catalog serves both editions, in canonical ids, and it
+//! is hashed apart from the registry packs.
 
 use std::collections::HashMap;
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{Constraint, Face, Faces, Support};
+use cairn_lang_core::block_array::{Constraint, Face, Faces, Support, Vertical};
 use cairn_lang_core::lock::HashHex;
 use cairn_lang_core::resolve::{FloorPlacement, VersionOrder};
 use indexmap::IndexMap;
@@ -101,32 +101,12 @@ pub struct SupportRow {
     #[serde(default)]
     pub defaults: IndexMap<String, String>,
     /// Which block holds them.
-    pub on: Side,
+    pub on: Vertical,
     /// What that block's face toward them must give.
-    pub needs: Needs,
+    pub needs: Support,
     /// Blocks that hold them whatever their faces.
     #[serde(default)]
     pub also_on: Vec<String>,
-}
-
-/// The block a [`SupportRow`]'s blocks rest on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Side {
-    /// The block below, which they stand on.
-    Below,
-    /// The block above, which they hang from.
-    Above,
-}
-
-/// What a [`SupportRow`]'s blocks need of the face that holds them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Needs {
-    /// The whole face.
-    Sturdy,
-    /// The centre of the face.
-    Center,
 }
 
 /// One row of [`ConstraintsCatalog::gravity`].
@@ -299,7 +279,7 @@ struct Rule {
 enum RuleKind {
     Hangs(HangsBy),
     Rests {
-        host: Face,
+        host: Vertical,
         needs: Support,
         also_on: Vec<String>,
     },
@@ -355,7 +335,7 @@ impl ConstraintIndex {
     /// # Errors
     ///
     /// [`ConstraintsError`] for the first fault in the catalog.
-    pub fn from_catalog(
+    pub(crate) fn from_catalog(
         catalog: ConstraintsCatalog,
         hash: HashHex,
         java: &BlocksIndex,
@@ -461,14 +441,6 @@ impl ConstraintIndex {
             } else {
                 check.ids(table, at, &row.also_on)?
             };
-            let host = match row.on {
-                Side::Below => Face::Down,
-                Side::Above => Face::Up,
-            };
-            let needs = match row.needs {
-                Needs::Sturdy => Support::Sturdy,
-                Needs::Center => Support::Center,
-            };
             self.add_rules(
                 &ids,
                 &Rule {
@@ -476,8 +448,8 @@ impl ConstraintIndex {
                     when: row.when,
                     defaults: row.defaults,
                     kind: RuleKind::Rests {
-                        host,
-                        needs,
+                        host: row.on,
+                        needs: row.needs,
                         also_on,
                     },
                 },
@@ -528,6 +500,7 @@ impl ConstraintIndex {
                 return Err(malformed(table, &ids, "it names no face"));
             }
             for id in &ids {
+                self.agrees(table, id, &row.defaults)?;
                 self.centres.entry(id.clone()).or_default().push(Centre {
                     when: row.when.clone(),
                     defaults: row.defaults.clone(),
@@ -596,6 +569,7 @@ impl ConstraintIndex {
     /// Add `rule` to each of `ids`, refusing one a state of the block already meets another of.
     fn add_rules(&mut self, ids: &[String], rule: &Rule) -> Result<(), ConstraintsError> {
         for id in ids {
+            self.agrees(rule.table, id, &rule.defaults)?;
             let rules = self.rules.entry(id.clone()).or_default();
             if let Some(other) = rules.iter().find(|other| !exclusive(other, rule)) {
                 return Err(ConstraintsError::OverlappingRules {
@@ -605,6 +579,36 @@ impl ConstraintIndex {
                 });
             }
             rules.push(rule.clone());
+        }
+        Ok(())
+    }
+
+    /// Refuse a row of `table` whose `defaults` give a state of `id` another default than a row
+    /// already added does, which would let one unwritten state meet two rules or none.
+    fn agrees(
+        &self,
+        table: &'static str,
+        id: &str,
+        defaults: &IndexMap<String, String>,
+    ) -> Result<(), ConstraintsError> {
+        let rules = self.rules.get(id).into_iter().flatten();
+        let centres = self.centres.get(id).into_iter().flatten();
+        let given = rules
+            .map(|rule| &rule.defaults)
+            .chain(centres.map(|centre| &centre.defaults));
+        for other in given {
+            for (key, value) in defaults {
+                if let Some(earlier) = other.get(key).filter(|earlier| *earlier != value) {
+                    return Err(ConstraintsError::MalformedRow {
+                        table,
+                        id: id.to_owned(),
+                        problem: format!(
+                            "`defaults` gives `{key}` the default `{value}`, and another row \
+                             `{earlier}`"
+                        ),
+                    });
+                }
+            }
         }
         Ok(())
     }

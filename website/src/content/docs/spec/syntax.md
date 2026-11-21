@@ -101,8 +101,8 @@ parser keeps the compound as written, braces included, and checks no field in it
 target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
 [Entities §8.1](/spec/entities/#81-two-tiers)'s. The keywords that read `nbt=` are the entities'
 and `raw_block`. On any other line it is a key like any other that its line does not read:
-`E_UNKNOWN_ARGUMENT` on a header or a member, and `W_IGNORED_ARGUMENT` as a theme selector's
-binding. A key that reads another kind of value treats a compound as it treats a decimal.
+`E_UNKNOWN_ARGUMENT`, on a header, on a member and as a theme selector's binding. A key that reads
+another kind of value treats a compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -559,7 +559,8 @@ language server shows the entry's own line on hover.
 - **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
   [Components, Editing, and Multi-building
   §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
-- **`theme`.** Binds each slot name to a material token. See
+- **`theme`.** Binds each slot name to a material token, and through a selector row the block of a
+  part of each member it selects. See
   [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
 - **`site`.** Places `def`s beside one another and lays walkways between them. See
   [Components, Editing, and Multi-building

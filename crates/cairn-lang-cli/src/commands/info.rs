@@ -303,8 +303,10 @@ fn backticked(names: &[String]) -> String {
 fn semantic_sensitive(edition: Edition, block_ir: &BlockArrayIr) -> Vec<SemanticSensitiveFinding> {
     builtin_pack(edition)
         .view(None)
-        .with_constraints(builtin_constraints())
-        .semantic_sensitive(block_ir)
+        .semantic_sensitive(builtin_constraints(), block_ir)
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and

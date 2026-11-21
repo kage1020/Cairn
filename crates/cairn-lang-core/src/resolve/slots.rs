@@ -1,6 +1,6 @@
 //! Theme slot findings: a `mat_slot=` the bound theme does not declare, a
-//! slot value that is not a material token, and a selector that matched
-//! nothing.
+//! slot or selector binding value that is not a material token, and a
+//! selector that matched nothing.
 
 use std::collections::HashSet;
 
@@ -69,8 +69,9 @@ pub(super) fn unresolved_slot_diag(
     }
 }
 
-/// Slot values that are neither material tokens nor member forms, and member form arguments
-/// the form does not take, in every declared theme, shadowed ones included.
+/// Slot values that are neither material tokens nor member forms, selector binding values that are
+/// not material tokens, and member form arguments the form does not take, in every declared theme,
+/// shadowed ones included; a key its keyword does not bind is `check::arguments`' to report.
 pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<Diagnostic>) {
     for theme in themes {
         for (slot_name, v) in &theme.slots {
@@ -84,30 +85,57 @@ pub(super) fn check_slot_targets(themes: &[ThemeBinding], diagnostics: &mut Vec<
                 continue;
             }
             if classify_token(&v.value) == TokenKind::NotAToken {
-                diagnostics.push(Diagnostic {
-                    code: DiagnosticCode::UnknownSlotTarget,
-                    span: v.span.clone(),
-                    primary: format!(
-                        "slot `{slot}` in theme `{theme}` does not bind to a canonical or abstract material token",
-                        slot = slot_name,
-                        theme = theme.name,
+                diagnostics.push(not_a_material_token(
+                    format!(
+                        "slot `{slot_name}` in theme `{}` does not bind to a canonical or abstract material token",
+                        theme.name,
                     ),
-                    notes: vec![DiagnosticNote {
-                        span: None,
-                        message: format!(
-                            "expected a `@canonical_block` or `@abstract.material` value, or the \
-                             member form {}, which a `hologram` is built as",
-                            MEMBER_FORMS
-                                .iter()
-                                .map(|(form, _)| format!("`{form}`"))
-                                .collect::<Vec<_>>()
-                                .join(" or ")
-                        ),
-                    }],
-                    data: None,
-                });
+                    v,
+                    format!(
+                        "expected a `@canonical_block` or `@abstract.material` value, or the \
+                         member form {}, which a `hologram` is built as",
+                        MEMBER_FORMS
+                            .iter()
+                            .map(|(form, _)| format!("`{form}`"))
+                            .collect::<Vec<_>>()
+                            .join(" or ")
+                    ),
+                ));
             }
         }
+        for sel in &theme.selectors {
+            let role = role_of(&sel.keyword);
+            for (key, v) in &sel.bindings {
+                if role.binding_key(key).is_some()
+                    && classify_token(&v.value) == TokenKind::NotAToken
+                {
+                    diagnostics.push(not_a_material_token(
+                        format!(
+                            "`{key}=` on `{selector}` in theme `{theme}` does not bind to a canonical or abstract material token",
+                            selector = selector_text(&sel.keyword, &sel.attrs),
+                            theme = theme.name,
+                        ),
+                        v,
+                        "expected a `@canonical_block` or `@abstract.material` value".to_owned(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// The `E_UNKNOWN_SLOT_TARGET` on `value`, which `primary` says binds no material token and
+/// `expected` says what would be valid.
+fn not_a_material_token(primary: String, value: &ValueWithSpan, expected: String) -> Diagnostic {
+    Diagnostic {
+        code: DiagnosticCode::UnknownSlotTarget,
+        span: value.span.clone(),
+        primary,
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: expected,
+        }],
+        data: None,
     }
 }
 
