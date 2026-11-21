@@ -214,12 +214,21 @@ fn duplicate_selector_diag(
             ),
         })
         .collect();
-    notes.push(DiagnosticNote {
-        span: None,
-        message: format!(
-            "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's {listed} and the earlier value is dead text whatever a binding comes to mean (no pass lowers a selector's bindings yet, so neither value is built today)",
-        ),
-    });
+    // A key the keyword does not bind builds on neither row, which its `E_UNKNOWN_ARGUMENT` says.
+    let keyword_role = role_of(&rule.keyword);
+    let built: Vec<String> = rebound
+        .iter()
+        .filter(|(key, _)| keyword_role.binding_key(key).is_some())
+        .map(|(key, _)| format!("`{key}=`"))
+        .collect();
+    if let Some(built) = and_list(&built) {
+        notes.push(DiagnosticNote {
+            span: None,
+            message: format!(
+                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's {built} and the earlier value is built for none of them",
+            ),
+        });
+    }
     notes.push(DiagnosticNote {
         span: None,
         message: "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members".into(),

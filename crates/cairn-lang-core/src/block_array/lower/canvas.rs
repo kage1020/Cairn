@@ -1,5 +1,7 @@
 //! The grid and the palette one body is painted into.
 
+use std::collections::HashSet;
+
 use indexmap::IndexMap;
 
 use crate::block_array::geometry::Declared;
@@ -140,6 +142,26 @@ impl ScopePalette {
     }
 }
 
+/// A block state a member paints, interned on its first cell so a state it paints nowhere claims
+/// no palette slot.
+pub(super) struct LazySlot {
+    state: BlockState,
+    slot: Option<PaletteIndex>,
+}
+
+impl LazySlot {
+    pub(super) fn new(state: BlockState) -> Self {
+        Self { state, slot: None }
+    }
+
+    /// The state's slot in `palette`, interning it on the first call.
+    pub(super) fn intern(&mut self, palette: &mut ScopePalette) -> PaletteIndex {
+        *self
+            .slot
+            .get_or_insert_with(|| palette.intern(self.state.clone()))
+    }
+}
+
 /// The voxel grid under construction, with who wrote each cell and which palette slots a write
 /// named, so within-phase contests and covered materials can be told apart.
 pub(super) struct Canvas {
@@ -158,6 +180,8 @@ pub(super) struct Canvas {
     /// `(overridden, overriding)` member pairs, in the order they are judged, to how many voxels
     /// the second took from each `(before, after)` pair of palette slots.
     pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
+    /// [`Self::conflicts`] for the frames members lay, which meet only one another.
+    pub(super) frame_conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
     /// Indexed like [`Self::phases`]: `true` while that member's contests wait on
     /// [`Self::settle_contests`].
     held: Vec<bool>,
@@ -188,6 +212,7 @@ impl Canvas {
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
+            frame_conflicts: IndexMap::new(),
             deferred: Vec::new(),
             block_entities: Vec::new(),
         }
@@ -266,6 +291,20 @@ impl Canvas {
             .filter_map(|(i, (slot, _))| Some((self.dims.position(i)?, *slot)))
     }
 
+    /// Every cell one of `members` of the flattened paint list wrote last.
+    pub(super) fn cells_owned_by(&self, members: &[u32]) -> HashSet<(u32, u32, u32)> {
+        self.owners
+            .iter()
+            .enumerate()
+            .filter(|(_, owner)| {
+                owner
+                    .checked_sub(1)
+                    .is_some_and(|member| members.contains(&member))
+            })
+            .filter_map(|(i, _)| self.dims.position(i))
+            .collect()
+    }
+
     /// What member `index` of the flattened paint list declared, or `None` if it declared nothing.
     pub(super) fn declared(&self, index: u32) -> Option<Declared> {
         self.declared.get(index as usize).copied().flatten()
@@ -287,6 +326,15 @@ impl Canvas {
         MemberCanvas {
             canvas: self,
             member: index,
+            frame: false,
+        }
+    }
+
+    /// [`Self::for_member`] for laying the member's frame, whose contests are counted apart.
+    pub(super) fn for_frame(&mut self, index: u32) -> MemberCanvas<'_> {
+        MemberCanvas {
+            frame: true,
+            ..self.for_member(index)
         }
     }
 
@@ -311,6 +359,8 @@ impl Canvas {
 pub(super) struct MemberCanvas<'a> {
     canvas: &'a mut Canvas,
     member: u32,
+    /// Whether the writes lay the member's frame.
+    frame: bool,
 }
 
 impl MemberCanvas<'_> {
@@ -427,6 +477,17 @@ impl MemberCanvas<'_> {
             return true;
         };
         if overridden == member || !canvas.same_phase(overridden, member) {
+            return true;
+        }
+        if self.frame {
+            if before != after {
+                *canvas
+                    .frame_conflicts
+                    .entry((overridden, member))
+                    .or_default()
+                    .entry((before, after))
+                    .or_default() += 1;
+            }
             return true;
         }
         // A held slot may settle on another state, so even an unchanged one is judged later; a

@@ -22,11 +22,7 @@ fn floors(level: &str) -> String {
 fn a_level_attribute_selects_the_members_under_a_level_of_that_id() {
     for level in ["floor2", "\"floor2\""] {
         let source = floors(level);
-        assert_eq!(
-            codes(&source),
-            [DiagnosticCode::IgnoredArgument.as_str()],
-            "{level}"
-        );
+        assert_eq!(codes(&source), Vec::<&str>::new(), "{level}");
         assert_eq!(
             selector_extras(&source),
             [(
@@ -43,10 +39,7 @@ fn a_level_attribute_no_level_carries_selects_nothing() {
     let source = floors("floor3");
     assert_eq!(
         codes(&source),
-        [
-            DiagnosticCode::ThemeSelectorUnmatched.as_str(),
-            DiagnosticCode::IgnoredArgument.as_str(),
-        ],
+        [DiagnosticCode::ThemeSelectorUnmatched.as_str()]
     );
     assert_eq!(selector_extras(&source), []);
 }

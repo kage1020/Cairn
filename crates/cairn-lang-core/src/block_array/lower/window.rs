@@ -1,7 +1,7 @@
 //! Cutting the rectangles of a `window` member.
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::Member;
+use crate::intent::{BindingKey, Member};
 
 use crate::block_array::args::diag_deferred_member_reason;
 use crate::block_array::geometry::{Declared, outer_face};
@@ -9,12 +9,14 @@ use crate::block_array::openings::{WallSide, wall_local_to_grid};
 use crate::block_array::{Bbox, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
-use super::members::{StructCtx, side_name};
+use super::frame::{Cut, Frame};
+use super::members::{StructCtx, bound_block, side_name};
 use super::opening::{WindowCut, WindowPlan, plan_window, read_sym};
 
 /// What an unreadable `sym=` leaves of a window that is not cut.
 const NOT_CUT: &str = "this window is not cut either way — see the finding on the same line";
 
+/// Cut a `window`'s rectangles, with the frame a theme binds on it round the ones it cut.
 pub(super) fn fill_window(
     member: &Member,
     y_offset: u32,
@@ -22,30 +24,35 @@ pub(super) fn fill_window(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) {
+) -> Option<Frame> {
+    let frame = bound_block(member, BindingKey::Frame, ctx, diagnostics);
     // Read before anything can refuse the window, so it is reported in the same compile.
     let (sym, sym_unread) = read_sym(member);
     let plan = plan_window(member, sym, y_offset, ctx, diagnostics);
-    let note = match plan {
-        WindowPlan::Cut(cut) => {
-            if cut_window(member, cut, ctx, palette, canvas, diagnostics) {
-                "the window is drawn without its mirror, as `sym=false` would draw it"
-            } else {
-                NOT_CUT
-            }
-        }
-        WindowPlan::Refused => NOT_CUT,
-        WindowPlan::RefusedForUnreadSym => {
+    let (cuts, note) = match plan {
+        WindowPlan::Cut(cut) => match cut_window(member, cut, ctx, palette, canvas, diagnostics) {
+            Some(cuts) => (
+                Some(cuts),
+                "the window is drawn without its mirror, as `sym=false` would draw it",
+            ),
+            None => (None, NOT_CUT),
+        },
+        WindowPlan::Refused => (None, NOT_CUT),
+        WindowPlan::RefusedForUnreadSym => (
+            None,
             "this window has `repeat=` greater than 1, which `sym=true` does not yet support, so \
              it is not cut on the `sym=false` default while `sym=` is unreadable — see the \
-             finding on the same line"
-        }
+             finding on the same line",
+        ),
     };
     diagnostics.extend(sym_unread.map(|unread| unread.report(note)));
+    frame
+        .zip(cuts)
+        .map(|(state, cuts)| Frame::new(canvas.member(), state, cuts))
 }
 
-/// Paint each rectangle `cut` names with its fill, and whether it did; a window whose cells fall
-/// off the block array is deferred instead.
+/// Paint each rectangle `cut` names with its fill, returning the rectangles, or `None` for a
+/// window whose cells fall off the block array, which is deferred instead.
 fn cut_window(
     member: &Member,
     cut: WindowCut,
@@ -53,33 +60,35 @@ fn cut_window(
     palette: &mut ScopePalette,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
+) -> Option<Vec<Cut>> {
     let Some(declared) = window_declared(ctx, &cut) else {
         diagnostics.push(diag_deferred_member_reason(
             member,
             "window resolved to cells outside the struct's block array",
         ));
-        return false;
+        return None;
     };
     canvas.declare(declared);
     let palette_index = cut
         .fill
         .map_or(PaletteIndex::AIR, |state| palette.intern(state));
-    for (offset, width) in cut.stamps {
-        paint_window_rect(
-            ctx,
-            WindowRect {
+    let cuts = cut
+        .stamps
+        .into_iter()
+        .map(|(offset, width)| {
+            let rect = WindowRect {
                 side: cut.side,
                 offset,
                 y_start: cut.row,
                 width,
                 height: cut.height,
                 palette_index,
-            },
-            canvas,
-        );
-    }
-    true
+            };
+            paint_window_rect(ctx, rect, canvas);
+            rect.cut()
+        })
+        .collect();
+    Some(cuts)
 }
 
 /// What a window's line declares: the rectangles `cut` cuts and its mirror's, anchored at the cell
@@ -124,6 +133,18 @@ struct WindowRect {
     width: u32,
     height: u32,
     palette_index: PaletteIndex,
+}
+
+impl WindowRect {
+    fn cut(self) -> Cut {
+        Cut {
+            side: self.side,
+            offset: self.offset,
+            y_start: self.y_start,
+            width: self.width,
+            height: self.height,
+        }
+    }
 }
 
 fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {
