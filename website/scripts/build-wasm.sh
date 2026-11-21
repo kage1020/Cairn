@@ -49,7 +49,10 @@ if ! command -v wasm-pack >/dev/null 2>&1; then
   cargo install --locked "wasm-pack@$WASM_PACK_VERSION"
 fi
 
-wasm-pack build crates/cairn-lang-wasm --target web --release --no-pack --out-dir "$out"
+# Size over speed for the module the page downloads: the playground compiles a source in
+# milliseconds at either level.
+CARGO_PROFILE_RELEASE_OPT_LEVEL=s \
+  wasm-pack build crates/cairn-lang-wasm --target web --release --no-pack --out-dir "$out"
 
 module="$out/cairn_lang_wasm_bg.wasm"
 if [ ! -f "$module" ]; then
