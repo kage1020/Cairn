@@ -74,7 +74,7 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
         read,
         StoredStructure {
             data_version: 3700,
-            volume: volume_of(&array),
+            volume: volume_of(&array, &target("1.20.4")),
             void_cells: 0,
             palettes: 1,
             entities: vec![],
@@ -94,7 +94,11 @@ fn every_shipped_example_reads_back_as_its_block_arrays_under_either_palette_key
                     .write_gzip(&mut bytes)
                     .expect("the file writes");
                 let read = read_structure(bytes.as_slice()).expect("the file reads back");
-                assert_eq!(read.volume, volume_of(array), "{name} at {version}");
+                assert_eq!(
+                    read.volume,
+                    volume_of(array, &target(version)),
+                    "{name} at {version}"
+                );
             }
         }
     }

@@ -57,7 +57,7 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
         data_version: 3700,
         metadata: compound([("Name", string("comparator")), ("Author", string("Cairn"))]),
         offset: (0, 0, 0),
-        volume: volume_of(&array),
+        volume: volume_of(&array, &target("1.20.4")),
         entities: vec![],
     };
     assert_eq!(read, vec![expected]);
@@ -66,7 +66,8 @@ fn a_struct_reads_back_as_its_block_array_with_its_block_entity() {
 #[test]
 fn each_placement_and_walkway_reads_back_at_its_offset() {
     let ir = lower_example("village.crn", Edition::Java, None);
-    let read: Vec<((i32, i32, i32), BlockVolume)> = round_trip(&ir, &target(latest(Edition::Java)))
+    let at = target(latest(Edition::Java));
+    let read: Vec<((i32, i32, i32), BlockVolume)> = round_trip(&ir, &at)
         .into_iter()
         .map(|schematic| (schematic.offset, schematic.volume))
         .collect();
@@ -80,7 +81,7 @@ fn each_placement_and_walkway_reads_back_at_its_offset() {
                 .map(|p| p.origin)
                 .or_else(|| ir.walkways.get(scope.as_str()).map(|w| w.origin))
                 .expect("every village structure is placed");
-            (origin, volume_of(array))
+            (origin, volume_of(array, &at))
         })
         .collect();
     assert_eq!(read, expected);
@@ -95,7 +96,11 @@ fn every_shipped_example_reads_back_as_its_block_arrays() {
             .into_iter()
             .map(|schematic| schematic.volume)
             .collect();
-        let expected: Vec<BlockVolume> = ir.structures.values().map(volume_of).collect();
+        let expected: Vec<BlockVolume> = ir
+            .structures
+            .values()
+            .map(|array| volume_of(array, &target))
+            .collect();
         assert_eq!(read, expected, "{name}");
     }
 }
@@ -103,8 +108,9 @@ fn every_shipped_example_reads_back_as_its_block_arrays() {
 #[test]
 fn an_index_of_three_varint_bytes_reads_back() {
     let array = wide_array(16385, &[16384, 0, 127, 128, 16383, 16384]);
-    let read = round_trip(&ir_of(array.clone()), &target("1.21.4"));
-    assert_eq!(read[0].volume, volume_of(&array));
+    let at = target("1.21.4");
+    let read = round_trip(&ir_of(array.clone()), &at);
+    assert_eq!(read[0].volume, volume_of(&array, &at));
 }
 
 /// A version 3 `Schematic` of `extents`, its `Blocks` holding `palette` and `data`.
