@@ -236,8 +236,8 @@ type Body = fn(&str) -> String;
 /// The bodies a `logic` or `assert` line stands in, by the keyword that opens each.
 const BODIES: [(&str, Body); 2] = [("struct", struct_with), ("def", def_with)];
 
-const KEYED_HEADER_NOTE: &str = "give each value the key it belongs to (`class=house`, \
-                                 `size=3x3`); a missing `=` lands here too";
+const KEYED_HEADER_NOTE: &str = "a header takes only `size=`: write the size as `size=3x3` and \
+                                 delete any other value; a missing `=` lands here too";
 
 #[test]
 fn a_dropped_equals_sign_on_a_struct_or_def_header_is_reported() {
