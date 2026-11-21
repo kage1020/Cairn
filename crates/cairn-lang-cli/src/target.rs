@@ -6,7 +6,7 @@ use cairn_lang_formats::bedrock_structure::{McStructure, ParityNote, prepare_mcs
 use cairn_lang_formats::data_version::JavaTarget;
 use cairn_lang_formats::java_structure::{JavaStructure, prepare_structure};
 use cairn_lang_formats::litematic::Litematic;
-use cairn_lang_formats::registry::{PackView, builtin_constraints, builtin_pack};
+use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_formats::schem::Schem;
 
 use crate::cli::StructureFormat;
@@ -30,16 +30,6 @@ pub(crate) fn prepare<'a>(
                 .map(|(prepared, notes)| (PreparedStructure::Bedrock(prepared), notes))
                 .map_err(|e| e.to_string())
         }
-    }
-}
-
-/// The built-in pack's view of `edition` at `pinned`, which runs the constraint catalog's checks
-/// only with a version pinned (`spec/lint` "Constraint checks").
-pub(crate) fn registry_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
-    let view = builtin_pack(edition).view(pinned);
-    match pinned {
-        Some(_) => view.with_constraints(builtin_constraints()),
-        None => view,
     }
 }
 

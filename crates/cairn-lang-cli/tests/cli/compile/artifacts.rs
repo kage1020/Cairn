@@ -737,7 +737,7 @@ fn the_lock_records_each_sensitive_member_with_its_boundary() {
         recorded,
         [
             ("pot", "cauldron split at 1.17"),
-            ("raw_fill", "item format at 1.20.5"),
+            ("raw_fill[0]", "item format at 1.20.5"),
         ],
     );
     let bedrock = Fixture::new(&fs::read_to_string(fixture.source()).expect("read source"));

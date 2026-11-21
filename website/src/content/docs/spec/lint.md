@@ -657,17 +657,20 @@ it happened at.
 | `W_UNSUPPORTED_BLOCK` | A member built a block that needs the face of the block below or above it, such as a torch, a lantern, a pressure plate, redstone dust or a door, where that face does not hold it, or a block that falls, such as sand or gravel, over air or a fluid. |
 | `W_WATER_SPILL` | A member built water, from a water `fill` or a block with `waterlogged=true`, that flows into air inside the structure. |
 
-The three are the checks of the constraint catalog ([§11.4](#114-constraint-catalog)), and each
-reads only the blocks its tables list. They run in the block-array lowering at a pinned target, the
-one `cairn compile --target` and `cairn check --edition E --target V` run, on each `struct` or
-`place` body once every member of it is painted and its connections are derived
-([Blockstate](/spec/blockstate/#connections)). So a block is judged against what the build put
-beside it, whichever member put it there. What a block needs of its neighbour is the catalog's
-answer, and what the neighbour gives is the pinned version's, read from the registry pack the way
-the connection rules read it: a face of a block is sturdy when its model covers it whole, which a
-full block's every face is, glass among them, and a glass pane's side is not. A Bedrock target reads
-each block as the canonical blocks its state map names. With no version pinned, they are not raised
-([§11.3](#113-error-vs-warning)).
+The three are the checks of the constraint catalog ([§11.4](#114-constraint-catalog)). Attachment,
+support and gravity read only the blocks its tables list, and the fluid check reads every block that
+holds water, which no table lists. They run in the block-array lowering at a pinned target, the one
+`cairn compile --target`, `cairn check --edition E --target V` and a language server with
+`cairn.edition` and `cairn.target` set run, on each `struct` or `place` body once every member of it
+is painted and its connections are derived ([Blockstate](/spec/blockstate/#connections)). So a block
+is judged against what the build put beside it, whichever member put it there. What a block needs of
+its neighbour is the catalog's answer, and what the neighbour gives is the pinned version's, read
+from the registry pack the way the connection rules read it: a face of a block is sturdy when its
+model covers it whole, which a full block's every face is, glass among them, and a glass pane's side
+is not. A Bedrock target reads each block as the canonical blocks its state map names. A cell holds
+air when its block is `air`, `cave_air` or `void_air`, which every check reads alike, and water or
+lava when its block reads as `water` or `lava`, as Bedrock's `flowing_water` and `flowing_lava` do.
+With no version pinned, they are not raised ([§11.3](#113-error-vs-warning)).
 
 - **Attachment** (`W_NO_ATTACHMENT_FACE`). A block of the `attachment` table hangs on the block its
   states point away from: a lever or button with `face=floor` on the block below it, with
@@ -682,21 +685,25 @@ each block as the canonical blocks its state map names. With no version pinned, 
   under a chain, and a repeater on neither.
 - **Gravity** (`W_UNSUPPORTED_BLOCK`). A block of the `gravity` table falls where the cell below it
   holds air, water or lava.
-- **Fluid** (`W_WATER_SPILL`). Water flows down and to the four sides. From a cell of water it
-  reaches each such neighbour that holds air, and from a block with `waterlogged=true` each one
-  through a face of the block that is not sturdy. A neighbour holding any block keeps it out.
+- **Fluid** (`W_WATER_SPILL`). Water flows down and to the four sides, never up. From a cell of
+  water it reaches each such neighbour that holds air, and from a block with `waterlogged=true` each
+  one through a face of the block that is not sturdy. A neighbour holding any other block keeps it
+  out, a glass pane as well as a full block.
 
 A cell outside the body's array is not judged: what stands there is the world's, which the build
 does not know. Nor is a neighbour the pack cannot answer for at the target, as when the canonical
-blocks a Bedrock block may be disagree. A body whose lowering raised an error is not judged at all,
-since a member an error refuses paints nothing and the cells it would have filled read as air.
+blocks a Bedrock block may be disagree. A body is not judged at all when an error refuses one of its
+members, whether its lowering raises it or the resolver does, as for a `mat_slot=` its theme does
+not declare (`E_UNRESOLVED_SLOT`) or binds to no material (`E_UNKNOWN_SLOT_TARGET`): a refused
+member may paint nothing, and the cells it would have filled read as air. The other bodies are
+judged as they would be alone.
 
 Each check reports a member once, at its line, however many of its blocks fail it. The message
 names the block and its cell, and the neighbour it fails against, air or a block; for a member with
 more than one, it gives their count and names the first its `resolved_state` records. A cell is
 written as the member's `at=` would write it, counted from the corner of the struct's interior, so
-one in an overhang's ring has a negative coordinate. `W_WATER_SPILL` names the cells of air the water
-reaches, each once.
+one in an overhang's ring has a negative coordinate. `W_WATER_SPILL` counts the cells of air the
+water reaches, each once, and names the first.
 
 ### Truth tables
 
@@ -789,12 +796,13 @@ Beyond the codes above, lint covers:
 | **AABB interference** | Members of one body that overlap priority-merge by phase; bodies of two `place` rows that overlap are an error ([Entities §8.2](/spec/entities/#82-anchor-conventions)). Boundary blockstate re-resolution is the IR layer's job. |
 
 attachment, support and fluid run at a pinned target, as the [constraint
-checks](#constraint-checks), over the blocks the catalog lists. A frame, a painting and a sign,
-standing or on a wall, are not among them: each needs a block the game counts as solid, which no
-table records. entity_aabb is specified with the catalog ([§11.4](#entity-aabb)) and reads the
-entities a build places, which no member does yet ([Entities](/spec/entities/)). AABB interference
-holds inside a body, where the phase order merges the members and `W_PHASE_CONFLICT` reports a later
-line of one phase that changes a cell an earlier one built ([Compilation Model
+checks](#constraint-checks): attachment and support over the blocks the catalog lists, fluid over
+every block that holds water. A frame, a painting and a sign, standing or on a wall, are not among
+them: each needs a block the game counts as solid, which no table records. entity_aabb is specified
+with the catalog ([§11.4](#entity-aabb)) and reads the entities a build places, which no member does
+yet ([Entities](/spec/entities/)). AABB interference holds inside a body, where the phase order
+merges the members and `W_PHASE_CONFLICT` reports a later line of one phase that changes a cell an
+earlier one built ([Compilation Model
 §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Between bodies it holds only
 in part: two `place` rows of a site whose boxes share a cell, or a walkway that lays a cell inside a
 placement it does not join, are `E_PLACEMENT_OVERLAP`, while the air a walkway's file writes beyond
@@ -1248,12 +1256,14 @@ A `support` or `center_support` row may hold for some states only: its `when` na
 the block below and `hanging: "true"` from the block above, a door one for `half: "lower"`, and an
 `attachment` row gives `face` and `facing` their defaults. No state of a block meets two rules of
 `attachment`, `support` and `gravity`, so a block with two rows, as the lantern, gives each a
-different value of one state in `when`.
+different value of one state in `when`. Every row of a block gives a state it reads the same
+default, so a state the build leaves unwritten meets the same rows whichever row reads it.
 
 ```json
 {
   "schema_version": 1,
   "name": "cairn-builtin-constraints",
+  "description": "What the game requires around a block, and where a block's meaning changes.",
   "namespace": "minecraft",
   "semantic_sensitivity": [
     {"edition": "java", "boundary": "1.17", "reason": "cauldron split",
@@ -1278,18 +1288,21 @@ different value of one state in `when`.
 }
 ```
 
-The loader refuses a catalog whose `schema_version` it does not read, a key no table has, a row that
-names no block or entity, an id no Java version declares, a `when` or `defaults` value no Java
-version gives the block, a state a row reads with no default or a default it does not read, a state
-of a block that meets two rules, a `boundary` its edition's version table cannot place, a `reason`
-that is empty, a box dimension that is not a positive number, and an entity given two boxes. A
-build never reads a half-understood catalog.
+The loader refuses a catalog whose `schema_version` it does not read, one that lacks a key the
+catalog or a row requires (`schema_version`, `name`, `description` and `namespace` at the top), a
+key no table or row has, a row that names no block or entity, an id no Java version declares, in
+`ids` or `also_on`, a `when` or `defaults` value no Java version gives the block, a state a row
+reads with no default or a default it does not read, two rows of a block that give one state
+different defaults, a state of a block that meets two rules, a `boundary` its edition's version
+table cannot place, a `reason` that is empty, a box dimension that is not a positive number, and an
+entity given two boxes. A build never reads a half-understood catalog.
 
 The built-in catalog's `semantic_sensitivity` has three rows, all Java's, each listing the blocks
-that exist on both sides of its boundary: walls, whose connection states went from `true` / `false`
-to `none` / `low` / `tall` at 1.16; the cauldron, which split into one block per contents at 1.17;
-and the blocks that store items in a block entity, whose items moved from a `tag` to data components
-at 1.20.5. A lever on a glass pane is dropped and one on glass is kept, since glass is a full block.
+a build of either side of its boundary may hold for one meaning: walls, whose connection states
+went from `true` / `false` to `none` / `low` / `tall` at 1.16; the cauldron, which split into one
+block per contents at 1.17, so its row names the three blocks the split added beside it; and the
+blocks that store items in a block entity, whose items moved from a `tag` to data components at
+1.20.5. A lever on a glass pane is dropped and one on glass is kept, since glass is a full block.
 
 ### Entity AABB
 

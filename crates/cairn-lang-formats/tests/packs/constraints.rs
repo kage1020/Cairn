@@ -2,10 +2,15 @@
 //! or lets fall, the faces that hold them and keep water in, and the members whose meaning moves at
 //! a boundary version (`spec/lint` "Constraint checks").
 
-use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockState, Constraint, Face, Support, TargetRegistry};
-use cairn_lang_core::resolve::SemanticSensitiveFinding;
-use cairn_lang_formats::registry::{PackView, builtin_constraints, builtin_pack};
+use cairn_lang_core::block_array::{
+    BlockArrayIr, BlockState, Constraint, Contents, Face, Support, TargetRegistry, Vertical,
+    lower_to_block_array,
+};
+use cairn_lang_core::resolve::{SemanticSensitiveFinding, resolve};
+use cairn_lang_core::{DiagnosticCode, Edition, lower, parse};
+use cairn_lang_formats::registry::{
+    PackView, builtin_constraints, builtin_pack, builtin_view, parse_constraints,
+};
 
 use crate::common::lower_source;
 
@@ -52,26 +57,29 @@ fn a_standing_block_rests_on_the_face_its_row_names_and_a_gravity_block_falls() 
     let view = pinned(Edition::Java, "26.3");
     let constraint = |id, properties: &[(&str, &str)]| view.constraint(&state(id, properties));
     let rests = |host, needs| Some(Constraint::Rests { host, needs });
-    assert_eq!(constraint("torch", &[]), rests(Face::Down, Support::Center));
+    assert_eq!(
+        constraint("torch", &[]),
+        rests(Vertical::Below, Support::Center)
+    );
     assert_eq!(
         constraint("lantern", &[("hanging", "false")]),
-        rests(Face::Down, Support::Center)
+        rests(Vertical::Below, Support::Center)
     );
     assert_eq!(
         constraint("lantern", &[("hanging", "true")]),
-        rests(Face::Up, Support::Center)
+        rests(Vertical::Above, Support::Center)
     );
     assert_eq!(
         constraint("oak_hanging_sign", &[("attached", "false")]),
-        rests(Face::Up, Support::Center)
+        rests(Vertical::Above, Support::Center)
     );
     assert_eq!(
         constraint("redstone_wire", &[]),
-        rests(Face::Down, Support::Sturdy)
+        rests(Vertical::Below, Support::Sturdy)
     );
     assert_eq!(
         constraint("oak_door", &[("half", "lower")]),
-        rests(Face::Down, Support::Sturdy)
+        rests(Vertical::Below, Support::Sturdy)
     );
     assert_eq!(constraint("oak_door", &[("half", "upper")]), None);
     assert_eq!(constraint("sand", &[]), Some(Constraint::Falls));
@@ -114,6 +122,28 @@ fn a_torch_stands_on_a_post_or_an_upright_chain_and_not_on_a_lying_one() {
         older.holds(&torch, &state("chain", &[("axis", "y")])),
         Some(true)
     );
+}
+
+#[test]
+fn a_lantern_hangs_under_an_upright_chain_and_a_repeater_does_not_stand_on_a_post() {
+    let lantern = state("lantern", &[("hanging", "true")]);
+    for (edition, version) in TARGETS {
+        let view = pinned(edition, version);
+        let repeater = match edition {
+            Edition::Java => state("repeater", &[]),
+            Edition::Bedrock => state("unpowered_repeater", &[]),
+        };
+        assert_eq!(
+            view.holds(&lantern, &state("iron_chain", &[("axis", "y")])),
+            Some(true),
+            "{version}"
+        );
+        assert_eq!(
+            view.holds(&repeater, &state("oak_fence", &[])),
+            Some(false),
+            "{version}"
+        );
+    }
 }
 
 #[test]
@@ -168,19 +198,90 @@ fn water_is_kept_in_by_a_whole_face_only() {
         assert_eq!(keeps("stone", Face::North), Some(true), "{version}");
         assert_eq!(keeps("glass_pane", Face::North), Some(false), "{version}");
         assert_eq!(keeps("glass_pane", Face::Down), Some(false), "{version}");
+        for face in [Face::Down, Face::North, Face::East, Face::South, Face::West] {
+            assert_eq!(keeps("water", face), Some(false), "{version} {face:?}");
+        }
     }
 }
 
 #[test]
-fn a_view_without_the_catalog_runs_no_check() {
-    let view = builtin_pack(Edition::Java).view(Some("26.3"));
-    let lever = state("lever", &[("face", "wall"), ("facing", "south")]);
-    assert_eq!(view.constraint(&lever), None);
-    assert_eq!(view.holds(&lever, &state("glass_pane", &[])), None);
+fn a_cell_holds_what_its_canonical_blocks_are() {
+    let java = pinned(Edition::Java, "26.3");
+    let bedrock = pinned(Edition::Bedrock, "1.26.60");
+    let holds = |view: &PackView<'_>, id| view.contents(&state(id, &[]));
+    for id in ["air", "cave_air", "void_air"] {
+        assert_eq!(holds(&java, id), Some(Contents::Air), "{id}");
+    }
+    assert_eq!(holds(&java, "water"), Some(Contents::Water));
+    assert_eq!(holds(&java, "lava"), Some(Contents::Lava));
+    assert_eq!(holds(&java, "stone"), Some(Contents::Block));
+    assert_eq!(holds(&bedrock, "air"), Some(Contents::Air));
+    for id in ["water", "flowing_water"] {
+        assert_eq!(holds(&bedrock, id), Some(Contents::Water), "{id}");
+    }
+    for id in ["lava", "flowing_lava"] {
+        assert_eq!(holds(&bedrock, id), Some(Contents::Lava), "{id}");
+    }
+    assert_eq!(holds(&bedrock, "stone"), Some(Contents::Block));
+}
+
+/// `source` lowered at `version` of `edition` through [`builtin_view`].
+fn judged(source: &str, edition: Edition, version: &str) -> BlockArrayIr {
+    let module = parse(source).expect("the source parses");
+    let ir = lower(&module);
+    let resolution = resolve(&ir, Some(edition));
+    lower_to_block_array(
+        &ir,
+        &resolution,
+        Some(&builtin_view(edition, Some(version))),
+    )
+}
+
+#[test]
+fn bedrock_flowing_water_and_lava_are_judged_as_water_and_lava() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x4\n  \
+                  walls mat_slot=wall height=3\n  \
+                  raw_block mat=minecraft:flowing_water at=2,1,1\n  \
+                  raw_block mat=minecraft:flowing_lava at=1,0,1\n  \
+                  raw_block mat=minecraft:sand at=1,1,1\n";
+    let found: Vec<(DiagnosticCode, String)> = judged(source, Edition::Bedrock, "1.26.60")
+        .diagnostics
+        .into_iter()
+        .map(|d| (d.code, d.primary))
+        .collect();
     assert_eq!(
-        view.keeps_water(&state("glass_pane", &[]), Face::North),
-        None
+        found,
+        [
+            (
+                DiagnosticCode::WaterSpill,
+                "`raw_block` holds water that flows into 3 cells of air: the first, at 2,0,1, from \
+                 `minecraft:flowing_water` at 2,1,1"
+                    .to_owned(),
+            ),
+            (
+                DiagnosticCode::UnsupportedBlock,
+                "`raw_block` builds a block that falls: `minecraft:sand` at 1,1,1 stands on \
+                 `minecraft:flowing_lava`"
+                    .to_owned(),
+            ),
+        ],
     );
+}
+
+#[test]
+fn an_unpinned_view_runs_no_check_and_a_view_without_the_catalog_none() {
+    let lever = state("lever", &[("face", "wall"), ("facing", "south")]);
+    let unpinned = builtin_view(Edition::Java, None);
+    let bare = builtin_pack(Edition::Java).view(Some("26.3"));
+    for view in [unpinned, bare] {
+        assert_eq!(view.constraint(&lever), None);
+        assert_eq!(view.holds(&lever, &state("glass_pane", &[])), None);
+        assert_eq!(
+            view.keeps_water(&state("glass_pane", &[]), Face::North),
+            None
+        );
+    }
 }
 
 #[test]
@@ -191,13 +292,14 @@ fn the_members_a_java_boundary_moves_are_semantic_sensitive_once_each() {
                   raw_block mat=minecraft:cauldron at=1,0,1\n  \
                   raw_fill mat=minecraft:chest from=2,0,1 to=3,0,1\n  \
                   raw_block mat=minecraft:cobblestone_wall at=4,0,1\n  \
-                  raw_block mat=minecraft:stone at=5,0,1\n";
+                  raw_block mat=minecraft:stone at=5,0,1\n  \
+                  raw_block mat=minecraft:chest at=1,0,3\n  \
+                  raw_block id=box mat=minecraft:chest at=3,0,3\n";
     let found = |edition, version| {
         let block_ir = lower_source(source, edition, Some(version));
         builtin_pack(edition)
             .view(None)
-            .with_constraints(builtin_constraints())
-            .semantic_sensitive(&block_ir)
+            .semantic_sensitive(builtin_constraints(), &block_ir)
     };
     let finding = |member: &str, reason: &str, boundary: &str| SemanticSensitiveFinding {
         edition: Edition::Java,
@@ -208,10 +310,58 @@ fn the_members_a_java_boundary_moves_are_semantic_sensitive_once_each() {
     assert_eq!(
         found(Edition::Java, "26.3"),
         [
-            finding("raw_block", "cauldron split", "1.17"),
-            finding("raw_fill", "item format", "1.20.5"),
-            finding("raw_block", "wall connections", "1.16"),
+            vec![finding("raw_block[0]", "cauldron split", "1.17")],
+            vec![finding("raw_fill[0]", "item format", "1.20.5")],
+            vec![finding("raw_block[1]", "wall connections", "1.16")],
+            vec![finding("raw_block[3]", "item format", "1.20.5")],
+            vec![finding("box", "item format", "1.20.5")],
         ],
     );
-    assert_eq!(found(Edition::Bedrock, "1.26.60"), []);
+    assert_eq!(found(Edition::Bedrock, "1.26.60"), Vec::<Vec<_>>::new());
+}
+
+#[test]
+fn a_bedrock_row_names_the_members_whose_canonical_blocks_it_lists_at_the_view_s_versions() {
+    let java = builtin_pack(Edition::Java);
+    let bedrock = builtin_pack(Edition::Bedrock);
+    let catalog = parse_constraints(
+        r#"{"schema_version": 1, "name": "t", "description": "d", "namespace": "minecraft",
+            "semantic_sensitivity": [{"edition": "bedrock", "boundary": "1.21.40",
+                "reason": "chain split", "ids": ["chain"]}]}"#,
+        java,
+        bedrock,
+    )
+    .expect("the catalog loads");
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x4\n  \
+                  walls mat_slot=wall height=3\n  \
+                  raw_block id=links mat=minecraft:chain at=2,0,1\n";
+    let block_ir = lower_source(source, Edition::Bedrock, Some("1.21.60"));
+    let found = |version| {
+        bedrock
+            .view(version)
+            .semantic_sensitive(&catalog, &block_ir)
+    };
+    let links = vec![vec![SemanticSensitiveFinding {
+        edition: Edition::Bedrock,
+        member: "links".to_owned(),
+        reason: "chain split".to_owned(),
+        boundary_version: "1.21.40".to_owned(),
+    }]];
+    assert_eq!(found(Some("1.21.60")), links);
+    assert_eq!(
+        found(None),
+        links,
+        "a version that maps `chain` onto `chain` is enough"
+    );
+    assert_eq!(
+        found(Some("1.26.60")),
+        Vec::<Vec<_>>::new(),
+        "1.26.60's map gives `chain` no canonical block"
+    );
+    assert_eq!(
+        java.view(None).semantic_sensitive(&catalog, &block_ir),
+        Vec::<Vec<_>>::new(),
+        "the row is Bedrock's"
+    );
 }

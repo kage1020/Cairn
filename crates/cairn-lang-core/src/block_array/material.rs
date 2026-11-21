@@ -11,7 +11,7 @@ use crate::resolve::{Resolution, TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
-use super::constraint::Constraint;
+use super::constraint::{Constraint, Contents};
 use super::joins::{Face, Joins};
 
 /// A block state the pinned target's state map has no form for, as
@@ -142,6 +142,12 @@ pub trait TargetRegistry {
     fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
         let _ = (state, face);
         None
+    }
+
+    /// What a cell holding `state` holds at the pinned target, or `None` when the registry cannot
+    /// say.
+    fn contents(&self, state: &BlockState) -> Option<Contents> {
+        Some(Contents::of_id(&state.id))
     }
 
     /// Whether a version this registry covers may declare `id`, asked only when

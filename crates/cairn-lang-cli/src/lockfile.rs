@@ -11,26 +11,28 @@ use cairn_lang_core::resolve::{FloorVerdict, SemanticSensitiveFinding};
 use cairn_lang_core::{CAIRN_VERSION, Edition};
 use cairn_lang_formats::registry::{builtin_constraints, builtin_pack};
 
-use crate::target::{ResolvedTarget, registry_view};
+use crate::target::ResolvedTarget;
 
-/// The members of `block_ir` the constraint catalog lists as meaning something else across a
-/// boundary version of `edition`, the edition `target` is a version of.
+/// The findings of each member of `block_ir` the constraint catalog lists as meaning something
+/// else across a boundary version of `edition`, the edition `target` is a version of.
 pub(crate) fn sensitive_members(
     block_ir: &BlockArrayIr,
     edition: Edition,
     target: &ResolvedTarget,
-) -> Vec<SemanticSensitiveFinding> {
-    registry_view(edition, Some(target.mc_version())).semantic_sensitive(block_ir)
+) -> Vec<Vec<SemanticSensitiveFinding>> {
+    builtin_pack(edition)
+        .view(Some(target.mc_version()))
+        .semantic_sensitive(builtin_constraints(), block_ir)
 }
 
-/// Warn where the lockfile at `lock_path` records another target, as `spec/versioning-editions`
-/// "Provenance and lock" does, or cannot be read; an absent one is silent. `sensitive` is this
-/// build's [`sensitive_members`].
+/// Warn where the lockfile at `lock_path` records another target than this build's, whose
+/// [`sensitive_members`] are `sensitive`, or cannot be read, as `spec/versioning-editions`
+/// "Provenance and lock" does.
 pub(crate) fn report_previous_target(
     lock_path: &Path,
     edition: Edition,
     target: &ResolvedTarget,
-    sensitive: &[SemanticSensitiveFinding],
+    sensitive: &[Vec<SemanticSensitiveFinding>],
 ) {
     let path = lock_path.display();
     let previous = match LockfileRead::from_path(lock_path) {
@@ -72,7 +74,7 @@ pub(crate) fn report_previous_target(
 /// members of `sensitive` whose boundary lies between the two.
 fn report_target_change(
     verified: &LockTarget,
-    sensitive: &[SemanticSensitiveFinding],
+    sensitive: &[Vec<SemanticSensitiveFinding>],
     edition: Edition,
     target: &ResolvedTarget,
 ) {
@@ -90,30 +92,29 @@ fn report_target_change(
         describe_verified(verified, show_edition),
         describe_now(&now, show_edition),
     );
-    let mut members: Vec<(&str, Vec<String>)> = Vec::new();
-    for finding in crossed(sensitive, verified, edition, target) {
-        let reason = format!("{} at {}", finding.reason, finding.boundary_version);
-        match members
-            .iter_mut()
-            .find(|(member, _)| *member == finding.member)
-        {
-            Some((_, reasons)) => reasons.push(reason),
-            None => members.push((&finding.member, vec![reason])),
-        }
-    }
-    if members.is_empty() {
+    let listed: Vec<String> = sensitive
+        .iter()
+        .filter_map(|findings| {
+            let crossed = crossed(findings, verified, edition, target);
+            let first = crossed.first()?;
+            let changes: Vec<String> = crossed.iter().map(|finding| change(finding)).collect();
+            Some(format!("{} ({})", first.member, changes.join(", ")))
+        })
+        .collect();
+    if listed.is_empty() {
         return;
     }
-    let listed: Vec<String> = members
-        .iter()
-        .map(|(member, reasons)| format!("{member} ({})", reasons.join(", ")))
-        .collect();
     eprintln!(
         "W_SEMANTIC_SENSITIVITY: {} member{} may resolve differently: {}",
-        members.len(),
-        if members.len() == 1 { "" } else { "s" },
+        listed.len(),
+        if listed.len() == 1 { "" } else { "s" },
         listed.join(", "),
     );
+}
+
+/// What `finding` says changes, and where: `item format at 1.20.5`.
+fn change(finding: &SemanticSensitiveFinding) -> String {
+    format!("{} at {}", finding.reason, finding.boundary_version)
 }
 
 /// The findings of `sensitive`, all of `edition`, whose boundary `target` and `verified` lie on
@@ -207,10 +208,11 @@ pub(crate) fn build_lockfile(
         resolved_ir_hash: hash_resolved_ir(block_ir)?,
         verified: true,
         member_version_sensitivity: sensitive_members(block_ir, edition, target)
-            .into_iter()
+            .iter()
+            .flatten()
             .map(|finding| MemberSensitivity {
-                id: finding.member,
-                reason: format!("{} at {}", finding.reason, finding.boundary_version),
+                id: finding.member.clone(),
+                reason: change(finding),
             })
             .collect(),
         placements: block_ir

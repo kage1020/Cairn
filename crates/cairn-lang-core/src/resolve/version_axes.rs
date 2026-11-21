@@ -351,7 +351,7 @@ pub enum UnsupportedReason {
 pub struct SemanticSensitiveFinding {
     /// The edition whose versions the boundary is one of.
     pub edition: Edition,
-    /// The member's `id=`, or its keyword when it carries none (`yard_water`, `walls`).
+    /// The member's `id=`, or its address when it carries none (`yard_water`, `walls[0]`).
     pub member: String,
     /// What changes at the boundary, as the catalog words it (`"cauldron split"`).
     pub reason: String,

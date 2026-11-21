@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, Constraint, DeclaredElsewhere,
+    AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, Constraint, Contents, DeclaredElsewhere,
     DomainFault, Face, Faces, IdStanding, JoinKind, Joins, OutOfDomain, StateDomain, Support,
     TargetRegistry, UnmappedState,
 };
@@ -328,6 +328,8 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn constraint(&self, state: &BlockState) -> Option<Constraint> {
+        // What holds a block is one version's answer, so an unpinned view judges none.
+        self.mc_version?;
         let catalog = self.constraints?;
         self.agreed_of(state, |id| catalog.constraint(id, &state.properties))?
     }
@@ -336,20 +338,18 @@ impl TargetRegistry for PackView<'_> {
         let catalog = self.constraints?;
         let (toward, needs) = match self.constraint(state)? {
             Constraint::Hangs { host } => (host, Support::Sturdy),
-            Constraint::Rests { host, needs } => (host, needs),
+            Constraint::Rests { host, needs } => (host.face(), needs),
             Constraint::Falls => return None,
         };
         let face = toward.opposite();
         if self.sturdy(host)?.contains(face) {
             return Some(true);
         }
-        let on_any_face = self
-            .agreed_of(host, |host_id| {
-                self.agreed_of(state, |id| {
-                    catalog.rests_on_any_face(id, &state.properties, host_id)
-                }) == Some(true)
+        let on_any_face = self.agreed_of(host, |host_id| {
+            self.agreed_of(state, |id| {
+                catalog.rests_on_any_face(id, &state.properties, host_id)
             })
-            .unwrap_or(false);
+        })??;
         if on_any_face || needs == Support::Sturdy {
             return Some(on_any_face);
         }
@@ -358,15 +358,18 @@ impl TargetRegistry for PackView<'_> {
                 self.joins(host)?.kind,
                 Some(JoinKind::Pane | JoinKind::Wall | JoinKind::Fence { .. })
             );
-        let centre = self
-            .agreed_of(host, |id| catalog.gives_centre(id, &host.properties, face))
-            .unwrap_or(false);
+        let centre = self.agreed_of(host, |id| catalog.gives_centre(id, &host.properties, face))?;
         Some(post || centre)
     }
 
     fn keeps_water(&self, state: &BlockState, face: Face) -> Option<bool> {
+        self.mc_version?;
         self.constraints?;
         Some(self.sturdy(state)?.contains(face))
+    }
+
+    fn contents(&self, state: &BlockState) -> Option<Contents> {
+        self.agreed_of(state, Contents::of_id)
     }
 }
 
@@ -383,16 +386,22 @@ impl<'a> PackView<'a> {
         }
     }
 
-    /// The members of `block_ir` the constraint catalog lists as meaning something else across a
-    /// boundary version of this view's edition, each once per boundary, in member order.
+    /// The findings of each member of `block_ir` whose blocks `catalog` lists as meaning something
+    /// else across a boundary version of this view's edition, one per boundary, member by member.
     #[must_use]
-    pub fn semantic_sensitive(&self, block_ir: &BlockArrayIr) -> Vec<SemanticSensitiveFinding> {
-        let Some(catalog) = self.constraints else {
-            return Vec::new();
-        };
-        let mut found: Vec<SemanticSensitiveFinding> = Vec::new();
+    pub fn semantic_sensitive(
+        &self,
+        catalog: &ConstraintIndex,
+        block_ir: &BlockArrayIr,
+    ) -> Vec<Vec<SemanticSensitiveFinding>> {
+        let mut members = Vec::new();
         for member in block_ir.members.values().flatten() {
-            let name = member.id.as_ref().unwrap_or(&member.role);
+            let name = member
+                .id
+                .clone()
+                .or_else(|| member.address.as_ref().map(ToString::to_string))
+                .unwrap_or_else(|| member.role.clone());
+            let mut found: Vec<SemanticSensitiveFinding> = Vec::new();
             for block in &member.resolved_state {
                 for id in self.canonical_ids(&block.state) {
                     for boundary in catalog.boundaries_of(self.edition, &id) {
@@ -408,8 +417,11 @@ impl<'a> PackView<'a> {
                     }
                 }
             }
+            if !found.is_empty() {
+                members.push(found);
+            }
         }
-        found
+        members
     }
 
     /// The id the pinned version writes for the canonical token `token` when it is not the
@@ -1325,6 +1337,15 @@ pub fn builtin_constraints() -> &'static ConstraintIndex {
         load_builtin_constraints()
             .expect("built-in constraint catalog failed to load — this is a build invariant")
     })
+}
+
+/// The built-in pack of `edition` seen through `pinned`, running the built-in catalog's checks
+/// (`spec/lint` "Constraint checks").
+#[must_use]
+pub fn builtin_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
+    builtin_pack(edition)
+        .view(pinned)
+        .with_constraints(builtin_constraints())
 }
 
 /// Loads a Java pack from a directory holding `pack.json` and the files it names.

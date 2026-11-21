@@ -163,10 +163,17 @@ pub(super) fn lower_body_to_block_array<'a>(
     let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
-        // A member an error refuses paints nothing, so what it should have held is not judged.
-        if diagnostics[raised..]
-            .iter()
-            .all(|d| d.severity() != Severity::Error)
+        // A member an error refuses may paint nothing, and no block of the body is judged against
+        // the air it leaves.
+        let refused = flattened.iter().any(|(_, member)| {
+            scope
+                .and_then(|scope| scope.members.get(&member.span.start))
+                .is_some_and(|binding| binding.refused)
+        });
+        if !refused
+            && diagnostics[raised..]
+                .iter()
+                .all(|d| d.severity() != Severity::Error)
         {
             diagnostics.extend(constraint_findings(&members, &array, overhang, registry));
         }

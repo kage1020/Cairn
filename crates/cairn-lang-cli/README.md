@@ -25,7 +25,7 @@ Prebuilt archives are attached to each [release](https://github.com/kage1020/Cai
 
 A `cairn check` with no `--target` still lowers, with no target, and reports the lowering-stage findings every target that reads their line raises, such as a roof bound outside the stair family, weighed as if every block id some shipped version declares were declared. `check --edition E --target V` pins the same `(edition, version)` pair a compile pins, which is what lets it reach the lowering-stage findings only a target can answer — `E_UNKNOWN_ID` above all — without building anything. That is the shape a CI gate wants, since an unpinned `cairn check` can go green on a source `cairn compile` refuses. What it does not take on is anything `compile` writes: no artifact, no lockfile, and no `@requires` floor enforcement (`E_VERSION_CAP`), since holding `--target` to the floors belongs to the command that certifies a build.
 
-A pinned `check` and `compile` also run the constraint catalog's checks: a lever on a glass pane is `W_NO_ATTACHMENT_FACE`, sand over air `W_UNSUPPORTED_BLOCK`, and water that runs out of the structure `W_WATER_SPILL` ([lint "Constraint checks"](https://cairn.kage1020.com/spec/lint/)). What holds a block is the pinned version's answer, so an unpinned `check` raises none of them.
+A pinned `check` and `compile` also run the constraint catalog's checks, as a language server with a target set does: a lever on a glass pane is `W_NO_ATTACHMENT_FACE`, sand over air `W_UNSUPPORTED_BLOCK`, and water that runs out of the structure `W_WATER_SPILL` ([lint "Constraint checks"](https://cairn.kage1020.com/spec/lint/)). What holds a block is the pinned version's answer, so an unpinned `check` raises none of them.
 
 ## Targeting rules
 

@@ -1095,10 +1095,11 @@ again: which versions are worth testing against. No code path emits it yet.
 The row answers the second axis per requested edition, as `Java: <members>   Bedrock: <members>`:
 each member as `name(reason @boundary)`, or `(none)` where the edition has none. A member is listed
 when a block it builds is one a `semantic_sensitivity` row of that edition names ([Lint
-§11.4](/spec/lint/#114-constraint-catalog)), once for each such row, in the order of the members. Its
-name is its `id=`, or its keyword where it carries none. The blocks are the ones the range-wide
-lowering builds, which the `edition portability` row reads too, so a Bedrock block is read as every
-canonical block a version's state map makes of it. `--format json` carries the row as
+§11.4](/spec/lint/#114-constraint-catalog)), once for each such row, in the order of the members.
+Its name is its `id=`, or its address ([Syntax §5.5](/spec/syntax/#55-ids-classes-addresses)) where
+it carries none, so two members that build one block are two entries. The blocks are the ones the
+range-wide lowering builds, which the `edition portability` row reads too, so a Bedrock block is
+read as every canonical block a version's state map makes of it. `--format json` carries the row as
 `semantic_sensitive`, one `{edition, member, reason, boundary_version}` per entry, edition by
 edition in the order requested.
 
