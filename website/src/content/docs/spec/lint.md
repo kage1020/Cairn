@@ -59,8 +59,8 @@ compose to the strictest across every line, so a second one adds a constraint ([
 |---|---|
 | `E_PARSE` | The source did not parse. |
 | `E_UNKNOWN_KEYWORD` | The statement keyword, or the member keyword an `edit` line's target names, is not in the known-keyword table. |
-| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` / `class=` a `struct` / `def` header takes. |
-| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary, or inside a `struct` / `def` header's, that no pass read on the line it was written on, an `edit` line included, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
+| `E_UNKNOWN_ARGUMENT` | A `key=` outside the vocabulary of the member's keyword, written as an argument or inside the member's own `[key=value]`, or outside the `size=` a `struct` / `def` header takes. |
+| `W_IGNORED_ARGUMENT` | A `key=` inside that vocabulary that no pass read on the line it was written on, an `edit` line included, or any `key=` bound by a `theme` selector row, which no pass reads yet. |
 | `E_MISPLACED_BINDING` | A `-> value` tail on a member whose keyword cannot emit a signal ([§14.2](/spec/redstone/#142-signal-binding)). |
 | `E_MISPLACED_MEMBER` | The keyword is known, but the enclosing body has no reader for it, or it is a `circuit` line under a `level`. |
 | `E_UNEXPECTED_POSITIONAL` | A bare value on a line that reads none ([§5.1](/spec/syntax/#51-lexical)). |
@@ -98,7 +98,8 @@ offered `raw_block`, `raw_fill`, `raw_repeat`, `repeater`, `comparator`, `redsto
 `redstone_dust`, or nothing in a `site` body, where none of them builds.
 
 `E_TYPE_MISMATCH_LABEL`: the label-typed keys are `id=`, `class=`, `mat_slot=`, `use=`, and
-`theme=`. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
+`theme=`. A `struct` / `def` header takes none of them, so one written there is `E_UNKNOWN_ARGUMENT`
+alone. For `use=` and `theme=` a mistyped value looks the same as an absent key to the resolver.
 This code says the key is on the line but unusable; `E_INCOMPLETE_PLACE` says it is missing.
 
 `E_CONNECT_ARITY`: `connect FROM.PORT to TO.PORT` is the one form that reads positionals. The code
@@ -1081,12 +1082,12 @@ answer turns out to be. Note that a key in a member's own bracket does not make 
 the attribute, so a `theme` row selecting on it matches nothing.
 
 A `struct` / `def` header line answers to a closed vocabulary of its own, the one [Components,
-Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering
-reads, and `class=`, which no pass reads yet. No `theme` selector widens it, since a selector names
-a member keyword. A key outside the two is the same defect one line up from a member's, and is
-refused with the suggestion: `struct s siz=7x7` is offered `size`. The missing-size warning the
-same typo causes cannot name it, since it says only that the struct has no size. The error is
-printed before the warning.
+Editing, and Multi-building](/spec/components-editing-sites/) states: `size=`, which lowering reads.
+No `theme` selector widens it, since a selector names a member keyword. Any other key is the same
+defect one line up from a member's, and is refused with the suggestion: `struct s siz=7x7` is
+offered `size`. A key every member takes, such as `class=`, is told it goes on a line in the body.
+The missing-size warning the same typo causes cannot name it, since it says only that the struct has
+no size. The error is printed before the warning.
 
 `W_IGNORED_ARGUMENT` is a **warning**, and covers three things. An **unreadable value**: a `key=` in
 the vocabulary whose value the pass cannot read is dropped and a default put in its place, or, where
@@ -1094,12 +1095,11 @@ the key itself decides whether the member is built at all, the member is left ou
 `W_DEFERRED_MEMBER` (`sym=` on a `window` whose `repeat=` is greater than 1 is that key today,
 [§5.4](/spec/syntax/#54-selectors)). An **unread key**: a `key=` the keyword accepts and nothing
 reads where it is written, carried into the IR and never consulted. It comes in two kinds. An
-*unreached* key is one this specification defines that no pass reads yet. `window shape=` and a
-header's `class=` are those keys today. Every
-`key=value` on the right of a `theme` selector row whose keyword the compiler knows is one too,
-reported on the binding whatever its key or value, since no pass lowers a selector's bindings yet
-([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every member
-accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
+*unreached* key is one this specification defines that no pass reads yet. `window shape=` is that
+key today. Every `key=value` on the right of a `theme` selector row whose keyword the compiler knows
+is one too, reported on the binding whatever its key or value, since no pass lowers a selector's
+bindings yet ([Materials and Themes](/spec/materials-themes/)). An *inapplicable* key is one every
+member accepts, on a keyword that puts down nothing it would be read for; `mat_slot=` on a `level`,
 `circuit`, `place`, `connect`, `raw_block`, `raw_fill` or `raw_repeat` is that key today. A
 `mat_slot=` of either kind is not looked up in the theme, so a slot name the theme does not declare
 is this warning rather than `E_UNRESOLVED_SLOT`, and a misspelt one is not caught. And a key
