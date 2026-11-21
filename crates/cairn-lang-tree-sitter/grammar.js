@@ -90,7 +90,32 @@ module.exports = grammar({
       $.struct_decl,
       $.def_decl,
       $.site_decl,
+      // A line of its own with no body, so the blank lines after it are its to take.
+      seq($.edit_stmt, repeat1($._newline)),
     ),
+
+    // Core's check alone says whether the target selects a member and the keys are its keyword's.
+    edit_stmt: $ => seq(
+      'edit',
+      field('target', choice($.selector, $.member_address)),
+      'set',
+      field('set', alias($.edit_set, $.attribute_list)),
+    ),
+
+    // Core refuses a bare value among an edit's keys, so unlike a header's list this holds none.
+    edit_set: $ => repeat1($.attribute),
+
+    member_address: $ => seq($.address_step, repeat(seq('.', $.address_step))),
+
+    address_step: $ => seq(
+      field('role', $.identifier),
+      optional(seq('@', field('side', $.address_side))),
+      '[',
+      field('index', $.integer),
+      ']',
+    ),
+
+    address_side: $ => seq($.identifier, repeat(seq('.', $.identifier))),
 
     struct_decl: declOf('struct', 'struct_body'),
     def_decl:    declOf('def', 'def_body'),
@@ -317,9 +342,10 @@ module.exports = grammar({
       optional(field('bindings', $.attribute_list)),
     ),
 
+    // Several brackets read as one holding all their attributes.
     selector: $ => seq(
       field('keyword', $.identifier),
-      field('filter', $.selector_filter),
+      repeat1(field('filter', $.selector_filter)),
     ),
 
     selector_filter: $ => seq('[', optional($.filter_list), ']'),

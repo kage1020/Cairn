@@ -11,18 +11,23 @@ use crate::repo::Repo;
 
 pub const RULE: Rule = Rule {
     name: "editor-keywords",
-    summary: "the VS Code grammar highlights exactly core's top-level and member keywords",
+    summary: "the VS Code grammar highlights exactly core's top-level, `edit` and member keywords",
     check,
 };
 
 const GRAMMAR: &str = "editors/vscode/syntaxes/cairn.tmLanguage.json";
 
 /// Each grammar pattern, the core source defining its keywords, and which literals there count.
-const PAIRS: [(&str, &str, Source); 2] = [
+const PAIRS: [(&str, &str, Source); 3] = [
     (
         "top-level",
         "crates/cairn-lang-core/src/ast.rs",
-        Source::ItemKeywords,
+        Source::ItemKind,
+    ),
+    (
+        "edit-line",
+        "crates/cairn-lang-core/src/parse/edit.rs",
+        Source::EditLine,
     ),
     (
         "member-keyword",
@@ -34,9 +39,11 @@ const PAIRS: [(&str, &str, Source); 2] = [
 #[derive(Clone, Copy)]
 enum Source {
     /// The literals `impl ItemKind { fn keyword }` returns.
-    ItemKeywords,
+    ItemKind,
     /// The literals of `const KNOWN_KEYWORDS`.
     KnownKeywords,
+    /// The literals of `const EDIT` and `const SET`.
+    EditLine,
 }
 
 struct Literals {
@@ -49,7 +56,7 @@ impl<'ast> Visit<'ast> for Literals {
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
         let is_item_kind = matches!(&*item.self_ty, syn::Type::Path(path)
             if path.path.segments.last().is_some_and(|last| last.ident == "ItemKind"));
-        if !matches!(self.source, Source::ItemKeywords) || !is_item_kind {
+        if !matches!(self.source, Source::ItemKind) || !is_item_kind {
             return;
         }
         for impl_item in &item.items {
@@ -64,7 +71,12 @@ impl<'ast> Visit<'ast> for Literals {
     }
 
     fn visit_item_const(&mut self, item: &'ast syn::ItemConst) {
-        if matches!(self.source, Source::KnownKeywords) && item.ident == "KNOWN_KEYWORDS" {
+        let counted = match self.source {
+            Source::KnownKeywords => item.ident == "KNOWN_KEYWORDS",
+            Source::EditLine => item.ident == "EDIT" || item.ident == "SET",
+            Source::ItemKind => false,
+        };
+        if counted {
             self.inside = true;
             self.visit_expr(&item.expr);
             self.inside = false;
@@ -89,20 +101,46 @@ fn core_keywords(source: &str, kind: Source) -> Result<BTreeSet<String>, String>
     Ok(literals.found)
 }
 
-/// The alternatives of the first group in a `match` such as `^\s*(theme|def)\b`.
+/// The alternatives of the first capturing group in a `match` such as `^\s*(theme|def)\b`; a
+/// `(?` group, such as a lookbehind, is passed over.
 fn alternation(pattern: &str) -> Option<BTreeSet<String>> {
-    let (_, rest) = pattern.split_once('(')?;
+    let mut rest = pattern;
+    loop {
+        (_, rest) = rest.split_once('(')?;
+        if !rest.starts_with('?') {
+            break;
+        }
+    }
     let (group, _) = rest.split_once(')')?;
     Some(group.split('|').map(str::to_owned).collect())
 }
 
+/// The first group of a pattern's `match`, or of its `begin` and of each `match` nested in it.
 fn grammar_keywords(grammar: &str, name: &str) -> Result<BTreeSet<String>, String> {
     let grammar: serde_json::Value =
         serde_json::from_str(grammar).map_err(|error| format!("not JSON: {error}"))?;
-    let pattern = grammar["repository"][name]["match"]
-        .as_str()
-        .ok_or_else(|| format!("no `repository.{name}.match` pattern"))?;
-    alternation(pattern).ok_or_else(|| format!("`{name}` has no `(a|b|...)` group: {pattern}"))
+    let rule = &grammar["repository"][name];
+    let patterns: Vec<&str> = match (rule["match"].as_str(), rule["begin"].as_str()) {
+        (Some(pattern), _) => vec![pattern],
+        (None, Some(begin)) => std::iter::once(begin)
+            .chain(
+                rule["patterns"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|nested| nested["match"].as_str()),
+            )
+            .collect(),
+        (None, None) => return Err(format!("no `repository.{name}.match` or `begin` pattern")),
+    };
+    let mut keywords = BTreeSet::new();
+    for pattern in patterns {
+        keywords.extend(
+            alternation(pattern)
+                .ok_or_else(|| format!("`{name}` has no `(a|b|...)` group: {pattern}"))?,
+        );
+    }
+    Ok(keywords)
 }
 
 fn check(repo: &Repo) -> Vec<Finding> {
@@ -179,7 +217,7 @@ impl ItemKind {
 impl Other { pub fn keyword(self) -> &'static str { "nor_this" } }
 const KNOWN_KEYWORDS: &[&str] = &["floor"];
 "#;
-        let found: Vec<_> = core_keywords(source, Source::ItemKeywords)
+        let found: Vec<_> = core_keywords(source, Source::ItemKind)
             .unwrap()
             .into_iter()
             .collect();
@@ -198,6 +236,33 @@ impl ItemKind { pub fn keyword(self) -> &'static str { "theme" } }
             .into_iter()
             .collect();
         assert_eq!(found, ["floor", "walls"]);
+    }
+
+    #[test]
+    fn edit_keywords_come_from_the_edit_and_set_consts_only() {
+        let source = r#"
+pub(super) const EDIT: &str = "edit";
+const SET: &str = "set";
+const OTHER: &str = "nope";
+"#;
+        let found: Vec<_> = core_keywords(source, Source::EditLine)
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(found, ["edit", "set"]);
+    }
+
+    #[test]
+    fn a_begin_pattern_takes_the_keywords_of_its_nested_matches_too() {
+        let grammar = r##"{"repository": {"edit-line": {
+            "begin": "^(edit)\\b(?:\\s+([a-z]+))?",
+            "patterns": [{"match": "(?<=\\s)(set)(?=\\s)"}, {"include": "#number"}]
+        }}}"##;
+        let found: Vec<_> = grammar_keywords(grammar, "edit-line")
+            .unwrap()
+            .into_iter()
+            .collect();
+        assert_eq!(found, ["edit", "set"]);
     }
 
     #[test]

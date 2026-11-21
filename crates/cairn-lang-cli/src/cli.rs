@@ -461,7 +461,8 @@ pub(crate) enum StructureFormat {
 
 #[derive(Copy, Clone, ValueEnum)]
 pub(crate) enum ParseFormat {
-    /// Pretty JSON (default), each member line of a `struct` or `def` body carrying its address.
+    /// Pretty JSON (default), each member line of a `struct` or `def` body carrying its address,
+    /// and each `edit` line its target and the keys it sets.
     Json,
     /// Rust `{:#?}` debug formatting (developer-facing).
     Debug,
