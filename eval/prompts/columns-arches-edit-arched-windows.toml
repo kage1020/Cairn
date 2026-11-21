@@ -1,0 +1,3 @@
+topic = 'columns-arches'
+base = 'levels-two-storey-house'
+prompt = 'Make only the second-floor windows arched.'

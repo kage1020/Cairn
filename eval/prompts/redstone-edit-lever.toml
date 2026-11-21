@@ -1,0 +1,3 @@
+topic = 'redstone'
+base = 'redstone-pressure-plate-door'
+prompt = 'Make the door open from a lever beside it instead of the pressure plate.'

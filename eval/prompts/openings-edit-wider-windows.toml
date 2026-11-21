@@ -1,0 +1,3 @@
+topic = 'openings'
+base = 'openings-cottage-windows'
+prompt = 'Widen each front window by one block and leave the door where it is.'

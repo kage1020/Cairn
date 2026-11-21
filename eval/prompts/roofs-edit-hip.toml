@@ -1,0 +1,3 @@
+topic = 'roofs'
+base = 'roofs-gable-cottage'
+prompt = 'Change the gable roof to a hip roof.'
