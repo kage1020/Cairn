@@ -17,21 +17,20 @@ pub(super) struct Built {
 ///
 /// # Errors
 ///
+/// [`TransliterateError::Miswritten`] when `source` does not parse, and
 /// [`TransliterateError::Refused`] when any pass raises an error.
 pub(super) fn compile(
     source: &str,
     stamp: &Stamp,
     registry: &dyn TargetRegistry,
 ) -> Result<Built, TransliterateError> {
-    let module = parse(source).map_err(|error| TransliterateError::Malformed {
-        unit: "the written source".to_owned(),
-        reason: format!("it does not parse: {}", error.user_message()),
+    let module = parse(source).map_err(|error| TransliterateError::Miswritten {
+        reason: format!("does not parse: {}", error.user_message()),
     })?;
     let edition = stamp.edition;
     let ir = lower(&module);
     let mut findings = check(&module, &ir, Some(edition));
     let resolution = resolve(&ir, Some(edition));
-    findings.extend(resolution.diagnostics.iter().cloned());
     let mut built = lower_to_block_array(&ir, &resolution, Some(registry));
     findings.append(&mut built.diagnostics);
     let (errors, warnings): (Vec<Diagnostic>, Vec<Diagnostic>) = findings

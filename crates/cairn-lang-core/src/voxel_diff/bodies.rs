@@ -254,7 +254,7 @@ pub(super) fn compare_pair(unit: Option<&GridUnit>, body: Option<BuiltBody>) -> 
     let structure = unit.map(|unit| unit.name.clone());
     let source = body.as_ref().map(|body| body.name.clone());
     let built = body.unwrap_or_else(|| BuiltBody::empty(String::new()));
-    let grid_dims = unit.map_or(Dims { x: 0, y: 0, z: 0 }, |unit| unit.grid.dims);
+    let grid_dims = unit.map_or(Dims { x: 0, y: 0, z: 0 }, |unit| unit.grid.dims());
     let extent = Dims {
         x: grid_dims.x.max(built.dims.x),
         y: grid_dims.y.max(built.dims.y),
@@ -262,8 +262,8 @@ pub(super) fn compare_pair(unit: Option<&GridUnit>, body: Option<BuiltBody>) -> 
     };
     let expected_at = |(x, y, z): Cell| -> Option<&GridEntry> {
         let grid = &unit?.grid;
-        let slot = grid.voxels.get(grid.dims.index(x, y, z)?)?;
-        grid.palette
+        let slot = grid.voxels().get(grid.dims().index(x, y, z)?)?;
+        grid.palette()
             .get(usize::from(slot.0))
             .filter(|entry| !is_air(&entry.state.id))
     };

@@ -363,8 +363,8 @@ impl MemberRole {
         }
     }
 
-    /// Whether this is a role of the escape-hatch layer, a raw member or a Tier 0 part, the only
-    /// kind an `@edition` guard holds.
+    /// Whether this is a role of the escape-hatch layer, a raw member, a `raw_repeat` or a Tier 0
+    /// part, the only kind an `@edition` guard holds.
     #[must_use]
     pub fn is_escape_hatch(&self) -> bool {
         matches!(self, Self::RawBlock | Self::RawFill | Self::RawRepeat) || self.is_tier0_part()

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockState, PaletteIndex};
+use cairn_lang_core::block_array::{BlockState, PALETTE_CAPACITY, PaletteIndex};
 use cairn_lang_core::transliterate::{BlockGrid, GridEntry};
 use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
@@ -16,15 +16,13 @@ const WATER_IDS: [&str; 2] = ["minecraft:water", "minecraft:flowing_water"];
 
 /// A Java volume as a grid: every state as the file stores it, which Java builds as written.
 pub(super) fn java_grid(volume: &BlockVolume) -> BlockGrid {
-    BlockGrid {
-        dims: volume.dims(),
-        palette: volume
-            .palette()
-            .iter()
-            .map(|state| GridEntry::exact(state.clone()))
-            .collect(),
-        voxels: volume.voxels().to_vec(),
-    }
+    let palette = volume
+        .palette()
+        .iter()
+        .map(|state| GridEntry::exact(state.clone()))
+        .collect();
+    BlockGrid::new(volume.dims(), palette, volume.voxels().to_vec())
+        .expect("a block volume's voxels fill its extents and index its palette")
 }
 
 /// What a Bedrock volume reads as at one version's state map.
@@ -34,6 +32,8 @@ pub(super) struct BedrockGrid {
     pub(super) unspelled: Vec<(String, usize)>,
     /// Cells whose second layer holds water the written block does not stand in.
     pub(super) dried: usize,
+    /// Cells whose first layer holds a structure void and whose second holds water.
+    pub(super) void_water: usize,
     /// Cells whose written block stands in water the file's second layer does not hold.
     pub(super) flooded: usize,
     /// Each block the second layer holds that is not water, with its cells.
@@ -42,20 +42,31 @@ pub(super) struct BedrockGrid {
     pub(super) void_cells: usize,
 }
 
+/// A grid's palette past what a block array holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct GridPaletteTooLarge;
+
 /// A Bedrock volume as a grid at `states`' version, each block spelled with an id `declares`
 /// takes; a `block_palette` entry no canonical state writes is written by its id alone.
+///
+/// # Errors
+///
+/// [`GridPaletteTooLarge`] when air and the blocks written, each in water and out of it, take more
+/// entries than a block array's palette holds.
 pub(super) fn bedrock_grid(
     volume: &BedrockVolume,
     states: &VersionStates<'_>,
     declares: &dyn Fn(&str) -> bool,
-) -> BedrockGrid {
+) -> Result<BedrockGrid, GridPaletteTooLarge> {
     let mut palette = vec![GridEntry::exact(BlockState::air())];
+    let mut written: HashMap<EntryKey, PaletteIndex> = HashMap::new();
+    written.insert(EntryKey::of(&palette[0]), PaletteIndex::AIR);
     // Per first-layer entry and whether water stands with it: its slot, and the water the
     // written block stands in, `None` for an entry no canonical state writes.
     let mut slots: HashMap<(usize, bool), (PaletteIndex, Option<bool>)> = HashMap::new();
     let mut unspelled: IndexMap<String, usize> = IndexMap::new();
     let mut layered: IndexMap<String, usize> = IndexMap::new();
-    let (mut dried, mut flooded, mut void_cells) = (0, 0, 0);
+    let (mut dried, mut void_water, mut flooded, mut void_cells) = (0, 0, 0, 0);
     let mut voxels = Vec::with_capacity(volume.blocks().len());
     for (block, liquid) in volume.blocks().iter().zip(volume.liquids()) {
         let liquid = liquid.map(|slot| &volume.palette()[usize::from(slot.0)]);
@@ -65,12 +76,15 @@ pub(super) fn bedrock_grid(
         }
         let Some(block) = block else {
             void_cells += 1;
+            void_water += usize::from(water);
             voxels.push(PaletteIndex::AIR);
             continue;
         };
         let at = usize::from(block.0);
         let entry = &volume.palette()[at];
-        let (slot, wet) = *slots.entry((at, water)).or_insert_with(|| {
+        let (slot, wet) = if let Some(known) = slots.get(&(at, water)) {
+            *known
+        } else {
             let spelling = typed_states(&entry.states)
                 .and_then(|typed| states.canonical_spelling(&entry.name, &typed, water, declares));
             let (grid_entry, wet) = match spelling {
@@ -84,12 +98,22 @@ pub(super) fn bedrock_grid(
                 ),
                 None => (GridEntry::exact(BlockState::bare(entry.name.clone())), None),
             };
-            let slot = PaletteIndex(
-                u16::try_from(palette.len()).expect("one entry per palette entry and water"),
-            );
-            palette.push(grid_entry);
+            let key = EntryKey::of(&grid_entry);
+            let slot = if let Some(slot) = written.get(&key) {
+                *slot
+            } else {
+                let slot = u16::try_from(palette.len())
+                    .ok()
+                    .filter(|_| palette.len() < PALETTE_CAPACITY)
+                    .map(PaletteIndex)
+                    .ok_or(GridPaletteTooLarge)?;
+                palette.push(grid_entry);
+                written.insert(key, slot);
+                slot
+            };
+            slots.insert((at, water), (slot, wet));
             (slot, wet)
-        });
+        };
         match wet {
             None => {
                 *unspelled
@@ -102,17 +126,43 @@ pub(super) fn bedrock_grid(
         }
         voxels.push(slot);
     }
-    BedrockGrid {
-        grid: BlockGrid {
-            dims: volume.dims(),
-            palette,
-            voxels,
-        },
+    Ok(BedrockGrid {
+        grid: BlockGrid::new(volume.dims(), palette, voxels)
+            .expect("one voxel per cell, each a slot the palette was given"),
         unspelled: unspelled.into_iter().collect(),
         dried,
+        void_water,
         flooded,
         layered: layered.into_iter().collect(),
         void_cells,
+    })
+}
+
+/// A grid entry as one palette slot is told from another: its id and each of its lists sorted.
+#[derive(Debug, PartialEq, Eq, Hash)]
+struct EntryKey {
+    id: String,
+    properties: Vec<(String, String)>,
+    defaults: Vec<(String, String)>,
+    unread: Vec<String>,
+}
+
+impl EntryKey {
+    fn of(entry: &GridEntry) -> Self {
+        let sorted = |pairs: &IndexMap<String, String>| {
+            let mut out: Vec<(String, String)> =
+                pairs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            out.sort_unstable();
+            out
+        };
+        let mut unread = entry.unread.clone();
+        unread.sort_unstable();
+        Self {
+            id: entry.state.id.clone(),
+            properties: sorted(&entry.state.properties),
+            defaults: sorted(&entry.defaults),
+            unread,
+        }
     }
 }
 

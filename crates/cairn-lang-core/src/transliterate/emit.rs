@@ -3,11 +3,15 @@
 use std::fmt::Write as _;
 
 use crate::CAIRN_VERSION;
-use crate::block_array::{BlockArrayIr, BlockState, Dims, TargetRegistry};
+use crate::block_array::{BlockArrayIr, BlockState, Dims, IMPORTED_ORIGIN, TargetRegistry};
+use crate::lex::is_ident;
 use crate::resolve::place_scope_key;
 
 use super::boxes::{Cell, Folded, cut, fold};
-use super::{CHUNK_FOOTPRINT, GridEntry, GridUnit, Stamp, TransliterateError, WrittenBody};
+use super::names::{chunk_counts, chunk_name};
+use super::{
+    CHUNK_FOOTPRINT, GridEntry, GridUnit, Stamp, TransliterateError, UnspellablePart, WrittenBody,
+};
 
 /// The theme a chunked unit's `place` rows name; it binds nothing, as no raw member reads a slot.
 const CHUNK_THEME: &str = "imported";
@@ -48,54 +52,41 @@ impl<'a> UnitPlan<'a> {
         registry: &dyn TargetRegistry,
     ) -> Result<Self, TransliterateError> {
         let grid = &unit.grid;
-        let malformed = |reason: String| TransliterateError::Malformed {
-            unit: unit.name.clone(),
-            reason,
-        };
-        if grid.dims.x == 0 || grid.dims.y == 0 || grid.dims.z == 0 {
-            return Err(malformed(format!(
-                "its extents {}x{}x{} hold no cell",
-                grid.dims.x, grid.dims.y, grid.dims.z
-            )));
-        }
-        if grid.voxels.len() != grid.dims.volume() {
-            return Err(malformed(format!(
-                "it lists {} voxels for {}x{}x{} cells",
-                grid.voxels.len(),
-                grid.dims.x,
-                grid.dims.y,
-                grid.dims.z
-            )));
-        }
-        if let Some(slot) = grid
-            .voxels
-            .iter()
-            .find(|slot| usize::from(slot.0) >= grid.palette.len())
-        {
-            return Err(malformed(format!(
-                "a voxel names palette entry {} of {}",
-                slot.0,
-                grid.palette.len()
-            )));
+        let mut used = vec![false; grid.palette().len()];
+        for slot in grid.voxels() {
+            used[usize::from(slot.0)] = true;
         }
         let spellings: Vec<Option<Spellings>> = grid
-            .palette
+            .palette()
             .iter()
             .map(|entry| spellings(entry, registry))
             .collect();
-        if grid
-            .voxels
-            .iter()
-            .all(|slot| spellings[usize::from(slot.0)].is_none())
-        {
+        let written = || {
+            grid.palette()
+                .iter()
+                .zip(&spellings)
+                .zip(&used)
+                .filter(|((_, spelling), used)| **used && spelling.is_some())
+                .map(|((entry, _), _)| entry)
+        };
+        if written().next().is_none() {
             return Err(TransliterateError::Empty {
                 unit: unit.name.clone(),
+            });
+        }
+        if let Some((entry, part)) =
+            written().find_map(|entry| unspellable(&entry.state).map(|part| (entry, part)))
+        {
+            return Err(TransliterateError::Unspellable {
+                unit: unit.name.clone(),
+                block: spelled(&entry.state),
+                part,
             });
         }
         Ok(Self {
             unit,
             spellings,
-            chunks: chunks(&unit.name, grid.dims),
+            chunks: chunks(&unit.name, grid.dims()),
         })
     }
 
@@ -121,10 +112,10 @@ impl<'a> UnitPlan<'a> {
             chunk.origin.2 + cell.2,
         );
         let index = grid
-            .dims
+            .dims()
             .index(x, y, z)
             .expect("a chunk lies inside its grid");
-        usize::from(grid.voxels[index].0)
+        usize::from(grid.voxels()[index].0)
     }
 
     /// What each cell of `chunk` is written as: `2 * entry`, or that plus one with its connection
@@ -159,7 +150,8 @@ impl<'a> UnitPlan<'a> {
     ///
     /// # Errors
     ///
-    /// [`TransliterateError::Malformed`] when the compile built no body of the size written.
+    /// [`TransliterateError::Miswritten`] when the compile builds no body of the size written, or
+    /// places a chunk elsewhere than the grid holds it.
     pub(super) fn unmatched(
         &self,
         ir: &BlockArrayIr,
@@ -171,10 +163,9 @@ impl<'a> UnitPlan<'a> {
                 .structures
                 .get(&key)
                 .filter(|array| array.dims == chunk.dims)
-                .ok_or_else(|| TransliterateError::Malformed {
-                    unit: self.unit.name.clone(),
+                .ok_or_else(|| TransliterateError::Miswritten {
                     reason: format!(
-                        "compiling its source builds no `{key}` of {}x{}x{} cells",
+                        "builds no `{key}` of {}x{}x{} cells",
                         chunk.dims.x, chunk.dims.y, chunk.dims.z
                     ),
                 })?;
@@ -182,10 +173,9 @@ impl<'a> UnitPlan<'a> {
                 let expected = placed_origin(self.rows(), chunk.origin);
                 let placed = ir.placements.get(&key).map(|placement| placement.origin);
                 if placed != Some(expected) {
-                    return Err(TransliterateError::Malformed {
-                        unit: self.unit.name.clone(),
+                    return Err(TransliterateError::Miswritten {
                         reason: format!(
-                            "compiling its source places `{}` at {placed:?}, not at {expected:?}",
+                            "places `{}` at {placed:?}, not at {expected:?}",
                             chunk.name
                         ),
                     });
@@ -194,7 +184,7 @@ impl<'a> UnitPlan<'a> {
             for (i, slot) in array.voxels.iter().enumerate() {
                 let cell = chunk.dims.position(i).expect("a chunk's index");
                 let built = &array.palette.entries[usize::from(slot.0)];
-                let entry = &self.unit.grid.palette[self.entry_at(chunk, cell)];
+                let entry = &self.unit.grid.palette()[self.entry_at(chunk, cell)];
                 if !entry.is_built_as(built) {
                     out.push((c, cell, built.clone()));
                 }
@@ -211,7 +201,7 @@ impl<'a> UnitPlan<'a> {
         built: &BlockState,
     ) -> TransliterateError {
         let chunk = &self.chunks[chunk];
-        let entry = &self.unit.grid.palette[self.entry_at(chunk, cell)];
+        let entry = &self.unit.grid.palette()[self.entry_at(chunk, cell)];
         TransliterateError::Unmatched {
             unit: self.unit.name.clone(),
             cell: (
@@ -285,17 +275,17 @@ fn spellings(entry: &GridEntry, registry: &dyn TargetRegistry) -> Option<Spellin
 /// The bodies `name`'s grid of `dims` is written as: itself, or columns of at most
 /// [`CHUNK_FOOTPRINT`] each way, the whole height.
 fn chunks(name: &str, dims: Dims) -> Vec<Chunk> {
-    if dims.x <= CHUNK_FOOTPRINT && dims.z <= CHUNK_FOOTPRINT {
+    let Some((columns, rows)) = chunk_counts(dims) else {
         return vec![Chunk {
             name: name.to_owned(),
             origin: (0, 0, 0),
             dims,
             written: vec![false; dims.volume()],
         }];
-    }
+    };
     let mut out = Vec::new();
-    for i in 0..dims.x.div_ceil(CHUNK_FOOTPRINT) {
-        for j in 0..dims.z.div_ceil(CHUNK_FOOTPRINT) {
+    for i in 0..columns {
+        for j in 0..rows {
             let origin = (i * CHUNK_FOOTPRINT, 0, j * CHUNK_FOOTPRINT);
             let dims = Dims {
                 x: CHUNK_FOOTPRINT.min(dims.x - origin.0),
@@ -303,7 +293,7 @@ fn chunks(name: &str, dims: Dims) -> Vec<Chunk> {
                 z: CHUNK_FOOTPRINT.min(dims.z - origin.2),
             };
             out.push(Chunk {
-                name: format!("{name}_x{i}_z{j}"),
+                name: chunk_name(name, i, j),
                 origin,
                 dims,
                 written: vec![false; dims.volume()],
@@ -311,6 +301,25 @@ fn chunks(name: &str, dims: Dims) -> Vec<Chunk> {
         }
     }
     out
+}
+
+/// The first part of `state`, its id then each property by name, that no `mat=` value can spell.
+fn unspellable(state: &BlockState) -> Option<UnspellablePart> {
+    let (id, properties) = state.canonical_key();
+    let id = id.split_once(':');
+    if !id.is_some_and(|(namespace, path)| is_ident(namespace) && is_ident(path)) {
+        return Some(UnspellablePart::Id);
+    }
+    properties.into_iter().find_map(|(key, value)| {
+        let digits = !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit());
+        if !is_ident(key) {
+            Some(UnspellablePart::Property(key.to_owned()))
+        } else if is_ident(value) || digits || matches!(value, "true" | "false") {
+            None
+        } else {
+            Some(UnspellablePart::Value(key.to_owned()))
+        }
+    })
 }
 
 /// `state` as a `mat=` writes it: the id, and its properties sorted by name in brackets.
@@ -410,7 +419,7 @@ fn members(out: &mut String, plan: &UnitPlan<'_>, chunk: &Chunk) -> usize {
     if folded.iter().all(|item| item.top() < top) {
         let _ = writeln!(
             out,
-            "  raw_block mat={} at=0,{top},0 origin=imported",
+            "  raw_block mat={} at=0,{top},0 origin={IMPORTED_ORIGIN}",
             BlockState::AIR_ID
         );
         lines += 1;
@@ -426,13 +435,13 @@ fn raw_line(out: &mut String, indent: &str, plan: &UnitPlan<'_>, item: &Folded) 
     if cuboid.size == (1, 1, 1) {
         let _ = writeln!(
             out,
-            "{indent}raw_block mat={mat} at={x},{y},{z} origin=imported"
+            "{indent}raw_block mat={mat} at={x},{y},{z} origin={IMPORTED_ORIGIN}"
         );
     } else {
         let (hx, hy, hz) = cuboid.high();
         let _ = writeln!(
             out,
-            "{indent}raw_fill mat={mat} from={x},{y},{z} to={hx},{hy},{hz} origin=imported"
+            "{indent}raw_fill mat={mat} from={x},{y},{z} to={hx},{hy},{hz} origin={IMPORTED_ORIGIN}"
         );
     }
 }

@@ -7,6 +7,7 @@ use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
+use crate::block_array::IMPORTED_ORIGIN;
 use crate::block_array::args::diag_invalid_member;
 
 /// How many times a raw member is written, and how far each copy lies from the one before.
@@ -150,7 +151,7 @@ pub(super) fn diag_empty_repeat(member: &Member) -> Diagnostic {
 /// Whether a raw member's line carries `origin=imported`, the mark of a line `cairn import`
 /// wrote.
 pub(super) fn is_imported(member: &Member) -> bool {
-    member.ident_value("origin") == Some("imported")
+    member.ident_value("origin") == Some(IMPORTED_ORIGIN)
 }
 
 /// The refusal of a raw member's `origin=` that is not `imported`, or `None`.

@@ -610,9 +610,9 @@ Multi-building](/spec/components-editing-sites/).
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the
 incomplete side is its own line rather than the compiler. A line does that with an argument the
-member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose
-`y=` is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=`
-is no block id, a `raw_repeat` with no `count=` or `step=` or with nothing under it), a value
+member cannot be built without left out or unreadable (a `window` with no `y=`, a `level` whose `y=`
+is not a non-negative integer, `walls` with no positive `height=`, a `raw_block` whose `mat=` is no
+block id, a `raw_repeat` with no `count=` or `step=` or with no raw member under it), a value
 outside the ones its key takes (a `roof kind=` that names no kind, `side=middle`, an eave `stair`
 whose `half=` is an identifier other than `top` or `bottom`, a `raw_repeat` `count=` below 1 or a
 `step=0,0,0` over more than one copy, a raw member's `origin=` other than `imported`), or arguments

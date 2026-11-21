@@ -1,6 +1,7 @@
-//! Reads a Java structure file's `blocks` one entry at a time, holding only each entry's position
-//! and palette index, in whatever order the file stores its fields.
+//! Reads a Java structure file's `blocks` one entry at a time, holding only each entry's position,
+//! palette index and `nbt`, in whatever order the file stores its fields.
 
+use std::collections::HashSet;
 use std::io::Read;
 
 use cairn_lang_core::block_array::{
@@ -85,6 +86,12 @@ pub enum StructureReadError {
         /// The extents, as `3x4x5`.
         size: String,
     },
+    /// A field of the root stored a second time.
+    #[error("`{path}` is stored twice, where a compound holds each name once")]
+    StoredTwice {
+        /// The field.
+        path: String,
+    },
     /// Two `blocks` entries at one position.
     #[error("`blocks[{block}]` is at {x},{y},{z}, where an earlier entry already is")]
     Repeated {
@@ -118,7 +125,8 @@ struct Fields {
     data_version: Option<i32>,
     size: Option<Vec<i32>>,
     palette: Option<Vec<BlockState>>,
-    palettes: usize,
+    /// The first palette of `palettes`, and how many it holds.
+    palettes: Option<(Option<Vec<BlockState>>, usize)>,
     blocks: Option<Vec<Listed>>,
     block_entities: Vec<(usize, Compound)>,
     entities: Vec<Compound>,
@@ -135,7 +143,21 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
     let mut nbt = NbtReader::java(gz).with_max_len(MAX_STRUCTURE_VOLUME);
     nbt.next_event()?;
     let mut fields = Fields::default();
+    let mut stored: HashSet<String> = HashSet::new();
     while let Some(event) = nbt.next_event()? {
+        let name = match &event {
+            Event::Compound { name } | Event::List { name, .. } | Event::Value { name, .. } => {
+                name.as_deref()
+            }
+            Event::End => None,
+        };
+        if let Some(name) = name
+            && !stored.insert(name.to_owned())
+        {
+            return Err(StructureReadError::StoredTwice {
+                path: name.to_owned(),
+            });
+        }
         match event {
             Event::Value {
                 name: Some(name),
@@ -154,11 +176,8 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
                     });
                     fields.size = ints.collect();
                 }
-                "palette" => {
-                    fields.palette = Some(read_palette(&mut nbt, "palette")?);
-                    fields.palettes = 1;
-                }
-                "palettes" => read_palettes(&mut nbt, &mut fields)?,
+                "palette" => fields.palette = Some(read_palette(&mut nbt, "palette")?),
+                "palettes" => fields.palettes = Some(read_palettes(&mut nbt)?),
                 "blocks" => read_blocks(&mut nbt, &mut fields)?,
                 "entities" => fields.entities = compounds(&mut nbt, "entities")?,
                 _ => nbt.skip_rest()?,
@@ -211,22 +230,22 @@ fn read_palette<R: Read>(
         .collect()
 }
 
-/// The open `palettes` list: the first palette read, the others counted and skipped.
+/// The open `palettes` list: the first palette read, and how many there are, the others skipped.
 fn read_palettes<R: Read>(
     nbt: &mut NbtReader<R>,
-    fields: &mut Fields,
-) -> Result<(), StructureReadError> {
+) -> Result<(Option<Vec<BlockState>>, usize), StructureReadError> {
+    let (mut first, mut count) = (None, 0);
     loop {
         match nbt.next_event()? {
             Some(Event::List { .. }) => {
-                if fields.palettes == 0 {
-                    fields.palette = Some(read_palette(nbt, "palettes[0]")?);
+                if count == 0 {
+                    first = Some(read_palette(nbt, "palettes[0]")?);
                 } else {
                     nbt.skip_rest()?;
                 }
-                fields.palettes += 1;
+                count += 1;
             }
-            Some(Event::End) | None => return Ok(()),
+            Some(Event::End) | None => return Ok((first, count)),
             Some(Event::Compound { .. } | Event::Value { .. }) => {
                 return Err(malformed("palettes", "a list of palettes"));
             }
@@ -289,9 +308,17 @@ fn decode(fields: Fields) -> Result<StoredStructure, StructureReadError> {
             volume: saturating_volume(size),
             limit: MAX_STRUCTURE_VOLUME,
         })?;
-    let mut palette = fields
-        .palette
-        .ok_or_else(|| malformed("palette", "a list of block states"))?;
+    // As the game loads a structure, `palettes` wins over `palette` when both are stored.
+    let (mut palette, palettes) = match fields.palettes {
+        Some((Some(first), count)) => (first, count),
+        Some((None, _)) => return Err(malformed("palettes[0]", "a list of block states")),
+        None => (
+            fields
+                .palette
+                .ok_or_else(|| malformed("palette", "a list of block states"))?,
+            1,
+        ),
+    };
     let blocks = fields
         .blocks
         .ok_or_else(|| malformed("blocks", "a list of compounds"))?;
@@ -321,7 +348,7 @@ fn decode(fields: Fields) -> Result<StoredStructure, StructureReadError> {
         volume: BlockVolume::new(size, palette, voxels, block_entities)
             .expect("each part of the structure is checked as it is decoded"),
         void_cells,
-        palettes: fields.palettes,
+        palettes,
         entities: fields.entities,
     })
 }

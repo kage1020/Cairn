@@ -46,8 +46,8 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
             return ExitCode::from(1);
         }
     };
-    let edition = decoded.stamp.edition;
-    let target = match resolve_target(edition, &decoded.stamp.mc_version) {
+    let edition = decoded.stamp.edition();
+    let target = match resolve_target(edition, decoded.stamp.mc_version()) {
         Ok(target) => target,
         Err(err) => {
             eprintln!("error: {err}");
@@ -227,8 +227,8 @@ fn print_text(structure: &Path, file: &Path, decoded: &DecodedStructure, verdict
         "{} against {} at {} {}, {}",
         structure.display(),
         file.display(),
-        decoded.stamp.edition,
-        decoded.stamp.mc_version,
+        decoded.stamp.edition(),
+        decoded.stamp.mc_version(),
         decoded.stamp.reason()
     );
     for line in metric_lines(&verdict.metrics) {

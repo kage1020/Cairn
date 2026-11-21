@@ -1,6 +1,6 @@
-//! The `edition_guard` pass: a known member other than a raw member or a Tier 0 part, or a `logic`
-//! or `assert` line, under an `@edition` guard, since the semantic layer is edition-neutral
-//! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
+//! The `edition_guard` pass: a known member other than a raw member, a `raw_repeat` or a Tier 0
+//! part, or a `logic` or `assert` line, under an `@edition` guard, since the semantic layer is
+//! edition-neutral (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use crate::ast::{Item, Module, Statement};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
