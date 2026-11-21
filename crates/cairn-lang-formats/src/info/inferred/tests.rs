@@ -2,6 +2,7 @@ use cairn_lang_core::resolve::{VersionOrder, declared_version_floors};
 use cairn_lang_core::{Edition, parse};
 
 use super::*;
+use crate::build::conflicts::bound;
 
 /// No shipped pack ends two painted ids at different versions, so these bounds are made up.
 fn order() -> VersionOrder {

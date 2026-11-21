@@ -10,10 +10,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { runTests } from "@vscode/test-electron";
-import type { Pin, ServerEvent } from "./server-event";
+import type { Pin, ServerEvent, ShowInfo } from "./server-event";
 
 const EXTENSION_ROOT = resolve(__dirname, "..", "..");
 const FAKE_SERVER = join(__dirname, "fake-cairn-lsp.js");
@@ -70,6 +71,20 @@ function session(server: string, pins: Pin[]): Launch {
   };
 }
 
+/** An unpinned session with `server` that runs one command between its start and shutdown. */
+function commandSession(server: string): Launch {
+  return {
+    ...session(server, [UNPINNED]),
+    received: [
+      "initialize",
+      "initialized",
+      "workspace/executeCommand",
+      "shutdown",
+      "exit",
+    ],
+  };
+}
+
 /** What one run of VS Code is given. */
 interface Run {
   /** The user settings. */
@@ -81,6 +96,10 @@ interface Run {
   readonly workspace?: Record<string, unknown>;
   /** The edition and version `cairn.setTarget` runs with once the extension is active. */
   readonly setTarget?: readonly [string, string];
+  /** How `Cairn: Show Info` runs once the extension is active. */
+  readonly showInfo?: ShowInfo;
+  /** The JSON-RPC `result` or `error` member a stand-in answers a command with. */
+  readonly commandAnswer?: object;
 }
 
 /**
@@ -173,6 +192,9 @@ class Fixture {
         PATH: [dirname(this.pathServer), process.env.PATH].join(delimiter),
         CAIRN_TEST_RECORD: this.record,
         CAIRN_TEST_SET_TARGET: run.setTarget && JSON.stringify(run.setTarget),
+        CAIRN_TEST_SHOW_INFO: run.showInfo && JSON.stringify(run.showInfo),
+        CAIRN_TEST_INFO_ANSWER:
+          run.commandAnswer && JSON.stringify(run.commandAnswer),
       },
     });
   }
@@ -292,6 +314,11 @@ test(
 
 /** The settings JSON at `path`. */
 function settingsAt(path: string): unknown {
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+
+/** What `Cairn: Show Info` did, as the test host wrote it to `path`. */
+function shownAt(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
@@ -436,5 +463,112 @@ test(
     const fixture = new Fixture(t);
     const missing = join(fixture.root, "missing", "cairn-lsp");
     await fixture.expectLaunches({ user: { "cairn.serverPath": missing } }, []);
+  },
+);
+
+test(
+  "Cairn: Show Info opens what cairn.info answers for the document",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    await fixture.expectLaunches({ user: {}, showInfo: { to } }, [
+      probe(server),
+      probe(server),
+      commandSession(server),
+    ]);
+    const request = {
+      command: "cairn.info",
+      arguments: [{ uri: pathToFileURL(fixture.document).href }],
+    };
+    assert.deepEqual(shownAt(to), {
+      opened: `${JSON.stringify(request, null, 2)}\n`,
+    });
+  },
+);
+
+test(
+  "Cairn: Show Info says a refused source has no report",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const refused = { diagnostics: [] };
+    await fixture.expectLaunches(
+      { user: {}, showInfo: { to }, commandAnswer: { result: refused } },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    assert.deepEqual(shownAt(to), {
+      opened: `${JSON.stringify(refused, null, 2)}\n`,
+      message:
+        "cairn info refused the source, so there is no report. " +
+        "The document beside it lists the findings that refused it.",
+    });
+  },
+);
+
+test(
+  "Cairn: Show Info shows the error cairn.info answers",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const error = { code: -32803, message: "no report" };
+    await fixture.expectLaunches(
+      { user: {}, showInfo: { to }, commandAnswer: { error } },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    assert.deepEqual(shownAt(to), {
+      message: "cairn-lsp answered cairn.info with an error: no report",
+    });
+  },
+);
+
+test(
+  "Cairn: Show Info runs only on a .crn file saved to disk",
+  POSIX_ONLY,
+  async (t) => {
+    for (const [editor, message] of [
+      [
+        "plaintext",
+        "Cairn: Show Info reports on the active editor, which is not a .crn file. Open one first.",
+      ],
+      [
+        "untitled",
+        "Cairn: Show Info reads the lockfile beside the source. Save the document to a file first.",
+      ],
+    ] as const) {
+      const fixture = new Fixture(t);
+      const server = fixture.pathServer;
+      const to = join(fixture.root, "shown.json");
+      await fixture.expectLaunches({ user: {}, showInfo: { to, editor } }, [
+        probe(server),
+        probe(server),
+        session(server, [UNPINNED]),
+      ]);
+      assert.deepEqual(shownAt(to), { message }, editor);
+    }
+  },
+);
+
+test(
+  "Cairn: Show Info says when cairn-lsp is not running",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const missing = join(fixture.root, "missing", "cairn-lsp");
+    const to = join(fixture.root, "shown.json");
+    await fixture.expectLaunches(
+      { user: { "cairn.serverPath": missing }, showInfo: { to } },
+      [],
+    );
+    assert.deepEqual(shownAt(to), {
+      message:
+        "Cairn: Show Info needs cairn-lsp, which is not running. " +
+        "See the Output panel (Cairn Language Server) for why.",
+    });
   },
 );

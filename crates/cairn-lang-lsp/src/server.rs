@@ -1,6 +1,6 @@
 //! The stdio JSON-RPC loop: diagnostics pushed on each change or answered when the client pulls
-//! them, against what the client's settings pin; completion, hover and quick-fixes from the
-//! stored text.
+//! them, against what the client's settings pin; completion, hover, quick-fixes and commands from
+//! the stored text.
 
 use std::collections::VecDeque;
 use std::convert::Infallible;
@@ -15,11 +15,12 @@ use lsp_types::notification::{
     DidOpenTextDocument, Exit, Notification as _, PublishDiagnostics, ShowMessage,
 };
 use lsp_types::request::{
-    CodeActionRequest, Completion, DocumentDiagnosticRequest, HoverRequest, Request as _, Shutdown,
-    WorkspaceDiagnosticRefresh,
+    CodeActionRequest, Completion, DocumentDiagnosticRequest, ExecuteCommand, HoverRequest,
+    Request as _, Shutdown, WorkspaceDiagnosticRefresh,
 };
 
 use crate::code_action::{SET_TARGET, code_actions};
+use crate::commands::{COMMANDS, execute_command};
 use crate::completion::completions;
 use crate::diagnostics::compute_diagnostics;
 use crate::hover::hover;
@@ -63,6 +64,10 @@ fn server_capabilities() -> lsp_types::ServerCapabilities {
                 ..lsp_types::DiagnosticOptions::default()
             },
         )),
+        execute_command_provider: Some(lsp_types::ExecuteCommandOptions {
+            commands: COMMANDS.iter().map(|&command| command.to_owned()).collect(),
+            ..lsp_types::ExecuteCommandOptions::default()
+        }),
         ..lsp_types::ServerCapabilities::default()
     }
 }
@@ -424,6 +429,11 @@ fn handle_request(
         }
     } else if request.method == HoverRequest::METHOD {
         answer_hover(store, request)
+    } else if request.method == ExecuteCommand::METHOD {
+        match execute_command(store, request.params) {
+            Ok(result) => Response::new_ok(request.id, result),
+            Err(refused) => Response::new_err(request.id, refused.code, refused.message),
+        }
     } else if request.method == CodeActionRequest::METHOD {
         answer_code_action(store, request, runs_set_target)
     } else {
