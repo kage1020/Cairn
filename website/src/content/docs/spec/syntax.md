@@ -549,7 +549,8 @@ language server shows the entry's own line on hover.
 - **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
   [Components, Editing, and Multi-building
   §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
-- **`theme`.** Binds each slot name to a material token. See
+- **`theme`.** Binds each slot name to a material token, and through a selector row the block of a
+  part of each member it selects. See
   [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
 - **`site`.** Places `def`s beside one another and lays walkways between them. See
   [Components, Editing, and Multi-building

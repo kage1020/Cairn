@@ -306,23 +306,23 @@ fn two_frames_of_different_blocks_that_meet_are_a_phase_conflict() {
          window class=b side=front offset=3 y=2 size=1x1 mat_slot=glass\n",
     );
     let out = lowered(&src);
-    let found: Vec<(DiagnosticCode, &str)> = findings(&src, &out)
-        .into_iter()
-        .map(|(code, at, ..)| (code, at))
-        .collect();
     assert_eq!(
-        found,
+        findings(&src, &out),
         [(
             DiagnosticCode::PhaseConflict,
-            "window class=b side=front offset=3 y=2 size=1x1 mat_slot=glass"
+            "window class=b side=front offset=3 y=2 size=1x1 mat_slot=glass",
+            "the `frame=` of this `window` overwrites 3 voxels of the `frame=` of a `window`, so \
+             which block the build keeps is decided by the order the two lines are written in",
+            vec![
+                "overwritten frame's member declared here",
+                "if the later frame is not meant to win, bind both `frame=` to one block, or move \
+                 one opening so the frames do not meet",
+            ],
         )],
     );
-    assert!(
-        out.diagnostics[0]
-            .primary
-            .starts_with("`window` overwrites 3 voxels"),
-        "got: {}",
-        out.diagnostics[0].primary,
+    assert_eq!(
+        &src[out.diagnostics[0].notes[0].span.clone().expect("anchored")],
+        "window class=a side=front offset=1 y=2 size=1x1 mat_slot=glass",
     );
     assert_eq!(front_row(only_structure(&out), 2), "#gBgB##");
 
@@ -348,8 +348,8 @@ fn a_frame_bound_to_an_abstract_token_leaves_the_opening_cut_and_the_wall_round_
         [(
             DiagnosticCode::AbstractTokenDeferred,
             "@wood.frame",
-            "abstract token `@wood.frame` cannot be lowered without the registry pack; the \
-             opening is cut without a frame, and the wall round it stays",
+            "abstract token `@wood.frame` cannot be lowered without the registry pack; no frame \
+             is laid",
             vec![
                 "use a canonical block token (e.g. `frame=@spruce_wood`) until the registry pack \
                  ships"
@@ -371,8 +371,8 @@ fn trim_bound_to_an_abstract_token_leaves_the_corners_to_the_walls() {
         [(
             DiagnosticCode::AbstractTokenDeferred,
             "@wood.post",
-            "abstract token `@wood.post` cannot be lowered without the registry pack; the walls \
-             are built without corner posts, their corners of the walls' own block",
+            "abstract token `@wood.post` cannot be lowered without the registry pack; no corner \
+             posts are laid",
             vec![
                 "use a canonical block token (e.g. `trim=@spruce_log`) until the registry pack \
                  ships"
@@ -384,20 +384,275 @@ fn trim_bound_to_an_abstract_token_leaves_the_corners_to_the_walls() {
 
 #[test]
 fn a_binding_is_judged_even_when_its_member_is_refused() {
+    let frame_deferred = (
+        DiagnosticCode::AbstractTokenDeferred,
+        "@wood.frame",
+        "abstract token `@wood.frame` cannot be lowered without the registry pack; no frame is \
+         laid",
+        vec![
+            "use a canonical block token (e.g. `frame=@spruce_wood`) until the registry pack ships",
+        ],
+    );
     let src = themed(
         "  window[class=small] -> frame=@wood.frame\n",
         "struct s size=5x5\n  walls mat_slot=wall height=3\n  \
          window class=small side=front offset=9 y=2 size=1x1 mat_slot=glass\n",
     );
-    let out = lowered(&src);
-    let codes: Vec<DiagnosticCode> = out.diagnostics.iter().map(|d| d.code).collect();
     assert_eq!(
-        codes,
+        findings(&src, &lowered(&src)),
         [
-            DiagnosticCode::AbstractTokenDeferred,
-            DiagnosticCode::InvalidMember
+            frame_deferred.clone(),
+            (
+                DiagnosticCode::InvalidMember,
+                "window class=small side=front offset=9 y=2 size=1x1 mat_slot=glass",
+                "window extends beyond the `front` wall (offset=9 size=1x1 repeat=1 step=0, wall \
+                 length=5)",
+                vec![
+                    "the window ends at `offset + size.w`, which must be at most 5; lower \
+                     `offset=` or narrow `size=`"
+                ],
+            ),
         ],
     );
+
+    let src = themed(
+        "  door[class=main] -> frame=@wood.frame\n",
+        "struct s size=5x5\n  walls mat_slot=wall height=3\n  door class=main side=front at=99\n",
+    );
+    assert_eq!(
+        findings(&src, &lowered(&src)),
+        [
+            frame_deferred,
+            (
+                DiagnosticCode::InvalidMember,
+                "door class=main side=front at=99",
+                "door has `at=99`, which is not one of center, left, right",
+                vec![
+                    "`at=` takes `center`, `left` or `right`; `offset=` takes a column between the \
+                     wall's corners, from 1 to 3"
+                ],
+            ),
+        ],
+    );
+
+    let src = themed(
+        "  walls[class=outer] -> trim=@wood.post\n",
+        "struct s size=3x3\n  walls class=outer mat_slot=wall height=zz\n",
+    );
+    assert_eq!(
+        findings(&src, &lowered(&src)),
+        [
+            (
+                DiagnosticCode::AbstractTokenDeferred,
+                "@wood.post",
+                "abstract token `@wood.post` cannot be lowered without the registry pack; no \
+                 corner posts are laid",
+                vec![
+                    "use a canonical block token (e.g. `trim=@spruce_log`) until the registry pack \
+                     ships"
+                ],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                "walls class=outer mat_slot=wall height=zz",
+                "walls `height=` must be a positive integer that fits in u32, not identifier `zz`",
+                vec![
+                    "write `height=N`, where `N` is a positive integer: the walls fill the `N` rows \
+                     above the base row"
+                ],
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_member_that_builds_nothing_lays_no_part() {
+    let window = "window class=small side=front offset=2 y=2 size=1x1";
+    for (slots, mat_slot) in [("", "nope"), ("  slot pane -> @glass.clear\n", "pane")] {
+        let src = themed(
+            &format!("{slots}  window[class=small] -> frame=@spruce_wood\n"),
+            &format!(
+                "struct s size=5x5\n  walls mat_slot=wall height=3\n  {window} mat_slot={mat_slot}\n"
+            ),
+        );
+        let out = lowered_with_resolver_diagnostics(&src);
+        assert_eq!(
+            front_wall(only_structure(&out)),
+            ["#####", "#####", "#####", "....."],
+            "a window whose `mat_slot={mat_slot}` builds nothing is not cut or framed",
+        );
+    }
+
+    let src = themed(
+        "  walls[class=outer] -> trim=@spruce_log\n",
+        "struct s size=3x3\n  walls class=outer mat_slot=nope height=1\n",
+    );
+    let out = lowered_with_resolver_diagnostics(&src);
+    assert_eq!(
+        layer(only_structure(&out), 0),
+        ["...", "...", "..."],
+        "walls that build nothing lay no posts",
+    );
+
+    let src = themed(
+        "  window[class=small] -> frame=@spruce_wood\n",
+        "struct s size=9x5\n  walls mat_slot=wall height=3\n  \
+         window class=small side=front offset=1 y=2 size=1x1 repeat=2 step=4 sym=maybe \
+         mat_slot=glass\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out)
+            .into_iter()
+            .map(|(code, at, ..)| (code, at))
+            .collect::<Vec<_>>(),
+        [
+            (
+                DiagnosticCode::DeferredMember,
+                "window class=small side=front offset=1 y=2 size=1x1 repeat=2 step=4 sym=maybe \
+                 mat_slot=glass",
+            ),
+            (DiagnosticCode::IgnoredArgument, "maybe"),
+        ],
+    );
+    assert_eq!(
+        front_row(only_structure(&out), 2),
+        "#########",
+        "a window refused for its unreadable `sym=` is not framed",
+    );
+}
+
+#[test]
+fn a_later_row_that_also_selects_a_member_rebinds_its_frame() {
+    let src = themed(
+        "  window[class=small] -> frame=@spruce_wood\n  \
+         window[class=small,side=front] -> frame=@birch_wood\n",
+        "struct s size=7x5\n  walls mat_slot=wall height=3\n  \
+         window class=small side=front offset=2 y=2 size=1x1 mat_slot=glass\n  \
+         window class=small side=back offset=2 y=2 size=1x1 mat_slot=glass\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), []);
+    let ba = only_structure(&out);
+    assert_eq!(
+        front_row(ba, 2),
+        "#BgB###",
+        "both rows select it, and the later wins"
+    );
+    let back: String = (0..ba.dims.x).map(|x| glyph(ba, x, 2, 0)).collect();
+    assert_eq!(back, "###FgF#", "only the wider row selects it");
+}
+
+#[test]
+fn frames_are_laid_after_the_hinge_is_derived() {
+    // The window cut beside the door leaves one wall cell on its left and two on its right, which
+    // a frame laid first would turn to the door's own.
+    let src = themed(
+        "  door[class=main] -> frame=@spruce_wood\n",
+        "struct s size=7x5\n  walls mat_slot=wall height=4\n  \
+         window side=front offset=2 y=1 size=1x2\n  door class=main side=front at=center\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), []);
+    let ba = only_structure(&out);
+    assert_eq!(
+        front_wall(ba),
+        ["#######", "##FFF##", "##.DF##", "##.DF##", "......."],
+    );
+    let z = ba.dims.z - 1;
+    assert_eq!(
+        [1, 2].map(|y| state_at(ba, 3, y, z).properties["hinge"].clone()),
+        ["right", "right"],
+    );
+}
+
+#[test]
+fn a_frame_on_a_side_wall_runs_along_its_length() {
+    for (side, x) in [("left", 0), ("right", 4)] {
+        let src = themed(
+            "  window[class=small] -> frame=@spruce_wood\n",
+            &format!(
+                "struct s size=5x9\n  walls mat_slot=wall height=3\n  \
+                 window class=small side={side} offset=4 y=2 size=1x1 mat_slot=glass\n"
+            ),
+        );
+        let out = lowered(&src);
+        assert_eq!(findings(&src, &out), []);
+        let ba = only_structure(&out);
+        let wall: Vec<String> = (1..=3)
+            .rev()
+            .map(|y| (0..ba.dims.z).map(|z| glyph(ba, x, y, z)).collect())
+            .collect();
+        assert_eq!(wall, ["###FFF###", "###FgF###", "###FFF###"], "side={side}");
+    }
+}
+
+#[test]
+fn a_frame_on_an_upper_level_rings_its_opening_there() {
+    let src = themed(
+        "  window[class=small] -> frame=@spruce_wood\n",
+        "struct s size=5x5\n  level y=0\n    walls mat_slot=wall height=3\n  \
+         level y=3\n    walls mat_slot=wall height=3\n    \
+         window class=small side=front offset=2 y=2 size=1x1 mat_slot=glass\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), []);
+    assert_eq!(
+        front_wall(only_structure(&out)),
+        [
+            "#FFF#", "#FgF#", "#FFF#", "#####", "#####", "#####", "....."
+        ],
+    );
+}
+
+#[test]
+fn a_ring_that_falls_on_no_wall_cell_lays_nothing() {
+    // The course is one row high and the opening's columns sit between the wall's two ends.
+    let src = themed(
+        "  window[class=small] -> frame=@spruce_wood\n",
+        "struct s size=3x3\n  walls mat_slot=wall height=1\n  \
+         window class=small side=front offset=1 y=1 size=1x1\n",
+    );
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), []);
+    assert_eq!(front_wall(only_structure(&out)), ["#.#", "..."]);
+}
+
+#[test]
+fn a_corner_post_is_judged_with_its_phase_and_built_over_by_a_later_one() {
+    let rows = "  walls[class=outer] -> trim=@spruce_log\n";
+    let walls = "struct s size=3x3\n  walls class=outer mat_slot=wall height=2\n";
+    let src = themed(
+        rows,
+        &format!("{walls}  fill mat_slot=floor from=0,1,2 to=0,1,2\n"),
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out)
+            .into_iter()
+            .map(|(code, at, primary, _)| (code, at, primary))
+            .collect::<Vec<_>>(),
+        [(
+            DiagnosticCode::PhaseConflict,
+            "fill mat_slot=floor from=0,1,2 to=0,1,2",
+            "`fill` overwrites 1 voxel that `walls` painted in the same phase, so which block the \
+             build keeps is decided by the order the two lines are written in",
+        )],
+        "a `fill` paints in `massing`, the posts' phase",
+    );
+    assert_eq!(front_wall(only_structure(&out)), ["L#L", "o#L", "..."]);
+
+    let src = themed(
+        rows,
+        &format!("{walls}  raw_block mat=minecraft:oak_planks at=0,1,2\n"),
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [],
+        "a raw block builds over the post in its own phase"
+    );
+    assert_eq!(front_wall(only_structure(&out)), ["L#L", "o#L", "..."]);
 }
 
 #[test]

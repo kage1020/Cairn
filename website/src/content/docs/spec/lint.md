@@ -150,7 +150,7 @@ to compare.
 | Code | Meaning |
 |---|---|
 | `E_UNKNOWN_ID` | A resolved block ID the pinned target does not declare. |
-| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, a `theme` selector row's binding, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
+| `E_PARITY_UNSUPPORTED` | A semantic member's `mat_slot=`, the value of a key a `theme` selector row's keyword binds, or a `connect … path=`, resolved to a block only the other edition has, which the pinned target's pack lists as absent ([Versioning and Editions](/spec/versioning-editions/#a-block-only-the-other-edition-has)). |
 | `E_STATE_UNMAPPED` | A block state a member or a walkway's `path=` built that the pinned target's state map has no form for ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `E_STATE_DOMAIN` | A property or value of a block state a member resolves to that its block does not take at the pinned target, from a state literal, from a state a member's line writes, or from a state lowering derived ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `E_VERSION_CAP` | `--target`, or the target the language server pins, is below an `@requires` floor the source declares ([versioning-editions §10.4](/spec/versioning-editions/)). |
@@ -162,11 +162,11 @@ to compare.
 | `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
-| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE`, or a key a `theme` selector row binds, whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
+| `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE`, or a key a `theme` selector row's keyword binds ([Materials and Themes](/spec/materials-themes/#selector-bindings)), whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
 | `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
-| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=` or a `theme` selector row's binding resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
+| `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=`, or the value of a key a `theme` selector row's keyword binds, resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
@@ -274,10 +274,11 @@ something other than a material token resolves. A `floor` that names it is left 
 names it paints none of its box; a `walls` that names it is not built and takes up no rows, so a
 `door` or `window` cut into it, or a `beam` laid on it, is deferred; a `window` that names it is not
 cut, so its wall stays; and a `roof`, eave `stair`, `beam`, `door`, `pressure_plate`, `button`,
-`chest` or `trapdoor` that names it is built from its default block. Were it a warning, a theme
-whose slots are all mistyped would still build at exit 0 every scope that keeps something to draw,
-such as a `roof`: shorter than asked, with no floor and no walls, and only default blocks, less any
-eave `stair`, `chest`, `trapdoor`, sensor or actuator set higher than the shorter structure reaches.
+`chest` or `trapdoor` that names it is built from its default block. A selector row's key bound to
+such a value lays no part, and its member is built without it. Were it a warning, a theme whose
+slots are all mistyped would still build at exit 0 every scope that keeps something to draw, such as
+a `roof`: shorter than asked, with no floor and no walls, and only default blocks, less any eave
+`stair`, `chest`, `trapdoor`, sensor or actuator set higher than the shorter structure reaches.
 
 `E_MISSING_MATERIAL` and `E_UNRESOLVED_SLOT` are the two halves of one split, and no member earns
 both: the key is absent for the first and present-but-unusable for the second. They have different

@@ -177,6 +177,8 @@ pub(super) struct Canvas {
     /// `(overridden, overriding)` member pairs, in the order they are judged, to how many voxels
     /// the second took from each `(before, after)` pair of palette slots.
     pub(super) conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
+    /// [`Self::conflicts`] for the frames members lay, which meet only one another.
+    pub(super) frame_conflicts: IndexMap<(u32, u32), IndexMap<(PaletteIndex, PaletteIndex), u32>>,
     /// Indexed like [`Self::phases`]: `true` while that member's contests wait on
     /// [`Self::settle_contests`].
     held: Vec<bool>,
@@ -205,6 +207,7 @@ impl Canvas {
             phases,
             painted: vec![false; 1],
             conflicts: IndexMap::new(),
+            frame_conflicts: IndexMap::new(),
             deferred: Vec::new(),
         }
     }
@@ -308,6 +311,15 @@ impl Canvas {
         MemberCanvas {
             canvas: self,
             member: index,
+            frame: false,
+        }
+    }
+
+    /// [`Self::for_member`] for laying the member's frame, whose contests are counted apart.
+    pub(super) fn for_frame(&mut self, index: u32) -> MemberCanvas<'_> {
+        MemberCanvas {
+            frame: true,
+            ..self.for_member(index)
         }
     }
 
@@ -332,6 +344,8 @@ impl Canvas {
 pub(super) struct MemberCanvas<'a> {
     canvas: &'a mut Canvas,
     member: u32,
+    /// Whether the writes lay the member's frame.
+    frame: bool,
 }
 
 impl MemberCanvas<'_> {
@@ -395,6 +409,17 @@ impl MemberCanvas<'_> {
             return true;
         };
         if overridden == member || !canvas.same_phase(overridden, member) {
+            return true;
+        }
+        if self.frame {
+            if before != after {
+                *canvas
+                    .frame_conflicts
+                    .entry((overridden, member))
+                    .or_default()
+                    .entry((before, after))
+                    .or_default() += 1;
+            }
             return true;
         }
         // A held slot may settle on another state, so even an unchanged one is judged later.

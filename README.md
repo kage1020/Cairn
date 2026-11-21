@@ -111,7 +111,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 - **Declare intent, not blockstate.** A gable roof knows which way its stairs face and whether each one sits top or bottom half; you never write `facing=` for it. Blockstate is derived, and you override only when the value *is* the intent.
 - **Order doesn't matter.** Write members in any order; the compiler sorts them into fixed phases (massing → envelope → openings → fixtures → fluids → redstone → raw).
-- **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those slots to materials, the way a stylesheet binds classes. A selector row details the members it selects: in the cottage above, `walls[class=outer] -> trim=@spruce_log` stands spruce log posts at the walls' corners, and `window[class=small] -> frame=@spruce_wood` frames both windows in spruce wood. Delete the two rows and the cottage is cobblestone to every edge.
+- **Themes separate "where" from "what".** Structure carries `mat_slot`s; a theme binds those slots to materials, the way a stylesheet binds classes. A selector row details the members it selects: in the cottage above, `walls[class=outer] -> trim=@spruce_log` stands spruce log posts at the walls' corners, and `window[class=small] -> frame=@spruce_wood` frames both windows in spruce wood. Delete the two rows and the cottage is cobblestone to the corners.
 - **Recompile, don't transcode.** The portable artifact is the `.crn` source. Structure files are build output for one edition and version, like a binary.
 - **Fail loud.** An unknown block, an unresolvable slot, or a target that cannot express your intent is an error or a named degradation, never a silent substitution.
 

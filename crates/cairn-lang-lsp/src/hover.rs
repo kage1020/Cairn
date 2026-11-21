@@ -4,7 +4,7 @@
 
 use cairn_lang_core::ast::{Arg, Item, Module, Statement, ThemeRule, Value, ValueKind};
 use cairn_lang_core::block_array::resolve_block_state;
-use cairn_lang_core::intent::ValueWithSpan;
+use cairn_lang_core::intent::{ValueWithSpan, role_of};
 use cairn_lang_core::resolve::{TokenKind, classify_token};
 use cairn_lang_core::{
     BlockArray, BlockArrayIr, BlockState, Diagnostic, Edition, IntentModule, Member, MemberRole,
@@ -84,6 +84,7 @@ enum Binder<'a> {
     /// such as `walls[class=outer]`.
     Selector {
         theme: &'a str,
+        keyword: &'a str,
         row: &'a str,
         key: &'a str,
     },
@@ -152,6 +153,7 @@ fn in_theme<'a>(
                         value: &arg.value,
                         binder: Binder::Selector {
                             theme,
+                            keyword,
                             row,
                             key: &arg.key,
                         },
@@ -502,8 +504,20 @@ fn describe_token(value: &Value, binder: &Binder<'_>) -> String {
     };
     let bound = match binder {
         Binder::Slot { theme, slot } => format!("bound to slot `{slot}` by theme `{theme}`"),
-        Binder::Selector { theme, row, key } => {
-            format!("bound to `{key}=` by the `{row}` row of theme `{theme}`")
+        Binder::Selector {
+            theme,
+            keyword,
+            row,
+            key,
+        } => {
+            let bound = format!("bound to `{key}=` by the `{row}` row of theme `{theme}`");
+            if role_of(keyword).binding_key(key).is_none() {
+                return format!(
+                    "`@{inner}`, {bound}\n\n`{key}=` is not a key a theme binds on `{keyword}`, \
+                     so this value lays nothing"
+                );
+            }
+            bound
         }
         Binder::Path => "the `path=` of this `connect` row".to_owned(),
     };

@@ -85,7 +85,7 @@ pub(super) fn lay_frames(
         cuts,
     } in frames
     {
-        let mut member_canvas = canvas.for_member(member);
+        let mut member_canvas = canvas.for_frame(member);
         for cell in cuts.into_iter().flat_map(|cut| cut.ring(ctx)) {
             if wall_cells.contains(&cell) {
                 member_canvas.paint(cell, || slot.intern(palette));

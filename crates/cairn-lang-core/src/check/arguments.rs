@@ -198,8 +198,9 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
 fn unbindable_key(role: &MemberRole, key: &str, span: &crate::error::Span) -> Diagnostic {
     let keyword = role.keyword();
     let bound: Vec<&str> = role.binding_keys().iter().map(|b| b.key()).collect();
+    let suggestion = nearest_match(key, bound.iter().copied());
     let mut notes = Vec::with_capacity(3);
-    notes.extend(nearest_match(key, bound.iter().copied()).map(did_you_mean_note));
+    notes.extend(suggestion.map(did_you_mean_note));
     notes.push(DiagnosticNote {
         span: None,
         message: if bound.is_empty() {
@@ -242,7 +243,7 @@ fn unbindable_key(role: &MemberRole, key: &str, span: &crate::error::Span) -> Di
         span: span.clone(),
         primary: Field::Binding.nothing_reads(keyword, key),
         notes,
-        data: None,
+        data: Some(unknown_argument_data(key, suggestion)),
     }
 }
 

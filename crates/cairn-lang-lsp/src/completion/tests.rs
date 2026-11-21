@@ -99,6 +99,7 @@ fn a_selector_rows_key_position_offers_the_keys_its_keyword_binds() {
         ("theme x:\n  window[class=small] -> fr", "-> fr", "frame"),
         ("theme x:\n  door[class=main] -> ", "-> ", "frame"),
         ("theme x:\n  walls[class=outer] ->", "->", "trim"),
+        ("theme x:\n  window [class=small] -> ", "-> ", "frame"),
         (
             "theme x:\n  window[tags=[a,\"]\"]] -> f",
             "]] -> f",
@@ -135,8 +136,9 @@ fn only_a_theme_selector_row_takes_a_binding_key() {
         ("theme x:\n  window[class=small f", "small f"),
         ("struct s size=3x3\n  window[class=small] -> f", "-> f"),
     ] {
-        assert!(
-            !labels(&complete(source, needle)).contains(&"frame"),
+        assert_eq!(
+            labels(&complete(source, needle)),
+            Vec::<&str>::new(),
             "for {source:?}",
         );
     }

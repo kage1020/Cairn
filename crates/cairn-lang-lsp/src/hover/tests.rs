@@ -268,6 +268,7 @@ theme t:
   slot stairs -> @oak_stairs[facing=east]
   slot floor -> @floor.nonexistent.thing
   window[class=\"a->b\"] -> frame=@spruce_wood
+  window[class=small] -> trim=@spruce_log
 ";
 
 #[test]
@@ -321,6 +322,19 @@ fn a_selector_binding_names_its_block_on_each_edition_and_its_row_keyword_shows_
     assert_eq!(
         shown(KEEP, "walls["),
         Some((quoted("walls"), range(4, 2, 7)))
+    );
+}
+
+#[test]
+fn a_key_the_rows_keyword_does_not_bind_shows_that_it_lays_nothing() {
+    assert_eq!(
+        shown(TOKENS, "@spruce_log"),
+        Some((
+            "`@spruce_log`, bound to `trim=` by the `window[class=small]` row of theme `t`\n\n\
+             `trim=` is not a key a theme binds on `window`, so this value lays nothing"
+                .to_owned(),
+            range(4, 30, 41),
+        )),
     );
 }
 

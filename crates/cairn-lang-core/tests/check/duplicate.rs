@@ -988,6 +988,33 @@ mod selector {
     }
 
     #[test]
+    fn a_key_the_keyword_does_not_bind_is_left_out_of_what_the_later_row_keeps() {
+        let src = theme_with(
+            "  window[class=small] -> frame=@spruce_wood sill=@oak_slab\n  \
+         window[class=small] -> frame=@dark_oak_wood sill=@stone_slab\n",
+        );
+        assert_eq!(
+            notes(&one_of_code(&src, DiagnosticCode::DuplicateSelector)),
+            vec![
+                "`frame=` and `sill=` bound here",
+                "rows with the same attributes match exactly the same members, and bindings merge in source order, so every member's merged bindings keep this row's `frame=` and the earlier value is built for none of them",
+                "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members",
+            ],
+        );
+        let src = theme_with(
+            "  window[class=small] -> sill=@oak_slab\n  window[class=small] -> sill=@stone_slab\n",
+        );
+        assert_eq!(
+            notes(&one_of_code(&src, DiagnosticCode::DuplicateSelector)),
+            vec![
+                "`sill=` bound here",
+                "delete the value you do not mean from one of the rows, or narrow one selector so they pick different members",
+            ],
+            "neither `sill=` is built, so no note says the later one is kept",
+        );
+    }
+
+    #[test]
     fn the_anchored_notes_are_one_per_displaced_row() {
         let from_one_row = theme_with(
             "  window[class=small] -> frame=@spruce_wood sill=@oak_slab\n  \

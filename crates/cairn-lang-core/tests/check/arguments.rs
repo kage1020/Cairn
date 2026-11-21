@@ -921,7 +921,7 @@ fn an_unknown_keyword_answers_for_its_own_bracket() {
     );
 }
 
-/// The README's cottage, whose two theme selector rows each bind the key their keyword binds.
+/// A cottage whose two theme selector rows each bind the key their keyword binds.
 const COTTAGE_WITH_SELECTOR_ROWS: &str = "theme medieval:\n  \
     slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n  \
     slot roof  -> @spruce_stairs\n  slot glass -> @glass_pane\n  \
@@ -969,6 +969,16 @@ fn a_key_its_keyword_does_not_bind_is_refused_with_the_keys_it_does() {
 fn a_near_miss_of_a_bound_key_is_named() {
     let d = exactly_one(diagnose(&window_row("fram=@spruce_wood")));
     assert_eq!(notes(&d), "did you mean `frame`?\nexpected one of: frame");
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "fram", "suggestion": "frame"}),
+    );
+    let d = exactly_one(diagnose(&window_row("mat_slot=glass")));
+    assert_eq!(
+        serde_json::to_value(&d.data).expect("serialises"),
+        json!({"kind": "unknown_argument", "key": "mat_slot"}),
+        "a key no bound key resembles carries no suggestion",
+    );
 }
 
 #[test]

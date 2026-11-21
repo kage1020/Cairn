@@ -79,7 +79,8 @@ opening is cut and every door hung, so the order the openings are written in mov
 - The ring is the column on each side of the opening and the row above and the row below it,
   corners included, clipped to the wall course that holds the opening.
 - It is laid only on cells a `walls` member still holds then: never on another opening, and never
-  on a cell another member took from the walls.
+  on a cell another member took from the walls. A ring left with no such cell lays nothing, and is
+  not reported.
 - It never lies on the wall's two end columns, which the wall shares with the walls round each
   corner, so a frame neither turns a corner nor covers a corner post.
 - Each rectangle a `repeat=` series or a `sym=true` mirror cuts gets its own ring.

@@ -21,8 +21,8 @@ use super::canvas::ScopePalette;
 use super::phase::Phase;
 use super::roof_kind::roof_line_refused;
 use super::token_diag::{
-    IdSite, MemberFallback, TokenSite, check_state_literal, diag_abstract_token,
-    diag_undeclared_id, diag_unknown_abstract_token,
+    IdSite, MemberFallback, NamedBy, TokenSite, check_state_literal, diag_abstract_token,
+    diag_state_unmapped, diag_undeclared_id, diag_unknown_abstract_token,
 };
 use super::written::Written;
 
@@ -376,7 +376,7 @@ pub(super) fn resolve_member_state(
 }
 
 /// The block a theme selector row binds `key` to on `member`, or `None` when no row does or after
-/// the finding that says its value names no block.
+/// the finding that says the target cannot build its value.
 pub(super) fn bound_block(
     member: &Member,
     key: BindingKey,
@@ -392,7 +392,19 @@ pub(super) fn bound_block(
     let site = TokenSite::Binding(key);
     let unbound = match resolve_block_state(value, ctx.registry) {
         Ok(state) => {
-            return check_state_literal(value, &state, ctx.registry, diagnostics).then_some(state);
+            if !check_state_literal(value, &state, ctx.registry, diagnostics) {
+                return None;
+            }
+            let unmapped = ctx.registry.and_then(|registry| {
+                diag_state_unmapped(value.span.clone(), &state, registry, NamedBy::Part(key))
+            });
+            return match unmapped {
+                Some(finding) => {
+                    diagnostics.push(finding);
+                    None
+                }
+                None => Some(state),
+            };
         }
         Err(unbound) => unbound,
     };

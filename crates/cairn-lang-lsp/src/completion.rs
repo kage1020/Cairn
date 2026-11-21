@@ -1,5 +1,6 @@
-//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword or a
-//! slot name, and for a material token the tokens matching what is typed, bounded.
+//! Source text + cursor position → the closed-vocabulary set valid there: whole for a keyword, a
+//! slot name or a selector row's binding key, and for a material token the tokens matching what is
+//! typed, bounded.
 //!
 //! The context is read from the text, not a parse: a document mid-keystroke rarely parses, and
 //! Cairn is line-oriented (`spec/syntax` "Lexical").
@@ -261,7 +262,7 @@ fn unbound_keys(before: &str) -> Option<Vec<BindingKey>> {
     if matches!(role, MemberRole::Other(_)) {
         return None;
     }
-    let attrs = row[keyword.len()..].strip_prefix('[')?;
+    let attrs = row[keyword.len()..].trim_start().strip_prefix('[')?;
     let (mut depth, mut in_string) = (1_usize, false);
     let close = attrs.char_indices().find_map(|(i, c)| {
         match c {

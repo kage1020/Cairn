@@ -100,12 +100,8 @@ impl TokenSite {
     fn consequence(self) -> &'static str {
         match self {
             Self::WalkwayPath => "the walkway falls back to air",
-            Self::Binding(BindingKey::Trim) => {
-                "the walls are built without corner posts, their corners of the walls' own block"
-            }
-            Self::Binding(BindingKey::Frame) => {
-                "the opening is cut without a frame, and the wall round it stays"
-            }
+            Self::Binding(BindingKey::Trim) => "no corner posts are laid",
+            Self::Binding(BindingKey::Frame) => "no frame is laid",
             Self::MemberSlot(MemberFallback::Air) => "the cell falls back to air",
             Self::MemberSlot(MemberFallback::Unpainted) => "the fill paints none of its box",
             Self::MemberSlot(MemberFallback::Absent) => {
@@ -189,7 +185,8 @@ pub(super) fn diag_unknown_abstract_token(
 
 /// Check the state literal `value` carries against the pinned target, reporting each pair outside
 /// its block's states, or the literal as unchecked where the target records none; `false` when a
-/// pair is outside, and the member or walkway binding it is then not built.
+/// pair is outside, and what binds it (a member, a walkway, or a selector binding's part) is then
+/// not built.
 pub(super) fn check_state_literal(
     value: &ValueWithSpan,
     state: &BlockState,
@@ -455,6 +452,8 @@ pub(super) enum NamedBy {
     RawMat,
     /// A walkway's `path=`.
     Path,
+    /// A theme selector row's binding of a part.
+    Part(BindingKey),
 }
 
 /// Report `state`, built at `span`, when the pinned target's state map has no form for it.
@@ -484,9 +483,10 @@ pub(super) fn diag_state_unmapped(
         ),
     };
     let choose = match named_by {
-        NamedBy::Binding => "bind the material to",
-        NamedBy::RawMat => "set `mat=` to",
-        NamedBy::Path => "set `path=` to",
+        NamedBy::Binding => "bind the material to".to_owned(),
+        NamedBy::RawMat => "set `mat=` to".to_owned(),
+        NamedBy::Path => "set `path=` to".to_owned(),
+        NamedBy::Part(key) => format!("bind `{}=` to", key.key()),
     };
     Some(Diagnostic {
         code: DiagnosticCode::StateUnmapped,
@@ -511,7 +511,7 @@ pub(super) fn diag_state_unmapped(
 pub(super) enum IdSite {
     /// A `raw_block` or `raw_fill`'s `mat=`, which names an edition's own block.
     Raw,
-    /// A semantic member's block, or a `connect` row's `path=`.
+    /// A semantic member's block, a selector binding's part, or a `connect` row's `path=`.
     Semantic(TokenSite),
 }
 

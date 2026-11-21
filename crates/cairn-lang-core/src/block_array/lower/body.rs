@@ -146,22 +146,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         Err(Overflow::StandIn) => return None,
     };
 
-    // A stand-in differs from air at every target, but from another block only as the pack says.
-    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
-        (Some(before) == stand_in && after != PaletteIndex::AIR)
-            || (Some(after) == stand_in && before != PaletteIndex::AIR)
-    };
-    for ((overridden, overriding), contested) in &canvas.conflicts {
-        if contested.keys().any(pack_decides) {
-            continue;
-        }
-        diagnostics.push(diag_phase_conflict(
-            flattened[*overridden as usize].1,
-            flattened[*overriding as usize].1,
-            contested.values().sum(),
-            split_doors.contains(overridden),
-        ));
-    }
+    report_conflicts(&flattened, &canvas, stand_in, &split_doors, diagnostics);
     let cut = cut_openings(&flattened, &canvas.wrote);
     let (voxels, never_painted) = prune_unreferenced(&mut palette, &canvas);
     debug_assert!(
@@ -464,6 +449,42 @@ pub(super) fn run_phase(
     }
 }
 
+/// Report each pair of members, and each pair of frames, that wrote cells to different blocks.
+fn report_conflicts(
+    flattened: &[(u32, &Member)],
+    canvas: &Canvas,
+    stand_in: Option<PaletteIndex>,
+    split_doors: &[u32],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    // A stand-in differs from air at every target, but from another block only as the pack says.
+    let pack_decides = |&(before, after): &(PaletteIndex, PaletteIndex)| {
+        (Some(before) == stand_in && after != PaletteIndex::AIR)
+            || (Some(after) == stand_in && before != PaletteIndex::AIR)
+    };
+    for ((overridden, overriding), contested) in &canvas.conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
+        diagnostics.push(diag_phase_conflict(
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
+            contested.values().sum(),
+            split_doors.contains(overridden),
+        ));
+    }
+    for ((overridden, overriding), contested) in &canvas.frame_conflicts {
+        if contested.keys().any(pack_decides) {
+            continue;
+        }
+        diagnostics.push(diag_frame_conflict(
+            flattened[*overridden as usize].1,
+            flattened[*overriding as usize].1,
+            contested.values().sum(),
+        ));
+    }
+}
+
 /// Two members of one phase wrote the same cell to different blocks (`spec/compilation` "Phase
 /// evaluation"); anchored at the later.
 fn diag_phase_conflict(
@@ -512,6 +533,35 @@ fn diag_phase_conflict(
             MemberRole::keyword(&overridden.role),
         ),
         notes,
+        data: None,
+    }
+}
+
+/// The frames of two openings met on cells they laid in different blocks (`spec/materials-themes`
+/// "Selector bindings"); anchored at the later.
+fn diag_frame_conflict(overridden: &Member, overriding: &Member, voxels: u32) -> Diagnostic {
+    let cell = if voxels == 1 { "voxel" } else { "voxels" };
+    Diagnostic {
+        code: DiagnosticCode::PhaseConflict,
+        span: overriding.span.clone(),
+        primary: format!(
+            "the `frame=` of this `{}` overwrites {voxels} {cell} of the `frame=` of a `{}`, so \
+             which block the build keeps is decided by the order the two lines are written in",
+            MemberRole::keyword(&overriding.role),
+            MemberRole::keyword(&overridden.role),
+        ),
+        notes: vec![
+            DiagnosticNote {
+                span: Some(overridden.span.clone()),
+                message: "overwritten frame's member declared here".to_owned(),
+            },
+            DiagnosticNote {
+                span: None,
+                message: "if the later frame is not meant to win, bind both `frame=` to one \
+                          block, or move one opening so the frames do not meet"
+                    .to_owned(),
+            },
+        ],
         data: None,
     }
 }
