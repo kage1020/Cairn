@@ -39,7 +39,7 @@ use crate::error::Span;
 use crate::ids::{
     PlaceId, SiteName, WalkwayEndpoint, WalkwayScopeKey, artifact_stem, walkway_artifact_stem,
 };
-use crate::intent::MemberAddress;
+use crate::intent::{MemberAddress, Size};
 
 /// Lowered block-array IR for a whole [`crate::intent::IntentModule`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -221,6 +221,14 @@ pub struct Footprint {
 }
 
 impl Footprint {
+    /// The footprint a `size=WxH` covers, `W` east to west and `H` north to south.
+    pub(crate) const fn of_size(size: &Size) -> Self {
+        Self {
+            x: size.w.get(),
+            z: size.h.get(),
+        }
+    }
+
     /// The [`Dims`] of this footprint, one block high.
     #[must_use]
     pub fn to_dims_y1(self) -> Dims {

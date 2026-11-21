@@ -398,8 +398,8 @@ fn the_cells_a_blocked_walkway_skips_are_not_compared() {
             "walkway `a.back ↔ b.front` skipped 5 cells that overlapped an existing structure",
             vec![(
                 None,
-                "port `a.back` is buried inside the floor of placement `c`; move that door/window \
-                 to an unobstructed wall or pull the placements apart",
+                "port `a.back` stands on a cell placement `c` takes up on that row; move that \
+                 door/window to an unobstructed wall or pull the placements apart",
             )],
         )],
     );
