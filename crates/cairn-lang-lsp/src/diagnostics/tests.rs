@@ -459,3 +459,24 @@ fn every_pin_weighs_intended_targets_in_the_editions_it_is_about() {
         );
     }
 }
+
+#[test]
+fn a_pinned_target_runs_the_constraint_checks_and_no_other_pin_does() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  raw_block mat=minecraft:glass_pane at=2,1,2\n  \
+                  raw_block mat=minecraft:lever[face=wall, facing=south] at=2,1,3\n";
+    for pin in [java("1.21.4"), bedrock("1.21.60")] {
+        let found = compute_diagnostics(&uri(), source, &pin);
+        assert_eq!(
+            covered(source, &found),
+            [(
+                "W_NO_ATTACHMENT_FACE".to_owned(),
+                "raw_block mat=minecraft:lever[face=wall, facing=south] at=2,1,3",
+            )],
+        );
+    }
+    for pin in [Pin::Nothing, Pin::Edition(Edition::Java)] {
+        assert_eq!(compute_diagnostics(&uri(), source, &pin), vec![]);
+    }
+}

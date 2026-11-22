@@ -16,7 +16,7 @@ use crate::artifacts::{
     write_artifacts_and_lock,
 };
 use crate::cli::StructureFormat;
-use crate::lockfile::report_previous_target;
+use crate::lockfile::{report_previous_target, sensitive_members};
 use crate::name_case::NameCase;
 use crate::pipeline::load_and_lower;
 use crate::report::{report_diagnostics, report_run_level};
@@ -105,7 +105,12 @@ fn check_and_write(
         return code;
     }
     // Before the lockfile is replaced: it is the only record of what was verified before.
-    report_previous_target(lock_path, edition, target);
+    report_previous_target(
+        lock_path,
+        edition,
+        target,
+        &sensitive_members(block_ir, edition, target),
+    );
     write_artifacts_and_lock(&prepared, source, block_ir, edition, target, lock_path)
 }
 
