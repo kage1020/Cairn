@@ -188,19 +188,19 @@ they carry no span and no other command raises them.
 `E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED` and
 `E_INCOMPATIBLE_MATERIAL` are raised during block-array lowering, which `cairn compile`, `cairn
 lower`, `cairn info` and `cairn check` all run, as does the language server. `E_UNKNOWN_ID`,
-`E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` and `E_STATE_UNMAPPED` further need a pinned target, so
-three commands raise them: `cairn compile --target`, `cairn check --edition E
---target V`, and `cairn info`, which lowers once per supported version for its `buildable targets`
-row and prints each refusing version's findings under `note: <edition> <version> refuses this
-source`, exiting 0 all the same ([Versioning and
+`E_PARITY_UNSUPPORTED` on a block, `E_STATE_DOMAIN` and `E_STATE_UNMAPPED` further need a pinned
+target, so three commands raise them: `cairn compile --target`, `cairn check --edition E --target
+V`, and `cairn info`, which lowers once per supported version for its `buildable targets` row and
+prints each refusing version's findings under `note: <edition> <version> refuses this source`,
+exiting 0 all the same ([Versioning and
 Editions](/spec/versioning-editions/#the-buildable-targets-row)). The language server raises them as
 well, once the client's settings pin a target (see below). `lower` lowers against no version, as
 does the rest of `info`'s report, and so does a `compile` whose target the file's floors refuse
 ([Versioning and Editions](/spec/versioning-editions/#the-declared-floor-is-enforced)). A `cairn
 check` with no `--target`, and a language server that pins no target, lower with no target at all,
 so they raise `E_INCOMPATIBLE_MATERIAL` only on a canonical token some shipped version declares or
-writes under another ID, and never `E_UNKNOWN_ID`, `E_PARITY_UNSUPPORTED`, `E_STATE_DOMAIN` or
-`E_STATE_UNMAPPED` ([§11.3](#113-error-vs-warning)).
+writes under another ID, `E_PARITY_UNSUPPORTED` only on an entity the edition lacks, and never
+`E_UNKNOWN_ID`, `E_STATE_DOMAIN` or `E_STATE_UNMAPPED` ([§11.3](#113-error-vs-warning)).
 
 `W_STATE_LITERAL_UNCHECKED` is raised by the same lowering at a pinned target, in place of the
 `E_STATE_DOMAIN` check, on a state literal it reads from a theme slot or a `connect … path=` whose
