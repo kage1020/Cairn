@@ -1,2 +1,3 @@
 [alias]
+eval = "run --package eval --quiet --locked --"
 xtask = "run --package xtask --quiet --locked --"

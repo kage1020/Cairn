@@ -13,21 +13,36 @@ use cairn_lang_core::{Edition, Severity, lower};
 use cairn_lang_formats::build::circuits::lay_circuits;
 use cairn_lang_formats::build::finding::{Finding, Found};
 use cairn_lang_formats::build::gate::build_diagnostics;
+use cairn_lang_formats::build::run_level::unsupported_target;
+use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::registry::{BuiltinEditions, builtin_pack};
 
 use crate::cli::LowerFormat;
 use crate::pipeline::load_module;
-use crate::report::{print_json, report_diagnostics, report_failure_document};
+use crate::report::{print_json, report_diagnostics, report_failure_document, report_run_level};
 
-pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerFormat) -> ExitCode {
+pub(crate) fn run_lower(
+    file: &Path,
+    edition: Option<Edition>,
+    target: Option<&str>,
+    format: LowerFormat,
+) -> ExitCode {
     let (source, module) = match load_module(file, format.failure_report()) {
         Ok(loaded) => loaded,
         Err(code) => return code,
     };
+    // clap refuses `--target` without `--edition` (`spec/compilation` "Target axes"). An unshipped
+    // target lowers unpinned, as `cairn check` does, so the source's findings come before it.
+    let resolved = edition
+        .zip(target)
+        .map(|(edition, target)| resolve_target(edition, target));
+    let pinned = resolved
+        .as_ref()
+        .and_then(|resolved| resolved.as_ref().ok());
     let ir = lower(&module);
     let resolution = resolve(&ir, edition);
-    // No `--target`, so no version to check ids against.
-    let registry = builtin_pack(edition.unwrap_or(Edition::Java)).view(None);
+    let registry =
+        builtin_pack(edition.unwrap_or(Edition::Java)).view(pinned.map(ResolvedTarget::mc_version));
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     // With no edition pinned the guarded lines are left out, but an error on one still fails the
     // command.
@@ -55,13 +70,21 @@ pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerForm
         .chain(circuits.into_iter().map(Found::Circuit))
         .collect();
 
+    let lines = LineStarts::new(&source);
+    let unsupported = resolved
+        .as_ref()
+        .and_then(|resolved| resolved.as_ref().err())
+        .map(unsupported_target);
     // Refuse before printing: `> ir.json` gets the failure document, not IR of a rejected source.
-    if findings.iter().any(|d| d.severity() == Severity::Error) {
-        return report_failure_document(file, &source, format.failure_report(), &findings);
+    if unsupported.is_some() || findings.iter().any(|d| d.severity() == Severity::Error) {
+        let code = report_failure_document(file, &source, format.failure_report(), &findings);
+        if let Some(refusal) = &unsupported {
+            report_run_level(file, &source, &lines, refusal);
+        }
+        return code;
     }
 
     // Warnings go to stderr as text in every format.
-    let lines = LineStarts::new(&source);
     report_diagnostics(file, &source, &lines, &findings);
     if edition.is_none() {
         report_left_out(&ir);

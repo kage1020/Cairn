@@ -22,6 +22,7 @@ to keep in mind while editing.
 | `cairn-lang-tree-sitter` | editor grammar, separate from core's parser | — |
 | `cairn-lang-docs` | the site's Markdown pages, embedded; its manifest is `website/Cargo.toml` | — |
 | `xtask` | `cargo xtask lint`, unpublished | docs |
+| `eval` | the evaluation harness, `cargo eval`, unpublished | core, docs |
 
 Dependencies point one way. A library never depends on `cli` or `lsp`, so code both front ends
 need lives in the library they call. Modules inside a crate form a DAG too: when two modules need

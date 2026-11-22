@@ -14,7 +14,7 @@ is the sequence.
    `canary`, and release-plz reads it. `main` takes merge commits only, so a hotfix writes each of
    its own commits as a Conventional Commits line too.
    - Scope is the crate without its prefix or the spec area: `core`, `nbt`, `formats`,
-     `redstone`, `cli`, `lsp`, `wasm`, `tree-sitter`, `xtask`, `spec`, `deps`.
+     `redstone`, `cli`, `lsp`, `wasm`, `tree-sitter`, `xtask`, `eval`, `spec`, `deps`.
    - `feat`, `fix`, `perf`, `refactor` and `build` make a patch release due, which goes out at the
      next promote to `main`, or at once for a hotfix; `docs`, `test`, `ci`, `chore` and `style`
      do not.

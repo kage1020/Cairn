@@ -1,0 +1,3 @@
+topic = 'def-repeat'
+base = 'def-repeat-row-of-houses'
+prompt = 'Make the row five houses long instead of three.'

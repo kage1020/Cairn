@@ -22,6 +22,7 @@ const SCANNED: &[&str] = &[
     "website/rust",
     ".github",
     ".claude",
+    "eval",
     "xtask",
     "CLAUDE.md",
 ];

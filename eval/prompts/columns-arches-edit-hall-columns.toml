@@ -1,0 +1,3 @@
+topic = 'columns-arches'
+base = 'walls-two-material-hall'
+prompt = 'Put a row of columns down the middle of the hall, one every three blocks, from the floor to the top of the walls.'
