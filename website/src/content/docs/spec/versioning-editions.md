@@ -311,21 +311,22 @@ target.
 
 The check therefore runs where a version is pinned and nowhere else: on `cairn compile --target`, on
 `cairn check --edition E --target V`, which pins the same pair to run the same pass without writing
-anything, and in the `buildable targets` row of `cairn info`, which pins each supported version in
-turn, and its `inferred range` row, which pins the oldest and the newest
-([§10.5](#the-inferred-range-row)). A `compile` whose target the file's floors refuse pins none: it
-checks no id and is refused on the floor instead ([§10.4](#the-declared-floor-is-enforced)), while
-`check --target` is not held to the floors and pins the target regardless. The language server pins
-a target once the client's settings name one, and holds it to the floors as `compile` does
+anything, on `cairn lower --edition E --target V`, which prints what that pass builds, in the
+`buildable targets` row of `cairn info`, which pins each supported version in turn, and in its
+`inferred range` row, which pins the oldest and the newest ([§10.5](#the-inferred-range-row)). A
+`compile` whose target the file's floors refuse pins none: it checks no id and is refused on the
+floor instead ([§10.4](#the-declared-floor-is-enforced)), while `check --target` and `lower
+--target` are not held to the floors and pin the target regardless. The language server pins a
+target once the client's settings name one, and holds it to the floors as `compile` does
 ([Lint](/spec/lint/#materials-and-targets)). A `compile` held to a floor also lowers once at the
 newest version, whatever its target, to weigh the floors against the registry
 ([below](#a-floor-is-weighed-against-the-registry)); that pin reports nothing but
 `E_REQUIRES_CONFLICT`. The `buildable targets` row reports each version's `E_UNKNOWN_ID` under that
 version and leaves the exit code alone ([§10.5](#the-buildable-targets-row)). The other rows of
-`info` report across the whole range by design, and `cairn lower` lowers with no target, so neither
-pins a version: they skip the comparison rather than pick one on the author's behalf. A `cairn
-check` with no `--target` lowers with no target at all, which pins no version and leaves each
-abstract token to the pack of the target that builds it, so neither this check,
+`info` report across the whole range by design, and `cairn lower` without `--target` lowers with no
+target, so neither pins a version: they skip the comparison rather than pick one on the author's
+behalf. A `cairn check` with no `--target` lowers with no target at all, which pins no version and
+leaves each abstract token to the pack of the target that builds it, so neither this check,
 `E_UNKNOWN_ABSTRACT_TOKEN` nor `W_ABSTRACT_TOKEN_DEFERRED` reaches it ([Lint
 §11.3](/spec/lint/#113-error-vs-warning)).
 

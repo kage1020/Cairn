@@ -1,0 +1,3 @@
+topic = 'walls'
+base = 'walls-cobblestone-shed'
+prompt = 'Make the walls one block taller.'

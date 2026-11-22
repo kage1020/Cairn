@@ -1,0 +1,3 @@
+topic = 'themes'
+base = 'themes-medieval-cottage'
+prompt = 'Change the style so the walls are bricks and the roof is dark oak, and leave the layout as it is.'

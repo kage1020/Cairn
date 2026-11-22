@@ -56,8 +56,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   slots, themes carry block bindings. See
   [materials-themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
 - **`intent_state`.** The author's blockstate intent: the blockstate keys a member's keyword names,
-  such as a `stair`'s `facing`. The line's other keys are the member's arguments. Edit diffs look
-  **only** at what the line writes, these and the arguments, never at what was derived. See
+  such as a `stair`'s `facing`. The line's other keys are the member's arguments. An edit's AST
+  diff looks **only** at what the line writes, these and the arguments, while its NBT diff also
+  counts the states the compiler derives
+  ([evaluation §13.1](/spec/evaluation/#131-primary-metrics)). See
   [blockstate §6.2](/spec/blockstate/#62-intent_state-and-resolved_state).
 - **`resolved_state`.** Compiler-derived blockstate (orientation, connections, waterlogged). Never
   hand-written. Lowering records each member's beside the block array it builds, with the block ids
