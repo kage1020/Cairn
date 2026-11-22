@@ -1,15 +1,19 @@
 //! The lines an `@edition` guard holds that a build reads
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
-use crate::ast::{Arg, Statement};
+use crate::ast::{Arg, Statement, ValueKind};
 use crate::edition::Edition;
 
 use super::{MemberRole, role_of};
 
 /// Whether a line of `role` writing `args` is of the escape-hatch layer: a raw member, a `spawn`,
-/// a Tier 0 part, or a line whose role reads the `nbt=` it writes.
+/// a Tier 0 part, or a line whose role reads the `nbt={...}` compound it writes.
 pub(crate) fn is_escape_hatch_line(role: &MemberRole, args: &[Arg]) -> bool {
-    role.is_escape_hatch() || (role.reads_nbt() && args.iter().any(|arg| arg.key == "nbt"))
+    role.is_escape_hatch()
+        || (role.reads_nbt()
+            && args
+                .iter()
+                .any(|arg| arg.key == "nbt" && matches!(arg.value.kind, ValueKind::Nbt(_))))
 }
 
 /// Whether `line`, standing directly under an `@edition` guard, is one the guard may not hold, so

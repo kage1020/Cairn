@@ -43,9 +43,9 @@ it fills holds.
 An `nbt={...}` compound is edition-specific by nature. Java and Bedrock name an entity's and a block
 entity's fields apart, and no registry pack holds those fields, so nothing checks a compound against
 the target the way a raw id is checked ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)). A line that writes `nbt=` therefore stands under the
-`@edition` guard of the edition whose field names it spells, which holds it as it holds a raw member
-([Versioning and Editions
+§7.4](/spec/materials-themes/#74-raw-blocks)). A line that writes an `nbt={...}` compound therefore
+stands under the `@edition` guard of the edition whose field names it spells, which holds it as it
+holds a raw member ([Versioning and Editions
 §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). Outside a guard it is
 `E_NBT_OUTSIDE_EDITION_GUARD`, at the compound. The keywords that read one are the entities',
 `painting`, `item_frame`, `armor_stand`, `villager`, the three displays and `spawn`, and

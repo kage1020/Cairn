@@ -57,7 +57,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
-    edition_guard::run(module, &mut sink);
+    edition_guard::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
     edit::run(ir, &mut sink);

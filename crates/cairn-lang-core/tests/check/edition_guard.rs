@@ -570,3 +570,38 @@ fn an_entity_line_stands_under_a_guard_only_when_it_writes_nbt() {
         [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3")],
     );
 }
+
+#[test]
+fn an_nbt_value_that_is_no_compound_is_semantic_inside_a_guard_and_unrefused_outside_one() {
+    let source = struct_with(
+        "  villager at=1,1,1 nbt=5\n  @edition java\n    armor_stand at=2,1,3 nbt=5\n",
+    );
+    assert_eq!(
+        located(&source),
+        [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3 nbt=5")],
+    );
+}
+
+#[test]
+fn an_nbt_compound_on_a_line_refused_for_where_it_stands_draws_only_that_refusal() {
+    let source = format!(
+        "{THEME}def d size=5x5\n  floor mat_slot=f\n  \
+         sign at=1,1,1 facing=north text=\"a\"\n    \
+         painting at=2,1,1 facing=north variant=kebab nbt={{Invisible:1b}}\n\n\
+         site v\n  place id=p use=d theme=t at=origin\n  \
+         raw_block mat=minecraft:chest at=1,0,1 nbt={{}}\n"
+    );
+    assert_eq!(
+        located(&source),
+        [
+            (
+                "E_UNSUPPORTED_NESTING",
+                "painting at=2,1,1 facing=north variant=kebab nbt={Invisible:1b}"
+            ),
+            (
+                "E_MISPLACED_MEMBER",
+                "raw_block mat=minecraft:chest at=1,0,1 nbt={}"
+            ),
+        ],
+    );
+}

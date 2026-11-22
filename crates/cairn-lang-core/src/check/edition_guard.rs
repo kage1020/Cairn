@@ -3,45 +3,52 @@
 //! `nbt={...}` compound no guard holds, since it is edition-specific
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
-use crate::ast::{Item, Module, Statement};
+use crate::ast::{Item, Module, Statement, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::edition::Edition;
 use crate::error::Span;
-use crate::intent::{MemberRole, is_escape_hatch_line, role_of};
+use crate::intent::{BodyKind, IntentModule, Member, MemberRole, is_escape_hatch_line, role_of};
 
 use super::DiagnosticSink;
 
-pub(super) fn run(module: &Module, sink: &mut DiagnosticSink) {
+pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink) {
     for item in &module.items {
         match item {
             Item::Struct { body, .. } | Item::Def { body, .. } | Item::Site { body, .. } => {
                 walk(body, sink);
-                unguarded_nbt(body, sink);
             }
             Item::Theme { .. } => {}
         }
     }
+    for body in ir.bodies() {
+        unguarded_nbt(body.members, body.kind, false, sink);
+    }
 }
 
-/// One `E_NBT_OUTSIDE_EDITION_GUARD` per `nbt=` a line of a role that reads one writes outside
-/// every guard; a role that reads none gets `E_UNKNOWN_ARGUMENT` instead.
-fn unguarded_nbt(body: &[Statement], sink: &mut DiagnosticSink) {
-    for statement in body {
-        let Statement::Generic {
-            keyword,
-            args,
-            children,
-            ..
-        } = statement
-        else {
-            continue;
-        };
-        if role_of(keyword).reads_nbt()
-            && let Some(nbt) = args.iter().find(|arg| arg.key == "nbt")
+/// One `E_NBT_OUTSIDE_EDITION_GUARD` per `nbt={...}` compound a member of a role that reads one
+/// writes outside every guard; a role that reads none gets `E_UNKNOWN_ARGUMENT` instead.
+fn unguarded_nbt(
+    members: &[Member],
+    body: BodyKind,
+    inside_level: bool,
+    sink: &mut DiagnosticSink,
+) {
+    for member in members {
+        // `member_scope::walk`'s gates: such a row is already reported, subtree and all.
+        if member.edition_guard.is_some()
+            || matches!(member.role, MemberRole::Other(_))
+            || !member.role.is_read_in(body)
         {
+            continue;
+        }
+        if member.role.reads_nbt()
+            && let Some(nbt) = member.written("nbt")
+            && matches!(nbt.value.kind, ValueKind::Nbt(_))
+        {
+            let keyword = member.role.keyword();
             sink.push(Diagnostic {
                 code: DiagnosticCode::NbtOutsideEditionGuard,
-                span: nbt.value.span.clone(),
+                span: nbt.span.clone(),
                 primary: format!(
                     "`{keyword}` writes an `nbt={{...}}` compound outside an `@edition` guard: the \
                      compound spells one edition's field names, and the semantic layer is \
@@ -56,7 +63,9 @@ fn unguarded_nbt(body: &[Statement], sink: &mut DiagnosticSink) {
                 data: None,
             });
         }
-        unguarded_nbt(children, sink);
+        if super::nesting::body_reaches_the_build(member, inside_level) {
+            unguarded_nbt(&member.children.members, body, true, sink);
+        }
     }
 }
 

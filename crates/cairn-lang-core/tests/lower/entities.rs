@@ -277,9 +277,8 @@ fn a_standing_entity_stands_on_its_cell_s_floor_facing_south_unless_told() {
 
 #[test]
 fn an_ignored_facing_says_a_standing_entity_faces_away_from_its_wall_or_south() {
-    let src = room(
-        "armor_stand at=inside.front offset=2 y=1 facing=5\n  armor_stand at=4,1,2 facing=5",
-    );
+    let src =
+        room("armor_stand at=inside.front offset=2 y=1 facing=5\n  armor_stand at=4,1,2 facing=5");
     let out = lowered(&src);
     let ignored = |note| {
         (
