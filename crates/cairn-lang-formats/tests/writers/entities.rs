@@ -272,6 +272,26 @@ fn a_bedrock_structure_lists_each_entity_and_builds_an_item_frame_as_a_frame_blo
     );
 }
 
+#[test]
+fn a_bedrock_nbt_compound_is_put_over_what_the_writer_builds_key_by_key() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  @edition bedrock\n    \
+                  armor_stand at=2,1,2 nbt={Rotation:[90f,0f],ShowArms:1b}\n    \
+                  spawn type=cat at=4,1,2 nbt={Variant:3,Tags:[\"a\",\"b\"]}\n";
+    let array = lowered(source, Edition::Bedrock, "1.21.60");
+    let root = bedrock_root(&array, "1.21.60");
+    assert_eq!(
+        listed(structure_compound(&root)),
+        [
+            "{identifier:\"minecraft:armor_stand\",Pos:[2.5f,1f,2.5f],Rotation:[90f,0f],\
+             Motion:[0f,0f,0f],UniqueID:1L,definitions:[\"+minecraft:armor_stand\"],ShowArms:1b}",
+            "{identifier:\"minecraft:cat\",Pos:[4.5f,1f,2.5f],Rotation:[0f,0f],Motion:[0f,0f,0f],\
+             UniqueID:2L,definitions:[\"+minecraft:cat\"],Variant:3,Tags:[\"a\",\"b\"]}",
+        ],
+    );
+}
+
 /// A painting inside each wall of a 7x5 room, so one faces each compass direction.
 const GALLERY: &str = "theme t:\n  slot wall -> @cobblestone\n\n\
                        struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \

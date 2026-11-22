@@ -206,6 +206,30 @@ fn a_hanging_entity_with_air_behind_a_cell_it_covers_is_dropped() {
 }
 
 #[test]
+fn water_or_lava_behind_a_hanging_entity_holds_it_no_more_than_air() {
+    judged(
+        "raw_block mat=minecraft:water at=3,1,3\n  painting at=3,1,2 facing=north variant=kebab\n  \
+         raw_block mat=minecraft:lava at=1,1,3\n  item_frame at=1,1,2 facing=north",
+        &[
+            (
+                DiagnosticCode::NoAttachmentFace,
+                "painting at=3,1,2 facing=north variant=kebab",
+                "`painting` places `minecraft:painting` at 3,1,2, where the game drops it: the \
+                 cell behind it, 3,1,3, holds `minecraft:water`",
+                vec![HUNG, HANG_FIX],
+            ),
+            (
+                DiagnosticCode::NoAttachmentFace,
+                "item_frame at=1,1,2 facing=north",
+                "`item_frame` places `minecraft:item_frame` at 1,1,2, where the game drops it: the \
+                 cell behind it, 1,1,3, holds `minecraft:lava`",
+                vec![HUNG, HANG_FIX],
+            ),
+        ],
+    );
+}
+
+#[test]
 fn a_frame_on_the_floor_hangs_on_the_block_under_it() {
     judged(
         "item_frame at=2,1,2 facing=up\n  item_frame at=2,2,2 facing=up",

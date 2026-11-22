@@ -158,6 +158,103 @@ fn a_wide_painting_runs_right_and_up_from_its_anchor_and_hangs_by_the_game_s_cel
 }
 
 #[test]
+fn a_wide_painting_on_each_wall_runs_to_the_right_as_seen_from_in_front_of_it() {
+    let src = format!(
+        "{THEME}struct s size=9x9\n  floor mat_slot=wall\n  walls mat_slot=wall height=6\n  \
+         painting at=inside.front offset=4 y=1 variant=pointer\n  \
+         painting at=inside.left offset=4 y=1 variant=pointer\n  \
+         painting at=inside.back offset=4 y=1 variant=pointer\n  \
+         painting at=inside.right offset=4 y=1 variant=pointer\n"
+    );
+    let out = lowered_with(&src, &Paintings { bedrock: false });
+    assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
+    let pointer = |pos, cell, facing| {
+        entity(
+            "minecraft:painting",
+            pos,
+            cell,
+            EntityData::Painting {
+                facing,
+                variant: "pointer".to_owned(),
+                spelling: Some("Pointer".to_owned()),
+                width: blocks(4),
+                height: blocks(4),
+            },
+        )
+    };
+    // Each runs from its anchor, offset 4 along its wall, to the viewer's right: west on the front
+    // wall, north on the left, east on the back and south on the right.
+    assert_eq!(
+        placed(&out),
+        [
+            pointer((5.5, 2.5, 1.031_25), (5, 2, 1), Compass::South),
+            pointer((1.031_25, 2.5, 3.5), (1, 2, 3), Compass::East),
+            pointer((7.968_75, 2.5, 5.5), (7, 2, 5), Compass::West),
+            pointer((3.5, 2.5, 7.968_75), (3, 2, 7), Compass::North),
+        ],
+    );
+}
+
+#[test]
+fn an_entity_moves_with_the_cells_of_its_level_and_of_an_overhang() {
+    let kebab = |pos, cell| {
+        entity(
+            "minecraft:painting",
+            pos,
+            cell,
+            EntityData::Painting {
+                facing: Compass::North,
+                variant: "kebab".to_owned(),
+                spelling: Some("Kebab".to_owned()),
+                width: blocks(1),
+                height: blocks(1),
+            },
+        )
+    };
+    let stand = |pos, cell| {
+        entity(
+            "minecraft:armor_stand",
+            pos,
+            cell,
+            EntityData::ArmorStand {
+                facing: Compass::South,
+            },
+        )
+    };
+    let members = |indent| {
+        format!("armor_stand at=2,1,2\n{indent}painting at=inside.front offset=2 y=1 variant=kebab")
+    };
+    let src = format!(
+        "{THEME}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=7\n  \
+         level id=up y=3\n    {}\n",
+        members("    ")
+    );
+    let out = lowered_with(&src, &Paintings { bedrock: false });
+    assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        placed(&out),
+        [
+            stand((2.5, 4.0, 2.5), (2, 4, 2)),
+            kebab((2.5, 4.5, 3.968_75), (2, 4, 3)),
+        ],
+    );
+    let src = format!(
+        "{THEME}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  {}\n",
+        members("  ")
+    );
+    let out = lowered_with(&src, &Paintings { bedrock: false });
+    assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        placed(&out),
+        [
+            stand((3.5, 1.0, 3.5), (3, 1, 3)),
+            kebab((3.5, 1.5, 4.968_75), (3, 1, 4)),
+        ],
+    );
+}
+
+#[test]
 fn a_painting_variant_the_target_lacks_is_refused_with_what_it_has() {
     let src = room(
         "painting at=inside.front offset=2 y=1 variant=kebabs\n  \
@@ -340,6 +437,49 @@ fn a_villager_offers_the_trades_that_name_it_in_the_order_written() {
 }
 
 #[test]
+fn trades_join_the_villager_each_names_among_a_body_s_villagers() {
+    let trade = |buy, buy_count, sell, sell_count| Trade {
+        buy: item(buy, buy_count),
+        sell: item(sell, sell_count),
+    };
+    assert_eq!(
+        place(
+            "villager id=farmer at=2,1,2\n  villager id=mason at=4,1,2 profession=mason\n  \
+             trade villager=mason buy=clay_ball sell=emerald\n  \
+             trade villager=farmer buy=wheat count=20 sell=emerald\n  \
+             trade villager=mason buy=emerald sell=bricks sell_count=10"
+        ),
+        [
+            entity(
+                "minecraft:villager",
+                (2.5, 1.0, 2.5),
+                (2, 1, 2),
+                EntityData::Villager {
+                    facing: Compass::South,
+                    profession: Profession::None,
+                    level: VillagerLevel::Novice,
+                    trades: vec![trade("wheat", 20, "emerald", 1)],
+                },
+            ),
+            entity(
+                "minecraft:villager",
+                (4.5, 1.0, 2.5),
+                (4, 1, 2),
+                EntityData::Villager {
+                    facing: Compass::South,
+                    profession: Profession::Mason,
+                    level: VillagerLevel::Novice,
+                    trades: vec![
+                        trade("clay_ball", 1, "emerald", 1),
+                        trade("emerald", 1, "bricks", 10),
+                    ],
+                },
+            ),
+        ],
+    );
+}
+
+#[test]
 fn a_profession_or_level_the_villager_does_not_take_is_refused_with_the_words_it_takes() {
     const PROFESSIONS: &str = "`profession=` takes none, armorer, butcher, cartographer, cleric, \
                                farmer, fisherman, fletcher, leatherworker, librarian, mason, \
@@ -380,6 +520,58 @@ fn a_profession_or_level_the_villager_does_not_take_is_refused_with_the_words_it
         ],
     );
     assert_eq!(placed(&out), []);
+}
+
+#[test]
+fn a_trade_count_outside_a_stack_or_of_another_kind_is_ignored_for_one() {
+    let src = room(
+        "villager id=lib at=2,1,2\n  \
+         trade villager=lib buy=book count=0 sell=emerald sell_count=65\n  \
+         trade villager=lib buy=book count=book sell=emerald sell_count=1.5",
+    );
+    let out = lowered(&src);
+    let ignored = |value, key, kind, note| {
+        (
+            DiagnosticCode::IgnoredArgument,
+            value,
+            format!(
+                "`{key}=` must be a whole number from 1 to 64, not {kind} `{value}`; the value was \
+                 ignored"
+            ),
+            vec![note],
+        )
+    };
+    let found: Vec<_> = findings(&src, &out)
+        .into_iter()
+        .map(|(code, at, message, notes)| (code, at, message.to_owned(), notes))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ignored("0", "count", "integer", "the trade buys one"),
+            ignored("65", "sell_count", "integer", "the trade sells one"),
+            ignored("book", "count", "identifier", "the trade buys one"),
+            ignored("1.5", "sell_count", "decimal", "the trade sells one"),
+        ],
+    );
+    let one_for_one = Trade {
+        buy: item("book", 1),
+        sell: item("emerald", 1),
+    };
+    assert_eq!(
+        placed(&out),
+        [entity(
+            "minecraft:villager",
+            (2.5, 1.0, 2.5),
+            (2, 1, 2),
+            EntityData::Villager {
+                facing: Compass::South,
+                profession: Profession::None,
+                level: VillagerLevel::Novice,
+                trades: vec![one_for_one.clone(), one_for_one],
+            },
+        )],
+    );
 }
 
 #[test]
@@ -605,6 +797,42 @@ fn a_scale_the_saved_float_does_not_hold_above_zero_is_ignored() {
 }
 
 #[test]
+fn a_billboard_the_display_does_not_take_is_ignored_for_a_fixed_one() {
+    let src = room(
+        "text_display at=3,1,2 text=\"Inn\" billboard=diagonal\n  \
+         text_display at=4,1,2 text=\"Inn\" billboard=3",
+    );
+    let out = lowered(&src);
+    let ignored = |value, kind| {
+        (
+            DiagnosticCode::IgnoredArgument,
+            value,
+            format!(
+                "`billboard=` must be one of `fixed`, `vertical`, `horizontal` and `center`, not \
+                 {kind} `{value}`; the value was ignored"
+            ),
+            vec!["the display is fixed"],
+        )
+    };
+    let found: Vec<_> = findings(&src, &out)
+        .into_iter()
+        .map(|(code, at, message, notes)| (code, at, message.to_owned(), notes))
+        .collect();
+    assert_eq!(
+        found,
+        [ignored("diagonal", "identifier"), ignored("3", "integer")],
+    );
+    let billboards: Vec<_> = placed(&out)
+        .into_iter()
+        .map(|entity| match entity.data {
+            EntityData::TextDisplay { billboard, .. } => billboard,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(billboards, [Billboard::Fixed; 2]);
+}
+
+#[test]
 fn a_display_the_target_s_edition_lacks_is_refused_with_what_to_write() {
     let src = room("text_display at=3,2,2 text=\"Inn\"");
     let out = lowered_with(&src, &Paintings { bedrock: true });
@@ -696,6 +924,29 @@ fn a_hologram_is_built_as_the_member_form_its_slot_binds_with_the_form_s_keys() 
             }
         )],
     );
+}
+
+#[test]
+fn a_hologram_at_a_target_without_displays_says_to_bind_its_slot_to_a_sign() {
+    let src = "theme t:\n  slot wall -> @cobblestone\n  slot holo -> text_display\n\n\
+               struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+               hologram at=3,1,2 facing=north text=\"Inn\" mat_slot=holo\n";
+    let out = lowered_with(src, &Paintings { bedrock: true });
+    assert_eq!(
+        findings(src, &out),
+        [(
+            DiagnosticCode::ParityUnsupported,
+            "hologram at=3,1,2 facing=north text=\"Inn\" mat_slot=holo",
+            "`minecraft:text_display` is an entity only Java has, so `bedrock 1.21.60` cannot \
+             build it",
+            vec![
+                "Bedrock has no display entity",
+                "bind the hologram's slot to `sign` in this edition's theme, as `slot NAME -> sign \
+                 glowing=true`, and to `text_display` in the other's",
+            ],
+        )],
+    );
+    assert_eq!(placed(&out), []);
 }
 
 #[test]
