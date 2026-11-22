@@ -408,14 +408,14 @@ fn a_block_entity_off_the_grid_is_refused_with_its_region() {
     assert!(
         matches!(
             &err,
-            LitematicError::Region {
-                region,
-                source: JavaStructureError::BlockEntityOutsideGrid {
+            LitematicError::Region { region, source } if region == "probe" && matches!(
+                &**source,
+                JavaStructureError::BlockEntityOutsideGrid {
                     id,
                     pos: (0, 0, 3),
                     dims: (2, 2, 3),
-                },
-            } if region == "probe" && id == "minecraft:comparator"
+                } if id == "minecraft:comparator"
+            )
         ),
         "got {err:?}"
     );
@@ -521,10 +521,10 @@ fn a_region_the_nbt_writer_would_refuse_is_refused_with_its_name() {
     assert!(
         matches!(
             &err,
-            LitematicError::Region {
-                region,
-                source: JavaStructureError::AbstractPaletteEntry { id },
-            } if region == "probe" && id == "oak_planks"
+            LitematicError::Region { region, source } if region == "probe" && matches!(
+                &**source,
+                JavaStructureError::AbstractPaletteEntry { id } if id == "oak_planks"
+            )
         ),
         "got {err:?}"
     );

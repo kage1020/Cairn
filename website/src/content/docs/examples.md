@@ -44,6 +44,12 @@ The [Tutorial](/tutorial/) walks through the four in the first group.
 | [`control-room.crn`](https://github.com/kage1020/Cairn/blob/main/examples/control-room.crn) | Every sensor and actuator against the walls: a lever and a button hung facing away from theirs, a daylight detector, an observer and a sticky piston turned upward, a lamp, a dispenser facing out, and the piston bound through a patch. |
 | [`aquarium.crn`](https://github.com/kage1020/Cairn/blob/main/examples/aquarium.crn) | `fill`: a sand bed painted with a material, then water poured around what stands in the tank, waterlogging a pane divider and a chest while `waterlogged=false` keeps another dry. |
 
+## Entities
+
+| File | Shows |
+|---|---|
+| [`trading-post.crn`](https://github.com/kage1020/Cairn/blob/main/examples/trading-post.crn) | A librarian villager by the back wall with the two trades it sells, a painting and an item frame hung on the side walls, an armor stand at a coordinate triple, and a `hologram` over the door that each edition's theme builds its own way: a text display on Java and a glowing sign on Bedrock. |
+
 ## Edge cases
 
 | File | Shows |

@@ -346,9 +346,11 @@ fn a_litematic_refusal_another_format_avoids_says_so() {
     };
     let region = LitematicError::Region {
         region: "hut".to_owned(),
-        source: cairn_lang_formats::java_structure::JavaStructureError::AbstractPaletteEntry {
-            id: "oak_planks".to_owned(),
-        },
+        source: Box::new(
+            cairn_lang_formats::java_structure::JavaStructureError::AbstractPaletteEntry {
+                id: "oak_planks".to_owned(),
+            },
+        ),
     };
     assert_eq!(
         [corner, metadata, region].map(|refusal| litematic_fix(&refusal)),

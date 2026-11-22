@@ -57,7 +57,7 @@ pub fn check(module: &Module, ir: &IntentModule, edition: Option<Edition>) -> Ve
     let mut sink = DiagnosticSink::new();
     cairn_version::run(module, &mut sink);
     duplicate::run(module, ir, &mut sink);
-    edition_guard::run(module, &mut sink);
+    edition_guard::run(module, ir, &mut sink);
     keyword_allowlist::run(ir, &mut sink);
     arguments::run(module, ir, &mut sink);
     edit::run(ir, &mut sink);
@@ -132,6 +132,7 @@ mod tests {
             | C::UnsupportedNesting
             | C::MisplacedMember
             | C::SemanticInEditionGuard
+            | C::NbtOutsideEditionGuard
             | C::UnknownKeyword
             | C::UnknownArgument
             | C::MisplacedBinding
@@ -194,7 +195,8 @@ mod tests {
             | C::PhaseConflict
             | C::NoAttachmentFace
             | C::UnsupportedBlock
-            | C::WaterSpill => RaisedBy::LoweringOnly,
+            | C::WaterSpill
+            | C::EntityClipping => RaisedBy::LoweringOnly,
             C::IntendedTargetCap | C::IntendedTargetCapPartial | C::IntendedTargetUnsupported => {
                 RaisedBy::NeedsVersionTable
             }
@@ -255,6 +257,7 @@ mod tests {
                 "E_MISPLACED_BINDING",
                 "E_MISPLACED_MEMBER",
                 "E_MISSING_MATERIAL",
+                "E_NBT_OUTSIDE_EDITION_GUARD",
                 "E_SEMANTIC_IN_EDITION_GUARD",
                 "E_TRUTH_TABLE_CONFLICT",
                 "E_TRUTH_TABLE_DUPLICATE_INPUT",

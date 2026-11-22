@@ -275,3 +275,35 @@ theme t:
         bindings: (attribute_list
           (identifier)
           (identifier))))))
+
+==================
+Slot row binding a member form, with the form's arguments (field labels)
+==================
+
+theme t:
+  slot floating_text -> text_display billboard=center scale=2.0
+  slot shop_sign -> sign glowing=true
+
+---
+
+(source_file
+  (theme_decl
+    name: (identifier)
+    body: (theme_body
+      (slot_binding
+        name: (identifier)
+        target: (identifier)
+        arguments: (attribute_list
+          (attribute
+            key: (identifier)
+            value: (identifier))
+          (attribute
+            key: (identifier)
+            value: (decimal))))
+      (slot_binding
+        name: (identifier)
+        target: (identifier)
+        arguments: (attribute_list
+          (attribute
+            key: (identifier)
+            value: (boolean)))))))

@@ -1,16 +1,27 @@
 //! Helpers shared by the core integration test binaries.
 
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
 use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, Walkway, lower_to_block_array,
+    AbsentEntity, BlockArray, BlockArrayIr, BlockIdSet, BlockState, EditionTables, IdStanding,
+    PaintingLookup, TargetRegistry, Walkway, lower_to_block_array,
 };
-use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
-pub const SHIPPED_EXAMPLES: usize = 16;
+pub const SHIPPED_EXAMPLES: usize = 17;
+
+/// `n` blocks, as a painting's side.
+///
+/// # Panics
+///
+/// When `n` is 0.
+pub fn blocks(n: u32) -> NonZeroU32 {
+    NonZeroU32::new(n).expect("a painting's side is a block or more")
+}
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {
@@ -214,6 +225,37 @@ pub fn lowered_with(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr
     let ir = lower(&module);
     lower_to_block_array(&ir, &resolve(&ir, None), Some(registry))
 }
+
+/// Each edition's answers to a lowering with no target, as a test gives them.
+pub struct Tables<'a> {
+    /// What an edition's versions make of a block id.
+    pub standing: &'a dyn Fn(Edition, &str) -> IdStanding,
+    /// What an edition's painting table says of a variant.
+    pub painting: &'a dyn Fn(Edition, &str) -> PaintingLookup,
+    /// The other edition's entity an id names, when an edition has none.
+    pub absent: &'a dyn Fn(Edition, &str) -> Option<AbsentEntity>,
+}
+
+impl EditionTables for Tables<'_> {
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding {
+        (self.standing)(edition, id)
+    }
+
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup {
+        (self.painting)(edition, variant)
+    }
+
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity> {
+        (self.absent)(edition, id)
+    }
+}
+
+/// Tables that declare every id and record no painting and no absent entity.
+pub const DECLARED: Tables<'static> = Tables {
+    standing: &|_, _| IdStanding::Declared,
+    painting: &|_, _| PaintingLookup::Unrecorded,
+    absent: &|_, _| None,
+};
 
 /// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.
 ///
@@ -484,7 +526,9 @@ pub const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, w
     (kind=gable|shed|hip|flat), stair (kind=stairs), pressure_plate, lever, button, daylight, \
     observer, lamp, piston, dispenser and chest (at=<side>.outside|inside.<side>), trapdoor, sign, \
     bed, repeater, comparator, redstone_torch and redstone_dust (at=x,y,z or \
-    at=<side>.outside|inside.<side>), note_block (at=x,y,z), beam (kind=pillar \
+    at=<side>.outside|inside.<side>), note_block (at=x,y,z), painting, item_frame, armor_stand, \
+    villager, text_display, block_display, item_display, hologram and spawn (at=x,y,z or \
+    at=<side>.outside|inside.<side>), trade (villager=<id>), beam (kind=pillar \
     at=<side>.top|<id>.top), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill \
     (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and recognises circuit \
     region=<label> void=<N> (u32, N>=1) plus actuator patches such as door[id=<name>] \

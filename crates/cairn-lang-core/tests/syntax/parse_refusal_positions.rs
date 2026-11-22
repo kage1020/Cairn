@@ -400,8 +400,8 @@ fn a_key_on_a_line_that_takes_none_is_refused_at_the_key() {
         ),
         (
             "theme t:\n  slot a -> @b c=1\n",
-            "2:16: a `slot` row takes no `key=value` argument, got `c=`; delete it: a `slot` row \
-             binds one value",
+            "2:16: a `slot` row binding a material token takes no `key=value` argument, got \
+             `c=`; delete it: a `slot` row binding a material token binds that token alone",
         ),
         (
             "struct s size=3x3\n  assert truth(a -> b) { 0 -> 1 } strict=1\n",

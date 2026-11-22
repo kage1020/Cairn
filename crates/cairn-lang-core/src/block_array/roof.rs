@@ -5,6 +5,7 @@
 use indexmap::IndexMap;
 
 use super::BlockState;
+use super::joins::Compass;
 use super::openings::WallSide;
 
 /// Stair id a sloped roof falls back to when its `mat_slot=` binds nothing usable.
@@ -91,40 +92,14 @@ impl RoofKind {
     }
 }
 
-/// Cardinal direction a stair can face.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Cardinal {
-    /// `-z` direction.
-    North,
-    /// `+z` direction.
-    South,
-    /// `-x` direction.
-    West,
-    /// `+x` direction.
-    East,
-}
-
-impl Cardinal {
-    /// String form used inside a `BlockState.properties["facing"]`.
-    #[must_use]
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::North => "north",
-            Self::South => "south",
-            Self::West => "west",
-            Self::East => "east",
-        }
-    }
-}
-
-/// The cardinal a block faces when it faces into the struct from `side`'s wall: opposite the
+/// The compass direction a block faces when it faces into the struct from `side`'s wall: opposite the
 /// wall's outward normal.
-pub(super) fn inward_cardinal(side: WallSide) -> Cardinal {
+pub(super) fn inward_compass(side: WallSide) -> Compass {
     match side {
-        WallSide::Front => Cardinal::North,
-        WallSide::Back => Cardinal::South,
-        WallSide::Left => Cardinal::East,
-        WallSide::Right => Cardinal::West,
+        WallSide::Front => Compass::North,
+        WallSide::Back => Compass::South,
+        WallSide::Left => Compass::East,
+        WallSide::Right => Compass::West,
     }
 }
 
@@ -211,10 +186,10 @@ pub fn gable_stair_state(ridge_axis: Axis, face: StairFace) -> BlockState {
     // A `half=top` stair also fills the lower quarter on its facing side, so an even-span apex
     // pair faces outward to close both outer faces.
     let facing = match (ridge_axis, face) {
-        (Axis::X, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::South,
-        (Axis::X, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::North,
-        (Axis::Z, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Cardinal::East,
-        (Axis::Z, StairFace::HighSlope | StairFace::ApexLow) => Cardinal::West,
+        (Axis::X, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Compass::South,
+        (Axis::X, StairFace::HighSlope | StairFace::ApexLow) => Compass::North,
+        (Axis::Z, StairFace::LowSlope | StairFace::Apex | StairFace::ApexHigh) => Compass::East,
+        (Axis::Z, StairFace::HighSlope | StairFace::ApexLow) => Compass::West,
     };
     let half = match face {
         StairFace::Apex | StairFace::ApexLow | StairFace::ApexHigh => "top",
@@ -308,14 +283,14 @@ pub fn shed_extra_height(slope_span: u32) -> u32 {
     slope_span.max(1)
 }
 
-/// Cardinal direction the high edge of a shed roof sits on, which its stairs face.
+/// Compass direction the high edge of a shed roof sits on, which its stairs face.
 #[must_use]
-pub fn shed_high_side(slope_to: WallSide) -> Cardinal {
+pub fn shed_high_side(slope_to: WallSide) -> Compass {
     match slope_to {
-        WallSide::Front => Cardinal::South,
-        WallSide::Back => Cardinal::North,
-        WallSide::Left => Cardinal::West,
-        WallSide::Right => Cardinal::East,
+        WallSide::Front => Compass::South,
+        WallSide::Back => Compass::North,
+        WallSide::Left => Compass::West,
+        WallSide::Right => Compass::East,
     }
 }
 
@@ -415,14 +390,14 @@ pub fn hip_extra_height(roof_w: u32, roof_h: u32) -> u32 {
 #[must_use]
 pub fn hip_stair_state(ridge_axis: Axis, face: HipFace) -> BlockState {
     let (facing, shape) = match face {
-        HipFace::SlopeNorth => (Cardinal::South, StairShape::Straight),
-        HipFace::SlopeSouth => (Cardinal::North, StairShape::Straight),
-        HipFace::SlopeWest => (Cardinal::East, StairShape::Straight),
-        HipFace::SlopeEast => (Cardinal::West, StairShape::Straight),
-        HipFace::CornerNorthWest => (Cardinal::South, StairShape::OuterLeft),
-        HipFace::CornerNorthEast => (Cardinal::South, StairShape::OuterRight),
-        HipFace::CornerSouthWest => (Cardinal::North, StairShape::OuterRight),
-        HipFace::CornerSouthEast => (Cardinal::North, StairShape::OuterLeft),
+        HipFace::SlopeNorth => (Compass::South, StairShape::Straight),
+        HipFace::SlopeSouth => (Compass::North, StairShape::Straight),
+        HipFace::SlopeWest => (Compass::East, StairShape::Straight),
+        HipFace::SlopeEast => (Compass::West, StairShape::Straight),
+        HipFace::CornerNorthWest => (Compass::South, StairShape::OuterLeft),
+        HipFace::CornerNorthEast => (Compass::South, StairShape::OuterRight),
+        HipFace::CornerSouthWest => (Compass::North, StairShape::OuterRight),
+        HipFace::CornerSouthEast => (Compass::North, StairShape::OuterLeft),
         HipFace::Apex => return gable_stair_state(ridge_axis, StairFace::Apex),
         HipFace::ApexLow => return gable_stair_state(ridge_axis, StairFace::ApexLow),
         HipFace::ApexHigh => return gable_stair_state(ridge_axis, StairFace::ApexHigh),
@@ -561,7 +536,7 @@ pub fn flat_voxels(roof_w: u32, roof_h: u32, wall_top: u32) -> Vec<(u32, u32, u3
 }
 
 /// A stair [`BlockState`], its properties in name order as a parsed state literal's are.
-pub(super) fn stair_state(id: &str, facing: Cardinal, half: &str, shape: StairShape) -> BlockState {
+pub(super) fn stair_state(id: &str, facing: Compass, half: &str, shape: StairShape) -> BlockState {
     let mut properties: IndexMap<String, String> = IndexMap::new();
     properties.insert("facing".to_owned(), facing.as_str().to_owned());
     properties.insert("half".to_owned(), half.to_owned());

@@ -1034,6 +1034,7 @@ fn bedrock_pack(data_versions: &'static str) -> Result<RegistryPack, RegistryErr
         absent: "",
         meanings: "",
         connections: "",
+        paintings: "",
         states: None,
         sensitivity: None,
     };
@@ -1533,6 +1534,7 @@ fn a_state_map_the_binary_does_not_embed_is_refused() {
         absent: "",
         meanings: "",
         connections: "",
+        paintings: "",
         states: None,
         sensitivity: Some(NO_SENSITIVITY),
     };

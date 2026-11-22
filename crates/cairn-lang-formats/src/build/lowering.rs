@@ -15,7 +15,7 @@ use super::gate::build_diagnostics;
 use super::run_level::{RunLevelMessage, partial_build, requires_conflict, unsupported_target};
 use super::scopes::{built_scopes, dropped_scopes};
 use crate::data_version::{ResolvedTarget, UnsupportedTarget, resolve_target};
-use crate::registry::{builtin_pack, builtin_view};
+use crate::registry::{BuiltinEditions, builtin_pack, builtin_view};
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 #[derive(Debug)]
@@ -43,9 +43,7 @@ pub fn check_lowering(
     // A `--target` comes with an `--edition` (`spec/compilation` "Target axes").
     let (Some(edition), Some(target)) = (edition, target) else {
         return CheckLowering {
-            diagnostics: findings_without_target(ir, edition, &|edition, id| {
-                builtin_pack(edition).id_standing(id)
-            }),
+            diagnostics: findings_without_target(ir, edition, &BuiltinEditions),
             dropped_scopes: Vec::new(),
             built_scopes: 0,
             unsupported: None,

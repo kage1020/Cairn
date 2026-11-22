@@ -2,12 +2,10 @@
 //! reports a guarded line's findings from that edition's lowering
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
-use cairn_lang_core::block_array::{
-    BlockArrayIr, IdStanding, findings_without_target, lower_to_block_array,
-};
+use cairn_lang_core::block_array::{BlockArrayIr, findings_without_target, lower_to_block_array};
 use cairn_lang_core::{Edition, lower, parse, resolve};
 
-use crate::common::{bin, blocks_where, only_structure, slice};
+use crate::common::{DECLARED, bin, blocks_where, only_structure, slice};
 
 /// `source` lowered for `edition`, or for none, with no registry pack.
 fn lowered_for(source: &str, edition: Option<Edition>) -> BlockArrayIr {
@@ -32,7 +30,7 @@ fn raw_blocks(out: &BlockArrayIr) -> Vec<Built> {
 /// `source`'s findings with no target, for `edition` or for both, as code and text.
 fn unpinned(source: &str, edition: Option<Edition>) -> Vec<(&'static str, &str)> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    findings_without_target(&lower(&module), edition, &|_, _| IdStanding::Declared)
+    findings_without_target(&lower(&module), edition, &DECLARED)
         .iter()
         .map(|d| (d.code.as_str(), slice(source, d)))
         .collect()

@@ -2,4 +2,4 @@
 source: crates/cairn-lang-formats/src/registry/constraints/tests.rs
 expression: builtin.hash().to_string()
 ---
-sha256:7ce79c352378c80bf163b2cca771a61be6b1a83302b5f62339f85494b36ea584
+sha256:bc3b5879b0797913f5cc0cb13be6b53a5b2dc10d3d9828700994e35986772c3e

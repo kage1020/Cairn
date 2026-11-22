@@ -2,7 +2,7 @@
 //! a raw member that sizes the volume (`spec/materials-themes` "Raw blocks").
 
 use cairn_lang_core::DiagnosticCode;
-use cairn_lang_core::block_array::{BlockArrayIr, BlockState, Dims};
+use cairn_lang_core::block_array::{BlockArrayIr, BlockEntity, BlockEntityData, BlockState, Dims};
 
 use crate::common::{codes, findings, lowered, only_structure};
 
@@ -68,6 +68,30 @@ fn a_raw_repeat_writes_each_raw_member_under_it_once_per_copy_a_step_apart() {
                 (5, 0, 3),
             ],
         )],
+    );
+}
+
+#[test]
+fn each_copy_of_a_raw_block_carries_its_block_entity() {
+    let src = "struct s size=6x4\n  raw_repeat count=2 step=3,0,2\n    \
+               raw_block mat=minecraft:chest at=0,0,0 nbt={Lock:\"a\"}\n";
+    let out = lowered(src);
+    assert_eq!(findings(src, &out), []);
+    let compound = || BlockEntityData::Nbt {
+        compound: r#"{Lock:"a"}"#.to_owned(),
+    };
+    assert_eq!(
+        only_structure(&out).block_entities,
+        [
+            BlockEntity {
+                pos: (0, 0, 0),
+                data: compound(),
+            },
+            BlockEntity {
+                pos: (3, 0, 2),
+                data: compound(),
+            },
+        ],
     );
 }
 

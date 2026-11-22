@@ -9,8 +9,12 @@ use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::site_floor::{FloorExtent, FloorOwner, collect_floor_cells};
 use super::*;
+use crate::Edition;
 use crate::ast::ValueKind;
-use crate::block_array::material::{IdStanding, NoTarget, resolve_block_state, stand_in};
+use crate::block_array::material::{
+    AbsentEntity, EditionTables, IdStanding, NoTarget, PaintingLookup, resolve_block_state,
+    stand_in,
+};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -516,13 +520,28 @@ fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
     );
 }
 
+/// Tables that declare every id and record no painting and no absent entity.
+struct Declared;
+impl EditionTables for Declared {
+    fn id_standing(&self, _: Edition, _: &str) -> IdStanding {
+        IdStanding::Declared
+    }
+    fn painting(&self, _: Edition, _: &str) -> PaintingLookup {
+        PaintingLookup::Unrecorded
+    }
+    fn absent_entity(&self, _: Edition, _: &str) -> Option<AbsentEntity> {
+        None
+    }
+}
+
 #[test]
 fn without_a_target_the_palette_counts_no_stand_in() {
     /// Each finding as its code and the first line it covers.
     fn without_target(source: &str) -> Vec<(&'static str, &str)> {
         let ir = lower(&parse(source).expect("parse"));
         let registry = NoTarget {
-            standing: &|_| IdStanding::Declared,
+            editions: &[Edition::Java],
+            tables: &Declared,
         };
         let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
         out.diagnostics
@@ -1391,6 +1410,14 @@ const SLOT_READERS: &[(&str, &str)] = &[
     ),
     ("sign", "struct s size=3x3\n  sign at=1,0,1 mat_slot=s\n"),
     (
+        "block_display",
+        "struct s size=3x3\n  block_display at=1,0,1 mat_slot=s\n",
+    ),
+    (
+        "hologram",
+        "struct s size=3x3\n  hologram at=1,0,1 text=\"Inn\" mat_slot=s\n",
+    ),
+    (
         "bed",
         "struct s size=3x3\n  bed at=1,0,1 facing=north mat_slot=b\n",
     ),
@@ -1458,6 +1485,39 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
     (
         "redstone_dust",
         "struct s size=3x3\n  redstone_dust at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "painting",
+        "struct s size=3x3\n  painting at=1,0,1 facing=north variant=kebab mat_slot=d\n",
+    ),
+    (
+        "item_frame",
+        "struct s size=3x3\n  item_frame at=1,0,1 facing=up mat_slot=d\n",
+    ),
+    (
+        "armor_stand",
+        "struct s size=3x3\n  armor_stand at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "villager",
+        "struct s size=3x3\n  villager id=v at=1,0,1 mat_slot=d\n",
+    ),
+    (
+        "trade",
+        "struct s size=3x3\n  villager id=v at=1,0,1\n  trade villager=v buy=emerald sell=bread \
+         mat_slot=d\n",
+    ),
+    (
+        "text_display",
+        "struct s size=3x3\n  text_display at=1,0,1 text=\"Inn\" mat_slot=d\n",
+    ),
+    (
+        "item_display",
+        "struct s size=3x3\n  item_display at=1,0,1 item=diamond mat_slot=d\n",
+    ),
+    (
+        "spawn",
+        "struct s size=3x3\n  spawn type=cat at=1,0,1 mat_slot=d\n",
     ),
     (
         "raw_block",
@@ -4189,7 +4249,7 @@ fn a_stair_on_a_row_only_unpainted_walls_reach_defers_to_them() {
 }
 
 #[test]
-fn stair_facing_in_paints_the_inward_cardinal() {
+fn stair_facing_in_paints_the_inward_compass_direction() {
     let out = lowered(&eave_stair_source(
         "stair id=e kind=stairs mat_slot=r side=front half=top facing=in",
     ));

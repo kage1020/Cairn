@@ -34,11 +34,14 @@ rule keep their bare values beside their `key=value` arguments, so `struct s siz
 `E_UNEXPECTED_POSITIONAL` on `size 3x3`, fixed as `size=3x3`. A `site` or `theme` header reads
 nothing after its name, a `slot` row nothing after the value it binds, and an `assert` line nothing
 after the end of its form: a bare value there is the same finding, and a `key=value` there is
-`E_PARSE`. A `logic` line whose `=` is dropped, `logic sig.a sig.b or sig.c`, still reads the
-expression after its name, binds nothing, and is `E_UNEXPECTED_POSITIONAL` on the whole line. No
-expression starts with an infix primitive, so `logic sig.a or sig.b` is `E_PARSE` at the `or`, for
-its missing `=`. An `edit` line keeps no positional list yet, so a bare value after its `set` is
-`E_PARSE`, which ends the parse: `edit window[0] set shape arch` is refused with "expected `=`".
+`E_PARSE`. A `slot` row that binds a bare word reads the `key=value` arguments of a member form
+after it, as `slot floating_text -> text_display scale=2.0` ([Materials and Themes
+§7.1](/spec/materials-themes/#71-slots-as-dependency-injection)). A `logic` line whose `=` is
+dropped, `logic sig.a sig.b or sig.c`, still reads the expression after its name, binds nothing, and
+is `E_UNEXPECTED_POSITIONAL` on the whole line. No expression starts with an infix primitive, so
+`logic sig.a or sig.b` is `E_PARSE` at the `or`, for its missing `=`. An `edit` line keeps no
+positional list yet, so a bare value after its `set` is `E_PARSE`, which ends the parse:
+`edit window[0] set shape arch` is refused with "expected `=`".
 
 ### 5.1.1 Literals and separators
 
@@ -65,12 +68,11 @@ one value, and so are `2` and `2.0`. A theme selector's attribute matches a memb
 ([Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), and an
 address spells each number one way ([§5.5](#55-ids-classes-addresses)).
 
-No key reads a decimal yet: the keys that will, such as the `scale=` of a display entity
-([Entities §8.1](/spec/entities/#81-two-tiers)), belong to keywords the compiler does not know. A
-key that reads another kind of value treats a decimal as it treats a coordinate triple (below): a
-label or size key refuses it as a type mismatch, a member key such as `height=` or `offset=` refuses
-its member as `E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or
-`overhang=`, says so with `W_IGNORED_ARGUMENT`.
+The key that reads one is a display's `scale=`, which the writer stores as a float ([Entities
+§8.1](/spec/entities/#displays)). A key that reads another kind of value treats a decimal as it
+treats a coordinate triple (below): a label or size key refuses it as a type mismatch, a member key
+such as `height=` or `offset=` refuses its member as `E_INVALID_MEMBER`, and a key that falls back
+to its default, such as `sym=` or `overhang=`, says so with `W_IGNORED_ARGUMENT`.
 
 An **NBT compound** is raw NBT written as SNBT in braces, as in `nbt={variant:"black"}`. It is what
 a key reads when a `{` follows its `=`, with a space between them or none. Anywhere else a `{` keeps
@@ -95,11 +97,12 @@ version Cairn targets reads alike:
 
 Anything else is `E_PARSE` where it starts, an exponent, a hexadecimal or binary number, a `_`
 between digits, an escape such as `\n`, a function such as `bool(...)` and a comment among them. The
-parser keeps the compound as written, braces included, and checks no field in it against the target:
-what its fields mean, and the `@edition` guard a line that writes one stands under, are [Entities
-§8.1](/spec/entities/#81-two-tiers)'s. No keyword reads `nbt=` yet, so it is a key like any other
-that its line does not read: `E_UNKNOWN_ARGUMENT`, on a header, on a member and as a theme
-selector's binding. A key that reads another kind of value treats a compound as it treats a decimal.
+parser keeps the compound as written, braces included, and checks no field in it against the
+target: what its fields mean, and the `@edition` guard a line that writes one stands under, are
+[Entities §8.1](/spec/entities/#81-two-tiers)'s. The keywords that read `nbt=` are the entities'
+and `raw_block`. On any other line it is a key like any other that its line does not read:
+`E_UNKNOWN_ARGUMENT`, on a header, on a member and as a theme selector's binding. A key that reads
+another kind of value treats a compound as it treats a decimal.
 
 A size literal is exactly two non-zero extents, `WxH`. A run that continues past the second, such
 as `2x2x9` or `2x2y`, is refused at the literal rather than read as a size followed by something
@@ -133,12 +136,12 @@ wall's length. The `from=` and `to=` of a `fill` ([Blockstate Model
 §6.3](/spec/blockstate/#63-waterlogged)) and a `raw_fill`, and the `at=` of a `raw_block`
 ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)), a Tier 0 part ([Redstone
 §14.1](/spec/redstone/#tier-0-parts)), a `trapdoor`, a `note_block`, a `sign` and a `bed`
-([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), read a
-triple, and no other key does yet: the entities that take one are not keywords. A key that reads
-another kind of value treats a triple as any value of the wrong kind. A label or size key refuses it
-as a type mismatch, a member key such as `side=` or `height=` refuses its member as
-`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says
-so with `W_IGNORED_ARGUMENT`.
+([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), and an entity
+([Entities §8.1](/spec/entities/#81-two-tiers)) read a triple, and no other key does. A key that
+reads another kind of value treats a triple as any value of the wrong kind. A label or size key
+refuses it as a type mismatch, a member key such as `side=` or `height=` refuses its member as
+`E_INVALID_MEMBER`, and a key that falls back to its default, such as `sym=` or `overhang=`, says so
+with `W_IGNORED_ARGUMENT`.
 
 Outside a coordinate triple, commas are **optional separators**, not structure.
 `@intended_targets ["1.20.4", "1.21.4"]` and `@intended_targets ["1.20.4" "1.21.4"]` name the same
@@ -284,8 +287,9 @@ nesting diagnostic. So is a line indented after a directive: a directive is one 
 under it belongs to no construct.
 
 An `@edition` guard indents the lines under it too, but it is not a member and groups nothing. Its
-lines stand in the body around it, and it holds only raw members and Tier 0 parts ([Versioning and
-Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
+lines stand in the body around it, and it holds only the escape-hatch layer: raw members, `spawn`,
+Tier 0 parts, and an entity's line that writes `nbt=` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)).
 
 [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation) defines what
 `y=N` means to each grouped member.
@@ -293,8 +297,10 @@ Editions §10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-ha
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
 building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
 `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`trapdoor`, `note_block`, `sign`, `bed`, `repeater`, `comparator`, `redstone_torch`,
-`redstone_dust`, `circuit`, `raw_block`, `raw_fill`, `raw_repeat`. A `site` body describes a layout:
+`trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`, `armor_stand`, `villager`,
+`trade`, `text_display`, `block_display`, `item_display`, `hologram`, `spawn`, `repeater`,
+`comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`, `raw_repeat`. A `site` body
+describes a layout:
 `place`, `connect`. The keyword table is global, so writing one in the other body parses and
 classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending
 row, taking anything indented under it along. A `level` groups the other members of a `struct` /
@@ -532,8 +538,8 @@ member whose line gives it that address as written. An edit that moves a member,
 Editing, and Multi-building §9.2](/spec/components-editing-sites/#92-editing-model)).
 
 `cairn parse --format json` prints each member line's address, and the ASCII dump of `cairn lower`
-lists those of the members that built a cell. The `resolved_state` record of each member that
-built a cell, a struct's `circuit` included, carries its address
+lists those of the members that built a cell or placed an entity. The `resolved_state` record of
+each of those members, a struct's `circuit` included, carries its address
 ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)), so those
 addresses feed `resolved_ir_hash`
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
@@ -734,6 +740,107 @@ language server shows the entry's own line on hover.
   - **`y=`.** By a wall, the row it is on.
   - **`facing=`.** The way its head points: by a wall `left` or `right`, in place of toward the
     wall, and at a triple a compass word, which a bed there must write.
+- **`painting`.** A painting hung on the face of the block behind it. See [Entities
+  §8.1](/spec/entities/#hanging-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks, which it must write there: `north`, `south`,
+    `east` or `west`.
+  - **`variant=`.** The painting it shows, by the name the target's `paintings` table gives it.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`item_frame`.** An item frame hung on a face, holding one item or none. See [Entities
+  §8.1](/spec/entities/#hanging-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks, which it must write there: a compass word, `up`
+    or `down`.
+  - **`item=`.** The item it holds.
+  - **`glowing=`.** With `true`, a glow item frame.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`armor_stand`.** An armor stand on its cell's floor. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`villager`.** A villager on its cell's floor, offering the trades its `trade` lines name. See
+  [Entities §8.1](/spec/entities/#standing-entities).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`profession=`.** Its profession, such as `librarian`, or `none` without one.
+  - **`level=`.** Its level, from `novice` to `master`, or `novice` without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`trade`.** One offer of a `villager` of the same body. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`villager=`.** The `id=` of the villager that offers it.
+  - **`buy=`.** The item it buys.
+  - **`count=`.** How many of that item it buys, from 1 to 64.
+  - **`sell=`.** The item it sells.
+  - **`sell_count=`.** How many of that item it sells, from 1 to 64.
+  - **`enchant=`.** An enchantment on the item it sells.
+  - **`enchant_level=`.** That enchantment's level, from 1 to 255.
+- **`text_display`.** Java's text display, drawing its text where it stands. See [Entities
+  §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`text=`.** Its text, a string or a list of lines.
+  - **`billboard=`.** How it turns to the viewer: `fixed`, `vertical`, `horizontal` or `center`.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`block_display`.** Java's block display, drawing the block its `mat_slot=` binds. See
+  [Entities §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`item_display`.** Java's item display, drawing the item its `item=` names. See [Entities
+  §8.1](/spec/entities/#displays).
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`item=`.** The item it draws, which it must write.
+  - **`scale=`.** How much it scales what it draws along each axis, a number above 0.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
+- **`hologram`.** Floating text built as the member form its `mat_slot=` binds, a `text_display`
+  or a `sign`. See [Versioning and Editions
+  §10.7](/spec/versioning-editions/#writing-an-alternative).
+  - **`at=`.** Its cell, read as the member it is built as reads its own.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** The way it looks, read as the member it is built as reads its own.
+  - **`text=`.** Its text.
+- **`spawn`.** Any other entity, by its id: the escape hatch for entities. See [Entities
+  §8.1](/spec/entities/#standing-entities).
+  - **`type=`.** The entity's id, which it must write.
+  - **`at=`.** Its cell, a coordinate triple, or a wall face as a `chest`'s is.
+  - **`offset=`.** By a wall, the wall column it is beside.
+  - **`y=`.** By a wall, the row it is on.
+  - **`facing=`.** At a triple, the way it looks: `north`, `south`, `east` or `west`, or `south`
+    without one.
+  - **`nbt=`.** A compound put over what the build writes for it, under an `@edition` guard. See
+    [Entities §8.1](/spec/entities/#81-two-tiers).
 - **`repeater`.** A redstone repeater placed by hand, a Tier 0 part. See
   [Redstone §14.1](/spec/redstone/#tier-0-parts).
   - **`at=`.** Its cell, a coordinate triple, or a wall face as a `pressure_plate`'s is.
@@ -771,6 +878,8 @@ language server shows the entry's own line on hover.
   §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`mat=`.** The block id, `namespace:path`, with an optional state literal.
   - **`at=`.** The cell, a coordinate triple.
+  - **`nbt=`.** Its block's block entity, a compound written as given, under an `@edition` guard.
+    See [Entities §8.1](/spec/entities/#81-two-tiers).
   - **`origin=`.** `imported`, which marks a line `cairn import` wrote.
 - **`raw_fill`.** One block named by its id, in every cell of a box. See [Materials and Themes
   §7.4](/spec/materials-themes/#74-raw-blocks).

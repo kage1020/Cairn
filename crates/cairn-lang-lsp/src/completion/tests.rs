@@ -833,16 +833,28 @@ fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_
     let edition = "struct s size=3x3\n  @edition ";
     assert_eq!(labels(&complete(edition, "@edition ")), ["java", "bedrock"]);
     let under = "struct s size=3x3\n  floor mat_slot=f\n  @edition java\n    ";
+    let guarded = complete(under, "@edition java\n    ");
     assert_eq!(
-        labels(&complete(under, "@edition java\n    ")),
+        guarded
+            .iter()
+            .map(|item| (item.label.as_str(), item.detail.as_deref().unwrap_or("")))
+            .collect::<Vec<_>>(),
         [
-            "repeater",
-            "comparator",
-            "redstone_torch",
-            "redstone_dust",
-            "raw_block",
-            "raw_fill",
-            "raw_repeat"
+            ("painting", "entity with nbt="),
+            ("item_frame", "entity with nbt="),
+            ("armor_stand", "entity with nbt="),
+            ("villager", "entity with nbt="),
+            ("text_display", "entity with nbt="),
+            ("block_display", "entity with nbt="),
+            ("item_display", "entity with nbt="),
+            ("spawn", "entity by id"),
+            ("repeater", "Tier 0 part"),
+            ("comparator", "Tier 0 part"),
+            ("redstone_torch", "Tier 0 part"),
+            ("redstone_dust", "Tier 0 part"),
+            ("raw_block", "raw member"),
+            ("raw_fill", "raw member"),
+            ("raw_repeat", "raw member"),
         ]
     );
     let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
@@ -871,6 +883,16 @@ fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_
             "note_block",
             "sign",
             "bed",
+            "painting",
+            "item_frame",
+            "armor_stand",
+            "villager",
+            "trade",
+            "text_display",
+            "block_display",
+            "item_display",
+            "hologram",
+            "spawn",
             "repeater",
             "comparator",
             "redstone_torch",

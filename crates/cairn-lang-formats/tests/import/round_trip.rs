@@ -6,15 +6,20 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
 use cairn_lang_core::voxel_diff::{Metrics, compare};
-use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
+use cairn_lang_formats::bedrock_structure::{
+    frames_as_blocks, prepare_mcstructure, read_mcstructure,
+};
 use cairn_lang_formats::import::{ImportFormat, LossKind, RawImport, import_raw};
 use cairn_lang_formats::java_structure::{prepare_structure, read_structure};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic, read_litematic};
 use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_formats::schem::{prepare_schem, read_schem, schem_files};
 
+use cairn_lang_nbt::tag::Compound;
+
 use crate::common::{
-    admitted_versions, bedrock_cells, compile_source, examples, examples_dir, latest, states_for,
+    BedrockCell, admitted_versions, bedrock_cells, compile_source, examples, examples_dir, latest,
+    states_for,
 };
 
 /// One structure file an example writes: its name, its bytes, and the arrays it holds in order
@@ -202,6 +207,19 @@ fn assembled<T: Clone>(dims: Dims, parts: &[Part<T>]) -> Vec<Option<T>> {
     out
 }
 
+/// `cell` with an item frame's states dropped: Bedrock builds that entity as a block whose states no
+/// canonical state spells, so the import writes it by its id alone.
+fn frame_by_id((block, liquid): BedrockCell) -> BedrockCell {
+    let block = block.map(|(name, states)| {
+        if matches!(name.as_str(), "minecraft:frame" | "minecraft:glow_frame") {
+            (name, Compound::new())
+        } else {
+            (name, states)
+        }
+    });
+    (block, liquid)
+}
+
 fn states(array: &BlockArray) -> Vec<BlockState> {
     array
         .voxels
@@ -320,10 +338,13 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
                                 })
                                 .collect();
                             assert_eq!(
-                                assembled(array.dims, &parts),
+                                assembled(array.dims, &parts)
+                                    .into_iter()
+                                    .map(|cell| cell.map(frame_by_id))
+                                    .collect::<Vec<_>>(),
                                 bedrock_cells(&read(array).volume)
                                     .into_iter()
-                                    .map(Some)
+                                    .map(|cell| Some(frame_by_id(cell)))
                                     .collect::<Vec<_>>(),
                                 "{label}: `{}`",
                                 body.name
@@ -375,6 +396,9 @@ fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_a
                     let mut held = ir.clone();
                     held.structures
                         .retain(|scope, _| file.scopes.contains(&scope.as_str()));
+                    if edition == Edition::Bedrock {
+                        held = frames_as_blocks(&held);
+                    }
                     let comparison = compare(import.decoded.bodies(), &held);
                     let metrics = comparison.counts.metrics();
                     assert_eq!(

@@ -281,6 +281,48 @@ fn only_the_last_block_entity_at_each_voxel_is_written() {
     assert_eq!(written, [(&origin, &at_origin), (&last, &at_one)]);
 }
 
+/// The comparator array with its block entity replaced by a `raw_block` `nbt=` compound.
+fn raw_block_entity(compound: &str) -> BlockArray {
+    let mut array = comparator_array("minecraft:chest");
+    array.block_entities[0].data = BlockEntityData::Nbt {
+        compound: compound.to_owned(),
+    };
+    array
+}
+
+#[test]
+fn a_raw_block_compound_s_id_is_the_block_entity_s_id_and_the_rest_its_data() {
+    let array = raw_block_entity("{Items:[],id:\"minecraft:chest\"}");
+    let schematic = written_schematic(struct_file(&array), &target("1.21.4"));
+    assert_eq!(
+        entry(&schematic, "Blocks").entries.get("BlockEntities"),
+        Some(&Tag::List(List::of_compounds(vec![compound([
+            ("Pos", Tag::IntArray(vec![1, 1, 1])),
+            ("Id", string("minecraft:chest")),
+            (
+                "Data",
+                Tag::Compound(compound([("Items", Tag::List(List::empty()))]))
+            ),
+        ])])))
+    );
+}
+
+#[test]
+fn a_raw_block_compound_without_a_string_id_is_refused() {
+    for compound in ["{Items:[]}", "{id:1b,Items:[]}"] {
+        let array = raw_block_entity(compound);
+        let err = prepare_schem(struct_file(&array), &target("1.21.4")).expect_err(compound);
+        assert!(
+            matches!(err, SchemError::BlockEntityWithoutId { pos: (1, 1, 1) }),
+            "{compound}: got {err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "the block entity at (1, 1, 1) has no string `id`, which a `.schem` file names it by"
+        );
+    }
+}
+
 #[test]
 fn a_block_entity_off_the_grid_is_refused() {
     let mut array = comparator_array("minecraft:comparator");

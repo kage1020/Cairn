@@ -11,8 +11,8 @@ phases in this fixed order:
 massing     floor / walls / fill
 envelope    roof / stair / beam
 openings    door / window
-fixtures    sign / painting / frame / bed / chest / trapdoor / note_block / sensors / actuators /
-            Tier 0 parts
+fixtures    sign / bed / chest / trapdoor / note_block / sensors / actuators / Tier 0 parts /
+            painting / item_frame / armor_stand / villager / trade / displays / hologram / spawn
 fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place pads, risers and cells laid under the floor → Placement IR
@@ -27,14 +27,15 @@ member's phase ([Materials and Themes](/spec/materials-themes/#selector-bindings
 member's corner posts in `massing`, and a `door` or `window` frame in `openings`, once every
 opening is cut.
 
-Not every row runs today. `painting`, `frame` and `water` are not keywords yet and are each refused
-as `E_UNKNOWN_KEYWORD`, so the phases that paint are `massing`, `envelope`, `openings`, `fixtures`
-(whose members are `sign`, `bed`, `chest`, `trapdoor`, `note_block`, every sensor and actuator but
-`door`, and the Tier 0 parts ([Redstone §14.1](/spec/redstone/#tier-0-parts))),
-`fluids` and `raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The three
-`logic_*` phases lay each struct's circuit in the layers its `circuit` line reserves under the base
-plane, where no other phase paints, so they read the struct as every other phase leaves it, `raw`
-included, and contest no voxel with any of them.
+Not every row runs today. `water` is not a keyword yet and is refused as `E_UNKNOWN_KEYWORD`, so the
+phases that paint are `massing`, `envelope`, `openings`, `fixtures` (whose members are `sign`,
+`bed`, `chest`, `trapdoor`, `note_block`, every sensor and actuator but `door`, the Tier 0 parts
+([Redstone §14.1](/spec/redstone/#tier-0-parts)) and the entities ([Entities
+§8.1](/spec/entities/#81-two-tiers))), `fluids` and `raw` ([Materials and Themes
+§7.4](/spec/materials-themes/#74-raw-blocks)). The three `logic_*` phases lay each struct's circuit
+in the layers its `circuit` line reserves under the base plane, where no other phase paints, so they
+read the struct as every other phase leaves it, `raw` included, and contest no voxel with any of
+them.
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
@@ -244,12 +245,12 @@ Members inside a `level` count in each, at their offset: `walls height=3` writte
 `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
 **Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `beam`, `chest`,
-`trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the Tier 0 parts, `fill`,
-`raw_block` and `raw_fill`, under a `raw_repeat` or not, read `N` as the base their geometry is
-measured from, except that a `beam` over an opening lies where its opening's `level` puts it. A
-`floor` and a `roof` are planes a struct has one of, and what one under a raised `level` builds is
-reserved for a later extension: under `level y=N` with `N > 0` each fires `W_DEFERRED_MEMBER` and
-lowers to nothing.
+`trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the Tier 0 parts, every
+entity, `hologram`, `fill`, `raw_block` and `raw_fill`, under a `raw_repeat` or not, read `N` as the
+base their geometry is measured from, except that a `beam` over an opening lies where its opening's
+`level` puts it. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
+`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
+`W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under

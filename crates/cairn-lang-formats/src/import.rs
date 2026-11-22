@@ -468,7 +468,8 @@ fn java_stamp(data_version: i32) -> Result<ImportStamp, ImportError> {
 }
 
 /// The Bedrock target `volume` is stamped with, and its grid there: of the shipped targets its
-/// newest block version names, the oldest whose state map spells every block, else the oldest.
+/// newest block version names, the oldest whose state map spells every block, else the oldest that
+/// spells the most.
 fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGrid), ImportError> {
     let pack = builtin_pack(Edition::Bedrock);
     let saved = volume
@@ -485,7 +486,7 @@ fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGr
         }
         None => (vec![pack.data_versions().latest.clone()], None),
     };
-    let mut first = None;
+    let mut fewest_unspelled: Option<(ImportStamp, grid::BedrockGrid)> = None;
     for version in versions {
         let states = pack
             .states_at(&version)
@@ -499,9 +500,14 @@ fn bedrock_stamp(volume: &BedrockVolume) -> Result<(ImportStamp, grid::BedrockGr
         if grid.unspelled.is_empty() {
             return Ok((stamp, grid));
         }
-        first.get_or_insert((stamp, grid));
+        if fewest_unspelled
+            .as_ref()
+            .is_none_or(|(_, kept)| grid.unspelled.len() < kept.unspelled.len())
+        {
+            fewest_unspelled = Some((stamp, grid));
+        }
     }
-    Ok(first.expect("a candidate list is never empty"))
+    Ok(fewest_unspelled.expect("a candidate list is never empty"))
 }
 
 /// The losses a Bedrock grid records.
@@ -600,7 +606,7 @@ fn void_loss(name: &str, cells: usize) -> SemanticLoss {
     }
 }
 
-/// The loss of `block_entities`, which no raw member carries.
+/// The loss of `block_entities`, which an import does not write.
 fn lose_block_entities(
     losses: &mut Vec<SemanticLoss>,
     name: &str,
@@ -613,7 +619,7 @@ fn lose_block_entities(
         unit: Some(name.to_owned()),
         kind: LossKind::BlockEntities,
         what: format!(
-            "{} not written, since a raw member carries no block entity data, such as a chest's \
+            "{} not written, since an import writes no block entity data, such as a chest's \
              contents or a command block's command: {}",
             counted(
                 block_entities.len(),

@@ -100,8 +100,8 @@ fn a_structure_file_imports_as_one_struct_of_raw_members_with_its_block_entities
             loss(
                 "comparator",
                 LossKind::BlockEntities,
-                "1 block entity is not written, since a raw member carries no block entity \
-                 data, such as a chest's contents or a command block's command: 1 \
+                "1 block entity is not written, since an import writes no block entity data, \
+                 such as a chest's contents or a command block's command: 1 \
                  `minecraft:comparator`"
             )
         ]
@@ -497,8 +497,8 @@ fn a_comparator_in_each_java_format_reports_its_block_entity_lost() {
             [loss(
                 "comparator",
                 LossKind::BlockEntities,
-                "1 block entity is not written, since a raw member carries no block entity \
-                 data, such as a chest's contents or a command block's command: 1 \
+                "1 block entity is not written, since an import writes no block entity data, \
+                 such as a chest's contents or a command block's command: 1 \
                  `minecraft:comparator`"
             )],
             "{format:?}"

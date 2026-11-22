@@ -9,7 +9,7 @@ use crate::intent::{BindingKey, Member};
 use crate::block_array::args::diag_deferred_member_reason;
 use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{DOOR_HEIGHT, WallSide, wall_local_to_grid};
-use crate::block_array::roof::inward_cardinal;
+use crate::block_array::roof::inward_compass;
 use crate::block_array::{Bbox, BlockState, PaletteIndex};
 
 use super::canvas::{Canvas, MemberCanvas, ScopePalette};
@@ -48,7 +48,7 @@ impl HungDoor {
         let mut properties = IndexMap::new();
         properties.insert(
             "facing".to_owned(),
-            inward_cardinal(self.side).as_str().to_owned(),
+            inward_compass(self.side).as_str().to_owned(),
         );
         properties.insert("half".to_owned(), half.to_owned());
         properties.insert("hinge".to_owned(), hinge.as_str().to_owned());

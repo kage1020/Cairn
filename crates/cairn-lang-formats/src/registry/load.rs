@@ -7,9 +7,10 @@ use std::sync::OnceLock;
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
-    AbsentConcept, BlockArrayIr, BlockIdSet, BlockState, Constraint, Contents, DeclaredElsewhere,
-    DomainFault, Face, Faces, IdStanding, JoinKind, Joins, OutOfDomain, StateDomain, Support,
-    TargetRegistry, UnmappedState,
+    AbsentConcept, AbsentEntity, BlockArrayIr, BlockIdSet, BlockState, Constraint, Contents,
+    DeclaredElsewhere, DomainFault, EditionTables, EntityBox, Face, Faces, IdStanding, JoinKind,
+    Joins, OutOfDomain, PaintingLookup, PaintingVariant, StateDomain, Support, TargetRegistry,
+    UnmappedState,
 };
 use cairn_lang_core::check::VersionTables;
 use cairn_lang_core::lock::HashHex;
@@ -33,6 +34,7 @@ use super::hash::pack_hash;
 use super::manifest::PackManifest;
 use super::materials::{MaterialsError, MaterialsIndex};
 use super::meanings::{MeaningIndex, MeaningsError};
+use super::paintings::{PaintingIndex, PaintingsError};
 use super::respelled::{Respelled, respelled_at};
 use super::states::{StateMapIndex, StateRefusal, StatesError, VersionStates, WATER_LAYER_STATE};
 
@@ -50,6 +52,7 @@ struct BuiltinFiles {
     absent: &'static str,
     meanings: &'static str,
     connections: &'static str,
+    paintings: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
 }
@@ -87,6 +90,7 @@ macro_rules! builtin_files {
             absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
             meanings: include_str!(concat!("../../registry-data/", $dir, "/meanings.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
+            paintings: include_str!(concat!("../../registry-data/", $dir, "/paintings.json")),
             states: $states,
             sensitivity: $sensitivity,
         }
@@ -125,6 +129,7 @@ pub struct RegistryPack {
     meanings: MeaningIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
+    paintings: PaintingIndex,
     bytes_hash: HashHex,
     source: PackSource,
 }
@@ -149,6 +154,7 @@ pub struct PackView<'a> {
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
     connections: &'a ConnectionIndex,
+    paintings: &'a PaintingIndex,
     /// The constraint catalog the view's checks read; `None` runs none.
     constraints: Option<&'a ConstraintIndex>,
     /// The target as a diagnostic names it, such as `"bedrock 1.21.60"` or `"bedrock"`.
@@ -366,6 +372,85 @@ impl TargetRegistry for PackView<'_> {
         self.mc_version?;
         self.constraints?;
         Some(self.sturdy(state)?.contains(face))
+    }
+
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        self.mc_version?;
+        self.constraints?;
+        Some(self.sturdy(state)? == Faces::ALL)
+    }
+
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        self.mc_version?;
+        let shape = self.constraints?.entity_box(id)?;
+        Some(EntityBox {
+            width: shape.width,
+            height: shape.height,
+            depth: shape.depth,
+        })
+    }
+
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        if self.paintings.is_empty() {
+            return PaintingLookup::Unrecorded;
+        }
+        let known = |painting: &super::paintings::Painting| {
+            PaintingLookup::Known(PaintingVariant {
+                spelling: painting.spelling.clone(),
+                width: painting.width,
+                height: painting.height,
+            })
+        };
+        if let Some(version) = self.mc_version {
+            if let Some(painting) = self.paintings.at(version, variant) {
+                return known(painting);
+            }
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .variants_at(version)
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: self
+                    .paintings
+                    .everywhere(variant)
+                    .map(|(version, _)| version.to_owned())
+                    .collect(),
+            };
+        }
+        // Unpinned, a variant some version has hangs as every version that has it agrees.
+        let mut found = self
+            .paintings
+            .everywhere(variant)
+            .map(|(_, painting)| painting);
+        let Some(first) = found.next() else {
+            return PaintingLookup::Unknown {
+                registry: self.label.clone(),
+                known: self
+                    .paintings
+                    .every_variant()
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect(),
+                elsewhere: Vec::new(),
+            };
+        };
+        if found.all(|other| other == first) {
+            known(first)
+        } else {
+            PaintingLookup::Unrecorded
+        }
+    }
+
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        self.absent
+            .entity_reason_for(id)
+            .map(|reason| AbsentEntity {
+                registry: self.label.clone(),
+                declared_by: self.edition.other(),
+                reason: reason.to_owned(),
+            })
     }
 
     fn contents(&self, state: &BlockState) -> Option<Contents> {
@@ -782,6 +867,13 @@ pub enum RegistryError {
         #[from]
         source: ConnectionsError,
     },
+    /// The pack's `paintings` component failed to validate.
+    #[error(transparent)]
+    Paintings {
+        /// The validation error.
+        #[from]
+        source: PaintingsError,
+    },
     /// `connections` lacks a table for a targetable version, or has one for a version not in the
     /// table.
     #[error(
@@ -1037,6 +1129,12 @@ impl RegistryPack {
         &self.connections
     }
 
+    /// The painting tables, empty without the component.
+    #[must_use]
+    pub fn paintings(&self) -> &PaintingIndex {
+        &self.paintings
+    }
+
     /// The pack hash the lockfile records as `inputs.registry_pack_hash`.
     #[must_use]
     pub fn bytes_hash(&self) -> &HashHex {
@@ -1218,6 +1316,7 @@ impl RegistryPack {
                 .map(|e| e.mc_version.as_str())
                 .collect(),
             connections: &self.connections,
+            paintings: &self.paintings,
             constraints: None,
             label: match mc_version {
                 Some(version) => format!("{} {version}", self.manifest.edition.as_str()),
@@ -1348,6 +1447,25 @@ pub fn builtin_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
         .with_constraints(builtin_constraints())
 }
 
+/// Both editions' built-in packs, as a check with no target reads them (`spec/lint` "Error vs
+/// warning").
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuiltinEditions;
+
+impl EditionTables for BuiltinEditions {
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding {
+        builtin_pack(edition).id_standing(id)
+    }
+
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup {
+        builtin_pack(edition).view(None).painting(variant)
+    }
+
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity> {
+        builtin_pack(edition).view(None).absent_entity(id)
+    }
+}
+
 /// Loads a Java pack from a directory holding `pack.json` and the files it names.
 ///
 /// # Errors
@@ -1369,6 +1487,7 @@ enum Component {
     States,
     Sensitivity,
     Connections,
+    Paintings,
 }
 
 impl Component {
@@ -1384,6 +1503,7 @@ impl Component {
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
+            Component::Paintings => "paintings",
         };
         RegistryError::File {
             file: file.to_owned(),
@@ -1416,6 +1536,7 @@ impl ComponentSource for BuiltinFiles {
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
+            Component::Paintings => self.paintings,
         }))
     }
 
@@ -1505,13 +1626,7 @@ fn load_pack(
     let (states, states_text, sensitivity_text) = state_maps(source, &manifest, &blocks)?;
     validate_meanings(&meanings, &blocks, states.as_ref())?;
     validate_material_canonicals(&materials, states.as_ref(), expected_edition)?;
-    match &states {
-        Some(states) => validate_states_cover_versions(states, &data_versions)?,
-        None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
-            return Err(RegistryError::StatesMissing);
-        }
-        None => {}
-    }
+    validate_states(states.as_ref(), &data_versions, &blocks, expected_edition)?;
     let (connections, connections_text) = optional_component(
         source,
         Component::Connections,
@@ -1520,26 +1635,29 @@ fn load_pack(
         ConnectionIndex::empty,
     )?;
     validate_connections(&connections, &data_versions, &blocks, expected_edition)?;
+    let (paintings, paintings_text) = optional_component(
+        source,
+        Component::Paintings,
+        manifest.files.paintings.as_deref(),
+        |catalog| PaintingIndex::from_catalog(catalog, &data_versions),
+        PaintingIndex::empty,
+    )?;
 
-    let mut components: Vec<(&str, &[u8])> = vec![(
-        manifest.files.data_versions.as_str(),
-        data_versions_text.as_bytes(),
-    )];
-    for (file, text) in [
-        (&manifest.files.materials, &materials_text),
-        (&manifest.files.blocks, &blocks_text),
-        (&manifest.files.aliases, &aliases_text),
-        (&manifest.files.absent, &absent_text),
-        (&manifest.files.meanings, &meanings_text),
-        (&manifest.files.states, &states_text),
-        (&manifest.files.sensitivity, &sensitivity_text),
-        (&manifest.files.connections, &connections_text),
-    ] {
-        if let (Some(file), Some(text)) = (file, text) {
-            components.push((file.as_str(), text.as_bytes()));
-        }
-    }
-    let bytes_hash = pack_hash(manifest_text.as_bytes(), &components);
+    let bytes_hash = texts_hash(
+        &manifest_text,
+        (&manifest.files.data_versions, &data_versions_text),
+        &[
+            (&manifest.files.materials, &materials_text),
+            (&manifest.files.blocks, &blocks_text),
+            (&manifest.files.aliases, &aliases_text),
+            (&manifest.files.absent, &absent_text),
+            (&manifest.files.meanings, &meanings_text),
+            (&manifest.files.states, &states_text),
+            (&manifest.files.sensitivity, &sensitivity_text),
+            (&manifest.files.connections, &connections_text),
+            (&manifest.files.paintings, &paintings_text),
+        ],
+    );
     Ok(RegistryPack {
         manifest,
         data_versions,
@@ -1550,6 +1668,7 @@ fn load_pack(
         meanings,
         states,
         connections,
+        paintings,
         bytes_hash,
         source: source.provenance(),
     })
@@ -1557,6 +1676,21 @@ fn load_pack(
 
 /// A component's text, `None` when the manifest names no such component.
 type ComponentText<'s> = Option<Cow<'s, str>>;
+
+/// The pack hash of the manifest's text and of each component text read, under its file name.
+fn texts_hash(
+    manifest_text: &str,
+    (data_versions_file, data_versions_text): (&str, &str),
+    optional: &[(&Option<String>, &ComponentText<'_>)],
+) -> HashHex {
+    let mut components = vec![(data_versions_file, data_versions_text.as_bytes())];
+    for (file, text) in optional {
+        if let (Some(file), Some(text)) = (file, text) {
+            components.push((file.as_str(), text.as_bytes()));
+        }
+    }
+    pack_hash(manifest_text.as_bytes(), &components)
+}
 
 /// The state map index, if the pack names one, and the texts of its two components, which a pack
 /// names both or neither of.
@@ -1717,6 +1851,23 @@ fn validate_meanings(
         }
     }
     Ok(())
+}
+
+/// Refuses a state map that misses a targetable version, or a Bedrock pack with block tables and
+/// no state map.
+fn validate_states(
+    states: Option<&StateMapIndex>,
+    data_versions: &DataVersionTable,
+    blocks: &BlocksIndex,
+    expected_edition: Edition,
+) -> Result<(), RegistryError> {
+    match states {
+        Some(states) => validate_states_cover_versions(states, data_versions),
+        None if expected_edition == Edition::Bedrock && !blocks.is_empty() => {
+            Err(RegistryError::StatesMissing)
+        }
+        None => Ok(()),
+    }
 }
 
 /// Refuses a state map that misses a targetable version, whose build would have none to write by.
