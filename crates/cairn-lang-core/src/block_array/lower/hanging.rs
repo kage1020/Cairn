@@ -8,9 +8,9 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
-use crate::block_array::EntityData;
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
 use crate::block_array::material::PaintingLookup;
+use crate::block_array::{Compass, EntityData};
 
 use super::canvas::MemberCanvas;
 use super::entity::{
@@ -125,7 +125,7 @@ fn hang_painting(
         member.span.start,
         crate::block_array::Entity {
             id: "minecraft:painting".to_owned(),
-            pos: hanging_point(hung, placed.facing),
+            pos: painting_point(hung, facing, width, height),
             block_pos: hung,
             data: EntityData::Painting {
                 facing,
@@ -138,6 +138,30 @@ fn hang_painting(
         },
     );
     Ok(())
+}
+
+/// The middle of the face a `width` by `height` painting facing `facing` covers, kept by `hung`:
+/// `hung`'s point, moved half a block right for an even width and up for an even height.
+fn painting_point(
+    hung: (u32, u32, u32),
+    facing: Compass,
+    width: NonZeroU32,
+    height: NonZeroU32,
+) -> (f64, f64, f64) {
+    let half = |side: NonZeroU32| {
+        if side.get().is_multiple_of(2) {
+            0.5
+        } else {
+            0.0
+        }
+    };
+    let (x, y, z) = hanging_point(hung, facing.face());
+    let (dx, _, dz) = facing.counter_clockwise().face().step();
+    (
+        x + f64::from(dx) * half(width),
+        y + half(height),
+        z + f64::from(dz) * half(width),
+    )
 }
 
 /// The name a painting's `variant=` writes, or the refusal of a line that writes none.

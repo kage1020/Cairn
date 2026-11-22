@@ -102,14 +102,15 @@ it ([Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--dat
 `kebab`. A painting covers its variant's `width` by `height` cells: its line's cell is its
 bottom-left one, seen from in front of it, and it runs right and up from there. The game keeps a
 painting by one of those cells, `(width - 1) / 2` right of the bottom-left and `(height - 1) / 2`
-above it, rounded down, so that cell is its cell, and its point is that cell's. A painting whose
-cells leave the body's block array is not hung, `W_DEFERRED_MEMBER`. A `variant=` the pinned
-target has no painting of is `E_INVALID_MEMBER`, with the paintings it has, or, where other
-versions have it, those versions. With an edition and no version pinned, a variant some version
-has hangs at the size every version that has it agrees on, and covers its one cell where they
-disagree, and a variant no version has is `E_INVALID_MEMBER` with the paintings the versions have;
-with no pack, the variant is not checked and the painting covers its one cell. A missing
-`variant=` and one that is no identifier are `E_INVALID_MEMBER`.
+above it, rounded down, so that cell is its cell. Its point is the middle of the face it covers,
+where the game saves it: that cell's point, moved half a block right for an even width and half a
+block up for an even height. A painting whose cells leave the body's block array is not hung,
+`W_DEFERRED_MEMBER`. A `variant=` the pinned target has no painting of is `E_INVALID_MEMBER`, with
+the paintings it has, or, where other versions have it, those versions. With an edition and no
+version pinned, a variant some version has hangs at the size every version that has it agrees on,
+and covers its one cell where they disagree, and a variant no version has is `E_INVALID_MEMBER` with
+the paintings the versions have; with no pack, the variant is not checked and the painting covers
+its one cell. A missing `variant=` and one that is no identifier are `E_INVALID_MEMBER`.
 
 An `item_frame` holds the item its `item=` names, one of it, and with none it hangs empty.
 `glowing=true` makes it a glow item frame. An `item=` that is no id and a `glowing=` that is no

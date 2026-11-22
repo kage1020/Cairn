@@ -144,7 +144,7 @@ fn a_wide_painting_runs_right_and_up_from_its_anchor_and_hangs_by_the_game_s_cel
         placed(&out),
         [entity(
             "minecraft:painting",
-            (3.5, 2.5, 3.968_75),
+            (3.0, 3.0, 3.968_75),
             (3, 2, 3),
             EntityData::Painting {
                 facing: Compass::North,
@@ -183,14 +183,14 @@ fn a_wide_painting_on_each_wall_runs_to_the_right_as_seen_from_in_front_of_it() 
         )
     };
     // Each runs from its anchor, offset 4 along its wall, to the viewer's right: west on the front
-    // wall, north on the left, east on the back and south on the right.
+    // wall, north on the left, east on the back and south on the right; its point is its middle.
     assert_eq!(
         placed(&out),
         [
-            pointer((5.5, 2.5, 1.031_25), (5, 2, 1), Compass::South),
-            pointer((1.031_25, 2.5, 3.5), (1, 2, 3), Compass::East),
-            pointer((7.968_75, 2.5, 5.5), (7, 2, 5), Compass::West),
-            pointer((3.5, 2.5, 7.968_75), (3, 2, 7), Compass::North),
+            pointer((6.0, 3.0, 1.031_25), (5, 2, 1), Compass::South),
+            pointer((1.031_25, 3.0, 3.0), (1, 2, 3), Compass::East),
+            pointer((7.968_75, 3.0, 6.0), (7, 2, 5), Compass::West),
+            pointer((3.0, 3.0, 7.968_75), (3, 2, 7), Compass::North),
         ],
     );
 }
