@@ -190,11 +190,43 @@ named! {
 pub struct Item {
     /// Item id, as `minecraft:diamond`.
     pub id: String,
-    /// How many, 1 to 64.
-    pub count: u8,
+    /// How many.
+    pub count: StackCount,
     /// The enchantment it carries, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enchantment: Option<Enchantment>,
+}
+
+/// How many items one stack holds, 1 to 64.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(transparent)]
+pub struct StackCount(u8);
+
+impl StackCount {
+    /// One item.
+    pub const ONE: Self = Self(1);
+
+    /// A stack of `count` items, or `None` outside 1 to 64.
+    #[must_use]
+    pub fn new(count: i64) -> Option<Self> {
+        u8::try_from(count)
+            .ok()
+            .filter(|count| (1..=64).contains(count))
+            .map(Self)
+    }
+
+    /// How many items it holds.
+    #[must_use]
+    pub const fn get(self) -> u8 {
+        self.0
+    }
+
+    /// How many items it holds, as a signed byte.
+    #[must_use]
+    #[expect(clippy::cast_possible_wrap, reason = "a stack holds at most 64")]
+    pub const fn as_i8(self) -> i8 {
+        self.0 as i8
+    }
 }
 
 /// An enchantment on an item; an enchanted book keeps it as a stored enchantment.

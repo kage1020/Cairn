@@ -7,7 +7,9 @@ use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
-use crate::block_array::{Enchantment, EntityData, Item, Profession, Trade, VillagerLevel};
+use crate::block_array::{
+    Enchantment, EntityData, Item, Profession, StackCount, Trade, VillagerLevel,
+};
 
 use super::canvas::MemberCanvas;
 use super::entity::{
@@ -36,9 +38,6 @@ const SPAWN: Fixture = Fixture {
 
 /// What becomes of an unread argument of an entity that is not built.
 const NOT_BUILT: &str = "this entity is not built either way — see the finding on the same line";
-
-/// The most items of one kind a trade buys or sells.
-const STACK: i64 = 64;
 
 /// Stand an `armor_stand` on its cell's floor.
 pub(super) fn fill_armor_stand(
@@ -317,12 +316,12 @@ fn traded(member: &Member, key: &'static str) -> Result<String, Refusal> {
 }
 
 /// How many items a trade's `key=` counts, 1 when it writes none; another value joins `unread`.
-fn count_of(member: &Member, key: &'static str, unread: &mut Vec<UnreadArgument>) -> u8 {
+fn count_of(member: &Member, key: &'static str, unread: &mut Vec<UnreadArgument>) -> StackCount {
     read_or_ignore(
         member,
         key,
         |kind| match kind {
-            ValueKind::Int(count) if (1..=STACK).contains(count) => u8::try_from(*count).ok(),
+            ValueKind::Int(count) => StackCount::new(*count),
             _ => None,
         },
         "a whole number from 1 to 64",
@@ -331,7 +330,7 @@ fn count_of(member: &Member, key: &'static str, unread: &mut Vec<UnreadArgument>
         unread.push(argument);
         None
     })
-    .unwrap_or(1)
+    .unwrap_or(StackCount::ONE)
 }
 
 /// The enchantment a trade's `enchant=` and `enchant_level=` put on the item it sells.

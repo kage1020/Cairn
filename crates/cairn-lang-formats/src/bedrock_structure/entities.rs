@@ -297,10 +297,7 @@ fn direction_id(facing: Face) -> i32 {
 fn item_stack(item: &Item, holder: &Entity) -> Result<Compound, BedrockStructureError> {
     let mut stack = Compound::new();
     stack.insert("Name", Tag::String(item.id.clone()));
-    stack.insert(
-        "Count",
-        Tag::Byte(i8::try_from(item.count).unwrap_or(i8::MAX)),
-    );
+    stack.insert("Count", Tag::Byte(item.count.as_i8()));
     stack.insert("Damage", Tag::Short(0));
     stack.insert("WasPickedUp", Tag::Byte(0));
     if let Some(enchantment) = &item.enchantment {
@@ -330,7 +327,7 @@ fn item_stack(item: &Item, holder: &Entity) -> Result<Compound, BedrockStructure
 fn offer(trade: &Trade, tier: i32, villager: &Entity) -> Result<Compound, BedrockStructureError> {
     let mut offer = Compound::new();
     offer.insert("buyA", Tag::Compound(item_stack(&trade.buy, villager)?));
-    offer.insert("buyCountA", Tag::Int(i32::from(trade.buy.count)));
+    offer.insert("buyCountA", Tag::Int(i32::from(trade.buy.count.get())));
     offer.insert("buyCountB", Tag::Int(0));
     offer.insert("sell", Tag::Compound(item_stack(&trade.sell, villager)?));
     offer.insert("uses", Tag::Int(0));

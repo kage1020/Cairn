@@ -200,7 +200,7 @@ fn item_stack(item: &Item, data_version: i32) -> Compound {
     stack.insert("id", Tag::String(item.id.clone()));
     let stored = item.id == ENCHANTED_BOOK;
     if data_version >= ITEM_COMPONENTS_FROM {
-        stack.insert("count", Tag::Int(i32::from(item.count)));
+        stack.insert("count", Tag::Int(i32::from(item.count.get())));
         if let Some(enchantment) = &item.enchantment {
             let mut levels = Compound::new();
             levels.insert(
@@ -224,10 +224,7 @@ fn item_stack(item: &Item, data_version: i32) -> Compound {
             stack.insert("components", Tag::Compound(components));
         }
     } else {
-        stack.insert(
-            "Count",
-            Tag::Byte(i8::try_from(item.count).unwrap_or(i8::MAX)),
-        );
+        stack.insert("Count", Tag::Byte(item.count.as_i8()));
         if let Some(enchantment) = &item.enchantment {
             let mut entry = Compound::new();
             entry.insert("id", Tag::String(enchantment.id.clone()));

@@ -10,7 +10,7 @@ use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_igno
 use crate::block_array::geometry::Declared;
 use crate::block_array::joins::Face;
 use crate::block_array::material::AbsentEntity;
-use crate::block_array::{Bbox, Entity, EntityData, Item};
+use crate::block_array::{Bbox, Entity, EntityData, Item, StackCount};
 
 use super::canvas::MemberCanvas;
 use super::fixture::{Fixture, Refusal, fixture_cell, outside_the_array};
@@ -264,7 +264,7 @@ pub(super) fn item_of(
         })
         .map(|id| Item {
             id,
-            count: 1,
+            count: StackCount::ONE,
             enchantment: None,
         })
 }

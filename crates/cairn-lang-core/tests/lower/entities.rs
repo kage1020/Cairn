@@ -5,8 +5,8 @@
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::block_array::{
     AbsentEntity, Billboard, BlockEntityData, BlockIdSet, BlockState, Enchantment, Entity,
-    EntityData, Face, Item, PaintingLookup, PaintingVariant, Profession, SignText, StateDomain,
-    TargetRegistry, Trade, VillagerLevel,
+    EntityData, Face, Item, PaintingLookup, PaintingVariant, Profession, SignText, StackCount,
+    StateDomain, TargetRegistry, Trade, VillagerLevel,
 };
 use cairn_lang_core::{BlockArrayIr, DiagnosticCode, Edition, lower, parse, resolve};
 
@@ -56,10 +56,10 @@ fn entity(
     }
 }
 
-fn item(id: &str, count: u8) -> Item {
+fn item(id: &str, count: i64) -> Item {
     Item {
         id: format!("minecraft:{id}"),
-        count,
+        count: StackCount::new(count).expect("a stack's count"),
         enchantment: None,
     }
 }

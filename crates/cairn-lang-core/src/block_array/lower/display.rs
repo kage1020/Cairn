@@ -6,7 +6,7 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
 use crate::block_array::args::{diag_invalid_member, read_or_ignore, strings_or_ignore};
-use crate::block_array::{Billboard, EntityData, Item};
+use crate::block_array::{Billboard, EntityData, Item, StackCount};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::entity::{
@@ -265,7 +265,7 @@ fn shown_item(member: &Member) -> Result<Item, Refusal> {
     match written.and_then(|raw| id_value(&raw.value.kind)) {
         Some(id) => Ok(Item {
             id,
-            count: 1,
+            count: StackCount::ONE,
             enchantment: None,
         }),
         None => Err(Box::new(diag_invalid_member(
