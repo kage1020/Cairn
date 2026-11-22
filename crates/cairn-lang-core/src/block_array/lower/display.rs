@@ -115,6 +115,7 @@ fn show_text(
                 ID,
                 standing_point(placed.cell),
                 EntityData::TextDisplay {
+                    facing: placed.compass(),
                     lines,
                     billboard,
                     scale,
@@ -184,7 +185,11 @@ pub(super) fn fill_block_display(
                 placed,
                 ID,
                 standing_point(placed.cell),
-                EntityData::BlockDisplay { block, scale },
+                EntityData::BlockDisplay {
+                    facing: placed.compass(),
+                    block,
+                    scale,
+                },
                 &mut unread,
             );
             Some(placed)
@@ -241,7 +246,11 @@ pub(super) fn fill_item_display(
                 placed,
                 ID,
                 standing_point(placed.cell),
-                EntityData::ItemDisplay { item, scale },
+                EntityData::ItemDisplay {
+                    facing: placed.compass(),
+                    item,
+                    scale,
+                },
                 &mut unread,
             );
             Some(placed)

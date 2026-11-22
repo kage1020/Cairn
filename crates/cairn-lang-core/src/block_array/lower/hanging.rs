@@ -96,10 +96,8 @@ fn hang_painting(
         }
         PaintingLookup::Unrecorded => (None, NonZeroU32::MIN, NonZeroU32::MIN),
     };
-    let right = placed
-        .facing
-        .counter_clockwise()
-        .expect("a painting faces one of the four compass faces");
+    let facing = placed.compass();
+    let right = facing.counter_clockwise().face();
     let at = |across: u32, up: u32| {
         let (dx, _, dz) = right.step();
         let (x, y, z) = placed.cell;
@@ -129,8 +127,8 @@ fn hang_painting(
             id: "minecraft:painting".to_owned(),
             pos: hanging_point(hung, placed.facing),
             block_pos: hung,
-            facing: placed.facing,
             data: EntityData::Painting {
+                facing,
                 variant: name.to_owned(),
                 spelling,
                 width,
@@ -237,7 +235,10 @@ pub(super) fn fill_item_frame(
                 "minecraft:item_frame"
             },
             hanging_point(placed.cell, placed.facing),
-            EntityData::ItemFrame { item },
+            EntityData::ItemFrame {
+                facing: placed.facing,
+                item,
+            },
             &mut unread,
         ),
         Err(refusal) => diagnostics.push(*refusal),

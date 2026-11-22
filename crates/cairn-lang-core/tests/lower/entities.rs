@@ -4,7 +4,7 @@
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::block_array::{
-    AbsentEntity, Billboard, BlockEntityData, BlockIdSet, BlockState, Enchantment, Entity,
+    AbsentEntity, Billboard, BlockEntityData, BlockIdSet, BlockState, Compass, Enchantment, Entity,
     EntityData, Face, Item, PaintingLookup, PaintingVariant, Profession, SignText, StackCount,
     StateDomain, TargetRegistry, Trade, VillagerLevel,
 };
@@ -40,18 +40,11 @@ fn place(members: &str) -> Vec<Entity> {
     placed(&out)
 }
 
-fn entity(
-    id: &str,
-    pos: (f64, f64, f64),
-    block_pos: (u32, u32, u32),
-    facing: Face,
-    data: EntityData,
-) -> Entity {
+fn entity(id: &str, pos: (f64, f64, f64), block_pos: (u32, u32, u32), data: EntityData) -> Entity {
     Entity {
         id: id.to_owned(),
         pos,
         block_pos,
-        facing,
         data,
         nbt: None,
     }
@@ -128,8 +121,8 @@ fn a_painting_by_a_wall_hangs_in_the_cell_inside_it_facing_away() {
             "minecraft:painting",
             (2.5, 1.5, 3.968_75),
             (2, 1, 3),
-            Face::North,
             EntityData::Painting {
+                facing: Compass::North,
                 variant: "kebab".to_owned(),
                 spelling: None,
                 width: blocks(1),
@@ -153,8 +146,8 @@ fn a_wide_painting_runs_right_and_up_from_its_anchor_and_hangs_by_the_game_s_cel
             "minecraft:painting",
             (3.5, 2.5, 3.968_75),
             (3, 2, 3),
-            Face::North,
             EntityData::Painting {
+                facing: Compass::North,
                 variant: "pointer".to_owned(),
                 spelling: Some("Pointer".to_owned()),
                 width: blocks(4),
@@ -208,15 +201,17 @@ fn an_item_frame_hangs_on_a_wall_or_on_the_face_its_facing_turns_from() {
                 "minecraft:glow_item_frame",
                 (2.5, 1.031_25, 2.5),
                 (2, 1, 2),
-                Face::Up,
-                EntityData::ItemFrame { item: None },
+                EntityData::ItemFrame {
+                    facing: Face::Up,
+                    item: None
+                },
             ),
             entity(
                 "minecraft:item_frame",
                 (3.5, 2.5, 1.031_25),
                 (3, 2, 1),
-                Face::South,
                 EntityData::ItemFrame {
+                    facing: Face::South,
                     item: Some(item("diamond", 1)),
                 },
             ),
@@ -265,15 +260,17 @@ fn a_standing_entity_stands_on_its_cell_s_floor_facing_south_unless_told() {
                 "minecraft:armor_stand",
                 (1.5, 1.0, 1.5),
                 (1, 1, 1),
-                Face::South,
-                EntityData::ArmorStand,
+                EntityData::ArmorStand {
+                    facing: Compass::South
+                },
             ),
             entity(
                 "minecraft:armor_stand",
                 (3.5, 1.0, 2.5),
                 (3, 1, 2),
-                Face::East,
-                EntityData::ArmorStand,
+                EntityData::ArmorStand {
+                    facing: Compass::East
+                },
             ),
         ],
     );
@@ -300,7 +297,7 @@ fn an_ignored_facing_says_a_standing_entity_faces_away_from_its_wall_or_south() 
             ignored("it faces south"),
         ],
     );
-    let facings: Vec<Face> = placed(&out).iter().map(|entity| entity.facing).collect();
+    let facings: Vec<Face> = placed(&out).iter().map(Entity::facing).collect();
     assert_eq!(facings, [Face::South, Face::North]);
 }
 
@@ -317,8 +314,8 @@ fn a_villager_offers_the_trades_that_name_it_in_the_order_written() {
             "minecraft:villager",
             (2.5, 1.0, 2.5),
             (2, 1, 2),
-            Face::South,
             EntityData::Villager {
+                facing: Compass::South,
                 profession: Profession::Librarian,
                 level: VillagerLevel::Expert,
                 trades: vec![
@@ -401,8 +398,8 @@ fn librarian(nbt: &str) -> Entity {
             "minecraft:villager",
             (2.5, 1.0, 2.5),
             (2, 1, 2),
-            Face::South,
             EntityData::Villager {
+                facing: Compass::South,
                 profession: Profession::Librarian,
                 level: VillagerLevel::Expert,
                 trades: vec![Trade {
@@ -489,8 +486,8 @@ fn a_display_stands_on_its_cell_s_floor_showing_what_its_keys_name() {
                 "minecraft:block_display",
                 (1.5, 1.0, 1.5),
                 (1, 1, 1),
-                Face::South,
                 EntityData::BlockDisplay {
+                    facing: Compass::South,
                     block: BlockState::bare("minecraft:cobblestone"),
                     scale: 0.5,
                 },
@@ -499,8 +496,8 @@ fn a_display_stands_on_its_cell_s_floor_showing_what_its_keys_name() {
                 "minecraft:item_display",
                 (5.5, 1.0, 3.5),
                 (5, 1, 3),
-                Face::West,
                 EntityData::ItemDisplay {
+                    facing: Compass::West,
                     item: item("diamond_sword", 1),
                     scale: 1.0,
                 },
@@ -509,8 +506,8 @@ fn a_display_stands_on_its_cell_s_floor_showing_what_its_keys_name() {
                 "minecraft:text_display",
                 (3.5, 2.0, 2.5),
                 (3, 2, 2),
-                Face::South,
                 EntityData::TextDisplay {
+                    facing: Compass::South,
                     lines: vec!["Inn".to_owned(), "rooms".to_owned()],
                     billboard: Billboard::Center,
                     scale: 1.5,
@@ -599,8 +596,9 @@ fn a_spawn_under_its_edition_s_guard_places_its_type_with_its_nbt_as_written() {
                 "minecraft:cat",
                 (2.5, 1.0, 2.5),
                 (2, 1, 2),
-                Face::South,
-                EntityData::Spawn,
+                EntityData::Spawn {
+                    facing: Compass::South
+                },
             )
         }],
     );
@@ -626,8 +624,8 @@ fn a_hologram_is_built_as_the_member_form_its_slot_binds_with_the_form_s_keys() 
             "minecraft:text_display",
             (3.5, 1.0, 2.5),
             (3, 1, 2),
-            Face::North,
             EntityData::TextDisplay {
+                facing: Compass::North,
                 lines: vec!["Inn".to_owned()],
                 billboard: Billboard::Vertical,
                 scale: 1.0,

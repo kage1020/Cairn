@@ -6,7 +6,7 @@ use std::num::NonZeroU32;
 use serde::Serialize;
 
 use super::BlockState;
-use super::joins::Face;
+use super::joins::{Compass, Face};
 
 /// An entity on the grid: a painting, an item frame, an armor stand, a villager, a display or one
 /// a `spawn` places.
@@ -18,14 +18,29 @@ pub struct Entity {
     pub pos: (f64, f64, f64),
     /// The cell it belongs to.
     pub block_pos: (u32, u32, u32),
-    /// The way it faces.
-    pub facing: Face,
-    /// What its kind holds.
+    /// What its kind holds, the way it faces among them.
     #[serde(flatten)]
     pub data: EntityData,
     /// The `nbt={...}` compound its line writes, as written.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub nbt: Option<String>,
+}
+
+impl Entity {
+    /// The way it faces.
+    #[must_use]
+    pub const fn facing(&self) -> Face {
+        match &self.data {
+            EntityData::ItemFrame { facing, .. } => *facing,
+            EntityData::Painting { facing, .. }
+            | EntityData::ArmorStand { facing }
+            | EntityData::Villager { facing, .. }
+            | EntityData::TextDisplay { facing, .. }
+            | EntityData::BlockDisplay { facing, .. }
+            | EntityData::ItemDisplay { facing, .. }
+            | EntityData::Spawn { facing } => facing.face(),
+        }
+    }
 }
 
 /// What an [`Entity`] holds beside its place.
@@ -34,6 +49,8 @@ pub struct Entity {
 pub enum EntityData {
     /// A painting, hung by its hanging cell (`spec/entities` "Hanging entities").
     Painting {
+        /// The way it faces, away from the wall it hangs on.
+        facing: Compass,
         /// The variant, as its line names it, without a namespace.
         variant: String,
         /// The variant as the target's painting table spells it; `None` where no table answers.
@@ -46,14 +63,21 @@ pub enum EntityData {
     },
     /// An item frame, or a glow item frame by its id.
     ItemFrame {
+        /// The way it faces, away from the face it hangs on.
+        facing: Face,
         /// The item it holds, if any.
         #[serde(skip_serializing_if = "Option::is_none")]
         item: Option<Item>,
     },
     /// An armor stand, without arms.
-    ArmorStand,
+    ArmorStand {
+        /// The way it faces.
+        facing: Compass,
+    },
     /// A villager and the trades it offers, in the order written.
     Villager {
+        /// The way it faces.
+        facing: Compass,
         /// Its profession.
         profession: Profession,
         /// Its level.
@@ -64,6 +88,8 @@ pub enum EntityData {
     },
     /// A text display.
     TextDisplay {
+        /// The way it faces.
+        facing: Compass,
         /// Its lines, top first.
         lines: Vec<String>,
         /// How it turns toward the viewer.
@@ -73,6 +99,8 @@ pub enum EntityData {
     },
     /// A block display.
     BlockDisplay {
+        /// The way it faces.
+        facing: Compass,
         /// The block it shows.
         block: BlockState,
         /// Its scale on every axis, as the float the game saves.
@@ -80,13 +108,18 @@ pub enum EntityData {
     },
     /// An item display.
     ItemDisplay {
+        /// The way it faces.
+        facing: Compass,
         /// The item it shows.
         item: Item,
         /// Its scale on every axis, as the float the game saves.
         scale: f32,
     },
-    /// An entity a `spawn` places, which holds only what its `nbt=` writes.
-    Spawn,
+    /// An entity a `spawn` places, which holds only its facing and what its `nbt=` writes.
+    Spawn {
+        /// The way it faces.
+        facing: Compass,
+    },
 }
 
 /// Declares a field-less enum named by the words of its `ALL`, in the order its variants are listed.

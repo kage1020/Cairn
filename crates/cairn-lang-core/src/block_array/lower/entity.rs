@@ -8,7 +8,7 @@ use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
 use crate::block_array::geometry::Declared;
-use crate::block_array::joins::Face;
+use crate::block_array::joins::{Compass, Face};
 use crate::block_array::material::AbsentEntity;
 use crate::block_array::{Bbox, Entity, EntityData, Item, StackCount};
 
@@ -39,6 +39,17 @@ pub(super) struct Placed {
     pub(super) facing: Face,
     /// The face it is set against, as `spec/entities` "Anchor conventions" names one.
     pub(super) host_face: Option<Face>,
+}
+
+impl Placed {
+    /// The compass way it faces, as every entity but an item frame does.
+    ///
+    /// # Panics
+    ///
+    /// When it faces up or down, as only an item frame hangs.
+    pub(super) fn compass(self) -> Compass {
+        Compass::of(self.facing).expect("only an item frame faces up or down")
+    }
 }
 
 /// What a standing entity placed at `placed` faces once its `facing=` is ignored.
@@ -193,7 +204,6 @@ pub(super) fn place_one(
             id: id.to_owned(),
             pos,
             block_pos: placed.cell,
-            facing: placed.facing,
             data,
             nbt: nbt_of(member, unread),
         },

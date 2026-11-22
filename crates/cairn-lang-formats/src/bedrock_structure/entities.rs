@@ -2,7 +2,7 @@
 //! as the frame block Bedrock has for one, with its block entity, and every other entity in the
 //! structure's `entities`, each with its point in the structure's coordinates.
 
-use cairn_lang_core::block_array::{Entity, EntityData, Face, Item, Profession, Trade};
+use cairn_lang_core::block_array::{Compass, Entity, EntityData, Face, Item, Profession, Trade};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::BedrockStructureError;
@@ -81,11 +81,20 @@ pub(super) fn bedrock_entities(
     let mut frames = Vec::new();
     let mut listed = Vec::new();
     for entity in entities {
-        if let EntityData::ItemFrame { item } = &entity.data {
-            frames.push(frame(entity, item.as_ref())?);
-            continue;
-        }
-        let mut nbt = entity_nbt(entity, listed.len())?;
+        let facing = match &entity.data {
+            EntityData::ItemFrame { facing, item } => {
+                frames.push(frame(entity, *facing, item.as_ref())?);
+                continue;
+            }
+            EntityData::Painting { facing, .. }
+            | EntityData::ArmorStand { facing }
+            | EntityData::Villager { facing, .. }
+            | EntityData::TextDisplay { facing, .. }
+            | EntityData::BlockDisplay { facing, .. }
+            | EntityData::ItemDisplay { facing, .. }
+            | EntityData::Spawn { facing } => *facing,
+        };
+        let mut nbt = entity_nbt(entity, facing, listed.len())?;
         if let Some(written) = &entity.nbt {
             let tags = compound_of(written).ok_or_else(|| BedrockStructureError::MalformedNbt {
                 pos: entity.block_pos,
@@ -112,10 +121,14 @@ fn check_strings(entity: &Entity, nbt: &Compound) -> Result<(), BedrockStructure
     }
 }
 
-fn frame(entity: &Entity, item: Option<&Item>) -> Result<Frame, BedrockStructureError> {
+fn frame(
+    entity: &Entity,
+    facing: Face,
+    item: Option<&Item>,
+) -> Result<Frame, BedrockStructureError> {
     let glowing = entity.id == "minecraft:glow_item_frame";
     let mut states = Compound::new();
-    states.insert("facing_direction", Tag::Int(direction_id(entity.facing)));
+    states.insert("facing_direction", Tag::Int(direction_id(facing)));
     states.insert("item_frame_map_bit", Tag::Byte(0));
     states.insert("item_frame_photo_bit", Tag::Byte(0));
     let mut block_entity = Compound::new();
@@ -156,8 +169,12 @@ fn frame(entity: &Entity, item: Option<&Item>) -> Result<Frame, BedrockStructure
     })
 }
 
-/// One entry of `entities` for `entity`, the `index`th the list holds.
-fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructureError> {
+/// One entry of `entities` for `entity` facing `facing`, the `index`th the list holds.
+fn entity_nbt(
+    entity: &Entity,
+    facing: Compass,
+    index: usize,
+) -> Result<Compound, BedrockStructureError> {
     let identifier = match &entity.data {
         EntityData::Villager { .. } => "minecraft:villager_v2",
         EntityData::TextDisplay { .. }
@@ -180,7 +197,7 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
     )]
     let pos = [x as f32, y as f32, z as f32];
     nbt.insert("Pos", floats(&pos));
-    nbt.insert("Rotation", floats(&[yaw(entity.facing), 0.0]));
+    nbt.insert("Rotation", floats(&[yaw(facing), 0.0]));
     nbt.insert("Motion", floats(&[0.0, 0.0, 0.0]));
     nbt.insert(
         "UniqueID",
@@ -198,12 +215,13 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
                         variant: variant.clone(),
                     })?;
             nbt.insert("Motive", Tag::String(motive));
-            nbt.insert("Direction", Tag::Byte(horizontal_id(entity.facing)));
+            nbt.insert("Direction", Tag::Byte(horizontal_id(facing)));
         }
         EntityData::Villager {
             profession,
             level,
             trades,
+            ..
         } => {
             if *profession != Profession::None {
                 definitions.push(Tag::String(format!("+{}", profession.as_str())));
@@ -261,22 +279,22 @@ fn floats(values: &[f32]) -> Tag {
 }
 
 /// The yaw an entity facing `facing` turns to: south 0, west 90, north 180, east 270.
-fn yaw(facing: Face) -> f32 {
+const fn yaw(facing: Compass) -> f32 {
     match facing {
-        Face::West => 90.0,
-        Face::North => 180.0,
-        Face::East => 270.0,
-        _ => 0.0,
+        Compass::South => 0.0,
+        Compass::West => 90.0,
+        Compass::North => 180.0,
+        Compass::East => 270.0,
     }
 }
 
 /// The number a painting's `Direction` saves: south 0, west 1, north 2, east 3.
-fn horizontal_id(facing: Face) -> i8 {
+const fn horizontal_id(facing: Compass) -> i8 {
     match facing {
-        Face::West => 1,
-        Face::North => 2,
-        Face::East => 3,
-        _ => 0,
+        Compass::South => 0,
+        Compass::West => 1,
+        Compass::North => 2,
+        Compass::East => 3,
     }
 }
 

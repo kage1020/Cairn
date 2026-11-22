@@ -8,7 +8,7 @@ use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
 use crate::block_array::{
-    Enchantment, EntityData, Item, Profession, StackCount, Trade, VillagerLevel,
+    Compass, Enchantment, EntityData, Item, Profession, StackCount, Trade, VillagerLevel,
 };
 
 use super::canvas::MemberCanvas;
@@ -54,7 +54,11 @@ pub(super) fn fill_armor_stand(
         ctx,
         canvas,
         diagnostics,
-        |_| Ok(("minecraft:armor_stand".to_owned(), EntityData::ArmorStand)),
+        |_| {
+            Ok(("minecraft:armor_stand".to_owned(), |facing| {
+                EntityData::ArmorStand { facing }
+            }))
+        },
     );
 }
 
@@ -78,14 +82,14 @@ pub(super) fn fill_villager(
                 .unwrap_or(Profession::None);
             let level = word_of(member, "level", VillagerLevel::ALL, VillagerLevel::as_str)?
                 .unwrap_or(VillagerLevel::Novice);
-            Ok((
-                "minecraft:villager".to_owned(),
+            Ok(("minecraft:villager".to_owned(), move |facing| {
                 EntityData::Villager {
+                    facing,
                     profession,
                     level,
                     trades: Vec::new(),
-                },
-            ))
+                }
+            }))
         },
     );
 }
@@ -106,10 +110,11 @@ pub(super) fn fill_spawn(
         canvas,
         diagnostics,
         |member| match member.written("type").map(|raw| &raw.value.kind) {
-            Some(kind) if id_value(kind).is_some() => Ok((
-                id_value(kind).expect("checked by the guard"),
-                EntityData::Spawn,
-            )),
+            Some(kind) if id_value(kind).is_some() => {
+                Ok((id_value(kind).expect("checked by the guard"), |facing| {
+                    EntityData::Spawn { facing }
+                }))
+            }
             written => Err(Box::new(diag_invalid_member(
                 member,
                 match written {
@@ -129,14 +134,14 @@ pub(super) fn fill_spawn(
 }
 
 /// Place a standing entity, `kind` reading its id and what it holds off its line.
-fn stand(
+fn stand<D: FnOnce(Compass) -> EntityData>(
     fixture: Fixture,
     member: &Member,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     canvas: &mut MemberCanvas<'_>,
     diagnostics: &mut Vec<Diagnostic>,
-    kind: impl FnOnce(&Member) -> Result<(String, EntityData), Refusal>,
+    kind: impl FnOnce(&Member) -> Result<(String, D), Refusal>,
 ) {
     let mut unread = Vec::new();
     let built = kind(member).and_then(|(id, data)| {
@@ -146,7 +151,15 @@ fn stand(
     let built = match built {
         Ok((id, data, placed)) => {
             let pos = standing_point(placed.cell);
-            place_one(member, canvas, placed, &id, pos, data, &mut unread);
+            place_one(
+                member,
+                canvas,
+                placed,
+                &id,
+                pos,
+                data(placed.compass()),
+                &mut unread,
+            );
             Some(placed)
         }
         Err(refusal) => {

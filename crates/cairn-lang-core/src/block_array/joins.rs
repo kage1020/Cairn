@@ -106,6 +106,62 @@ impl Face {
     }
 }
 
+/// One of the four compass directions, the way a stair, a painting or a standing entity faces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Compass {
+    /// `-z`.
+    North,
+    /// `+z`.
+    South,
+    /// `-x`.
+    West,
+    /// `+x`.
+    East,
+}
+
+impl Compass {
+    /// The compass word, as a `facing` state names it.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        self.face().as_str()
+    }
+
+    /// The sideways face looking this way.
+    #[must_use]
+    pub const fn face(self) -> Face {
+        match self {
+            Self::North => Face::North,
+            Self::South => Face::South,
+            Self::West => Face::West,
+            Self::East => Face::East,
+        }
+    }
+
+    /// The way `face` looks, or `None` for `Down` and `Up`.
+    #[must_use]
+    pub const fn of(face: Face) -> Option<Self> {
+        Some(match face {
+            Face::North => Self::North,
+            Face::South => Self::South,
+            Face::West => Self::West,
+            Face::East => Self::East,
+            Face::Down | Face::Up => return None,
+        })
+    }
+
+    /// The way a quarter turn counter-clockwise from this one, seen from above.
+    #[must_use]
+    pub const fn counter_clockwise(self) -> Self {
+        match self {
+            Self::North => Self::West,
+            Self::West => Self::South,
+            Self::South => Self::East,
+            Self::East => Self::North,
+        }
+    }
+}
+
 /// A set of a block's faces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct Faces(u8);

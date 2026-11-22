@@ -4244,7 +4244,7 @@ fn a_stair_on_a_row_only_unpainted_walls_reach_defers_to_them() {
 }
 
 #[test]
-fn stair_facing_in_paints_the_inward_cardinal() {
+fn stair_facing_in_paints_the_inward_compass_direction() {
     let out = lowered(&eave_stair_source(
         "stair id=e kind=stairs mat_slot=r side=front half=top facing=in",
     ));

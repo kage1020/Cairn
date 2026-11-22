@@ -307,7 +307,7 @@ fn saved_facings(
             let Some(Tag::Byte(number)) = fields.entries.get(key) else {
                 panic!("no byte `{key}`: {entry:?}");
             };
-            (entity.facing.as_str(), *number)
+            (entity.facing().as_str(), *number)
         })
         .collect();
     saved.sort_unstable_by_key(|(_, number)| *number);

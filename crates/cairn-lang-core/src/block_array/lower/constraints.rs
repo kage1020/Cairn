@@ -514,7 +514,7 @@ fn entity_aabb(entity: &Entity, shape: EntityBox) -> Aabb {
         EntityData::Painting { width, height, .. } => (width.get(), height.get()),
         _ => (1, 1),
     };
-    let facing = entity.facing;
+    let facing = entity.facing();
     // A wall's face runs up and to the right as seen from in front of the entity; a floor's or a
     // ceiling's along x and z.
     let (right, upward) = match facing.counter_clockwise() {
@@ -599,7 +599,7 @@ pub(super) fn entity_findings(
                 .into_iter()
                 .filter_map(|cell| {
                     let (behind, state, contents) =
-                        grid.beside(registry, cell, placed.entity.facing.opposite())?;
+                        grid.beside(registry, cell, placed.entity.facing().opposite())?;
                     (contents != Contents::Block).then_some((behind, state))
                 })
                 .collect();

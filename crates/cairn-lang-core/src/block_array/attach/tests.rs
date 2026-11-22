@@ -2,7 +2,8 @@ use indexmap::IndexMap;
 
 use super::*;
 use crate::block_array::{
-    BlockArray, BlockEntityData, CellRun, Dims, Entity, EntityData, Face, PALETTE_CAPACITY, Palette,
+    BlockArray, BlockEntityData, CellRun, Compass, Dims, Entity, EntityData, PALETTE_CAPACITY,
+    Palette,
 };
 use crate::intent::AddressSegment;
 
@@ -31,8 +32,9 @@ fn hut() -> BlockArrayIr {
             id: "minecraft:armor_stand".to_owned(),
             pos: (0.5, 1.0, 0.5),
             block_pos: (0, 1, 0),
-            facing: Face::South,
-            data: EntityData::ArmorStand,
+            data: EntityData::ArmorStand {
+                facing: Compass::South,
+            },
             nbt: None,
         }],
         source_scope: KEY.to_owned(),

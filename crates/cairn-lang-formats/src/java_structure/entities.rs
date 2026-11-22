@@ -1,7 +1,7 @@
 //! The IR's entities as a Java structure's `entities` saves them: each with its point, its cell
 //! and its `nbt`, in the shape the target's `DataVersion` reads (`spec/entities` "Two tiers").
 
-use cairn_lang_core::block_array::{Billboard, Entity, EntityData, Face, Item, Trade};
+use cairn_lang_core::block_array::{Billboard, Compass, Entity, EntityData, Face, Item, Trade};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::{JavaStructureError, palette_entry, palette_entry_keys, text_component};
@@ -77,29 +77,33 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
     nbt.insert("id", Tag::String(entity.id.clone()));
     match &entity.data {
         EntityData::Painting {
-            variant, spelling, ..
+            facing,
+            variant,
+            spelling,
+            ..
         } => {
             let id = spelling
                 .clone()
                 .unwrap_or_else(|| format!("minecraft:{variant}"));
             nbt.insert("variant", Tag::String(id));
-            nbt.insert("facing", Tag::Byte(horizontal_id(entity.facing)));
+            nbt.insert("facing", Tag::Byte(horizontal_id(*facing)));
         }
-        EntityData::ItemFrame { item } => {
-            nbt.insert("Facing", Tag::Byte(direction_id(entity.facing)));
+        EntityData::ItemFrame { facing, item } => {
+            nbt.insert("Facing", Tag::Byte(direction_id(*facing)));
             if let Some(item) = item {
                 nbt.insert("Item", Tag::Compound(item_stack(item, data_version)));
             }
         }
-        EntityData::ArmorStand | EntityData::Spawn => {
-            nbt.insert("Rotation", rotation(entity.facing));
+        EntityData::ArmorStand { facing } | EntityData::Spawn { facing } => {
+            nbt.insert("Rotation", rotation(*facing));
         }
         EntityData::Villager {
+            facing,
             profession,
             level,
             trades,
         } => {
-            nbt.insert("Rotation", rotation(entity.facing));
+            nbt.insert("Rotation", rotation(*facing));
             let mut data = Compound::new();
             data.insert("type", Tag::String("minecraft:plains".to_owned()));
             data.insert(
@@ -120,23 +124,32 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
             }
         }
         EntityData::TextDisplay {
+            facing,
             lines,
             billboard,
             scale,
         } => {
-            display(&mut nbt, entity.facing, *billboard, *scale);
+            display(&mut nbt, *facing, *billboard, *scale);
             nbt.insert(
                 "text",
                 Tag::String(text_component(&lines.join("\n"), data_version)),
             );
         }
-        EntityData::BlockDisplay { block, scale } => {
-            display(&mut nbt, entity.facing, Billboard::Fixed, *scale);
+        EntityData::BlockDisplay {
+            facing,
+            block,
+            scale,
+        } => {
+            display(&mut nbt, *facing, Billboard::Fixed, *scale);
             let keys = palette_entry_keys(data_version);
             nbt.insert("block_state", Tag::Compound(palette_entry(block, keys)));
         }
-        EntityData::ItemDisplay { item, scale } => {
-            display(&mut nbt, entity.facing, Billboard::Fixed, *scale);
+        EntityData::ItemDisplay {
+            facing,
+            item,
+            scale,
+        } => {
+            display(&mut nbt, *facing, Billboard::Fixed, *scale);
             nbt.insert("item", Tag::Compound(item_stack(item, data_version)));
         }
     }
@@ -144,7 +157,7 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
 }
 
 /// What a display's `nbt` holds beside what it shows: its yaw, its billboard and its scale.
-fn display(nbt: &mut Compound, facing: Face, billboard: Billboard, scale: f32) {
+fn display(nbt: &mut Compound, facing: Compass, billboard: Billboard, scale: f32) {
     nbt.insert("Rotation", rotation(facing));
     nbt.insert("billboard", Tag::String(billboard.as_str().to_owned()));
     let floats = |values: &[f32]| {
@@ -162,23 +175,23 @@ fn display(nbt: &mut Compound, facing: Face, billboard: Billboard, scale: f32) {
 }
 
 /// `Rotation` for an entity turned to face `facing`: its yaw, then a level pitch.
-fn rotation(facing: Face) -> Tag {
+fn rotation(facing: Compass) -> Tag {
     let yaw = match facing {
-        Face::West => 90.0,
-        Face::North => 180.0,
-        Face::East => 270.0,
-        _ => 0.0,
+        Compass::South => 0.0,
+        Compass::West => 90.0,
+        Compass::North => 180.0,
+        Compass::East => 270.0,
     };
     Tag::List(List::of_tags(5, vec![Tag::Float(yaw), Tag::Float(0.0)]))
 }
 
 /// The number a painting's `facing` saves: south 0, west 1, north 2, east 3.
-fn horizontal_id(facing: Face) -> i8 {
+const fn horizontal_id(facing: Compass) -> i8 {
     match facing {
-        Face::West => 1,
-        Face::North => 2,
-        Face::East => 3,
-        _ => 0,
+        Compass::South => 0,
+        Compass::West => 1,
+        Compass::North => 2,
+        Compass::East => 3,
     }
 }
 
