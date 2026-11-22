@@ -64,7 +64,7 @@ pub(crate) fn run_info(
         InfoFormat::Text => {
             print_axes_report(&document.axes);
             outln!(
-                "verified target:         {}",
+                "verified target:           {}",
                 verified_target_text(&document.verified_target.reading)
             );
             ExitCode::SUCCESS
@@ -128,7 +128,7 @@ fn joined_or(empty: &str, separator: &str, items: impl IntoIterator<Item = Strin
 fn print_axes_report(axes: &VersionAxes) {
     // One range for every edition: `spec/versioning-editions` "The `registry compatibility` row".
     outln!(
-        "registry compatibility:  {} .. {}",
+        "registry compatibility:    {} .. {}",
         axes.registry_compat.min,
         axes.registry_compat.max,
     );
@@ -144,7 +144,7 @@ fn print_axes_report(axes: &VersionAxes) {
             )
         }),
     );
-    outln!("inferred range:          {inferred_line}");
+    outln!("inferred range:            {inferred_line}");
 
     let portability_line = joined_or(
         "(no editions requested)",
@@ -159,7 +159,7 @@ fn print_axes_report(axes: &VersionAxes) {
             )
         }),
     );
-    outln!("edition portability:     {portability_line}");
+    outln!("edition portability:       {portability_line}");
 
     let respelled_line = joined_or(
         "(no editions requested)",
@@ -179,7 +179,7 @@ fn print_axes_report(axes: &VersionAxes) {
             format!("{}: {ids}", capitalise(row.edition.as_str()))
         }),
     );
-    outln!("respelled:               {respelled_line}");
+    outln!("respelled:                 {respelled_line}");
 
     let buildable_line = joined_or(
         "(no editions requested)",
@@ -192,14 +192,14 @@ fn print_axes_report(axes: &VersionAxes) {
             )
         }),
     );
-    outln!("buildable targets:       {buildable_line}");
+    outln!("buildable targets:         {buildable_line}");
 
     let intended_line = joined_or(
         "(none declared)",
         ", ",
         axes.intended_targets.iter().cloned(),
     );
-    outln!("intended targets:        {intended_line}");
+    outln!("intended targets:          {intended_line}");
 
     let semantic_line = joined_or(
         "(no editions requested)",
@@ -216,7 +216,17 @@ fn print_axes_report(axes: &VersionAxes) {
             format!("{}: {members}", capitalise(ep.edition.as_str()))
         }),
     );
-    outln!("semantic-sensitive:      {semantic_line}");
+    outln!("semantic-sensitive:        {semantic_line}");
+
+    let recommended_line = joined_or(
+        "(no editions requested)",
+        "   ",
+        axes.recommended_test_targets.iter().map(|rt| {
+            let versions = joined_or("(none)", ", ", rt.versions.iter().cloned());
+            format!("{}: {versions}", capitalise(rt.edition.as_str()))
+        }),
+    );
+    outln!("recommended test targets:  {recommended_line}");
 }
 
 /// One edition's inferred range as its edges, or `none` when no version can lie in it.

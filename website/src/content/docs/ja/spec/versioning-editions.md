@@ -304,17 +304,18 @@ Java のリリースは `1.20.4 / 1.21 / 1.21.4 / 26.3`、Bedrock のリリー�
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-inferred range:          Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-respelled:               Java: none   Bedrock: minecraft:oak_sign
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
-verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
+registry compatibility:    1.21.40 .. latest
+inferred range:            Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+respelled:                 Java: none   Bedrock: minecraft:oak_sign
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
+verified target:           bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
-開いた下端の `0.0` を除き、名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。また、最後のコンパイルでは Bedrock 1.21.60 向けにビルドしています。Bedrock のビルドは Bedrock の表が 1.21.40 で初めて宣言するブロックを塗っており、それが下限を宣言した理由で、Bedrock の推定範囲の始まりでもあります。Java のビルドが塗るものは、Java の推定範囲を区切りません。Bedrock は、ビルドが塗る `@oak_sign` を `standing_sign` として書き出し、`respelled` の行がそれを名指します。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。
+開いた下端の `0.0` を除き、名前が出てくるバージョンは、どれも組み込みパックが宣言しているものです。この出力のもとになったファイルは `@requires version>=1.21.40` を持っているので、Java のすべてのターゲットと Bedrock 1.21.0 が下限を下回っています。また、最後のコンパイルでは Bedrock 1.21.60 向けにビルドしています。Bedrock のビルドは Bedrock の表が 1.21.40 で初めて宣言するブロックを塗っており、それが下限を宣言した理由で、Bedrock の推定範囲の始まりでもあります。Java のビルドが塗るものは、Java の推定範囲を区切りません。Bedrock は、ビルドが塗る `@oak_sign` を `standing_sign` として書き出し、`respelled` の行がそれを名指します。`semantic-sensitive` の行が Java のメンバーだけを示すのは、組み込みのカタログの境界がすべて Java のものだからです。`recommended test targets` の行は、どのバージョンでもビルドできない Java には何も挙げず、Bedrock にはビルドできる最も古いバージョンと最も新しいバージョンを挙げます。その間に Bedrock の境界はないからです。
 
 `intended targets` はファイル自身の `@intended_targets` 行をそのまま写したもので、答えではなく宣言である唯一の行です。`buildable targets` の隣にあるのは、矛盾しうる相手がその行だからです。判定できる半分の比較は [§10.4](#ヒントは下限と突き合わせる) が自動で行い、残りは読み手が突き合わせます。何も宣言していないファイルでも行は消えず、`(none declared)` と表示します。
 
@@ -346,14 +347,15 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-inferred range:          Java: 1.21.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-respelled:               Java: none
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      Java: (none)
-verified target:         (no lock)
+registry compatibility:    1.20.4 .. latest
+inferred range:            Java: 1.21.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+respelled:                 Java: none
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
+verified target:           (no lock)
 ```
 
 `1.20.4 .. latest` は答えのように読めますが、すぐ下の行がそれを否定しています。Java の表が `minecraft:pale_moss_block` を初めて宣言するのは 1.21.4 で、`buildable targets` は拒否したリストに `1.20.4` 自身を入れています。宣言した下限が間違っているのではなく、別の問いに答えているのです。ブロックが 1.21.4 で追加されたことはパックについての事実で、この行が読むのはファイルが宣言した内容だけです。下限は推定範囲の上ではなく下にあるので、2 つが矛盾しているわけでもありません ([§10.4](#下限はレジストリと突き合わせる))。
@@ -367,7 +369,7 @@ verified target:         (no lock)
 この行は、要求された各エディションについて、そのエディションのパックが持つバージョンの区間を示します。ビルドが塗る ID のどれかを初めて宣言するバージョンのうち最も遅いものから、どれかを最後に宣言するバージョンのうち最も早いものまでです。上の hut は `@pale_moss_block` を塗り、Java はそれを 1.21.4 で、Bedrock は 1.21.60 で初めて宣言するので、`--editions java,bedrock` では次のようになります。
 
 ```text
-inferred range:          Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
+inferred range:            Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
 ```
 
 この行は、パックが持つ最も古いバージョンと最も新しいバージョンにそれぞれ固定した 2 回の lowering から読み取ります。`cairn compile --target` がそれぞれのバージョンで走らせるのと同じパスです。最も古いバージョンが欠く ID は、それを宣言する最初のバージョンから範囲を始め、最も新しいバージョンが欠く ID は、それを宣言する最後のバージョンで範囲を終えます。これは、その固定で出る `E_UNKNOWN_ID` が持つ `since` と `until` です ([§10.4](#未知の-id-はどのレジストリに照らして未知なのか))。範囲はそれらの積で、最も遅い始まりと最も早い終わりです。数える ID は、固定した lowering がそのバージョンの表と照合するもので、その固定での綴りで数えます。メンバーのブロック、raw ブロック、ウォークウェイの `path=` で、作者が書いた ID か、パックのマテリアルカタログが選んだ ID かは問いません。ある固定が別の綴りで書き出す正規トークンは、その綴りとして数えます ([§10.4](#未知の-id-はどのレジストリに照らして未知なのか))。そのため、Java 26.3 が `iron_chain` として書き出す `@chain` は何も区切りません。パックが `overrides` の行で特定のバージョン向けに綴り直すカタログトークンも、両方の固定で宣言されているので、何も区切りません。回路の部品は表と照合しないので数えません。各固定はエディションのテーマバリアントを解決するので、1 つのスロットに対して 2 つのエディションが別々の ID を塗ることもあります。
@@ -439,7 +441,7 @@ note: hut.crn:5:17: java's inferred range starts at 1.21.4, the first java targe
 この行は、要求された各エディションについて、ファイルの下限が認めるバージョンがトークン自身のものとは別の ID で書き出す正規トークンを名指します ([マテリアルとテーマ §7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。パックの `aliases` がたどるリネーム、Bedrock のステートマップが独自のブロックとして書き出す Java のブロック、意味トークンが選ぶブロックです。各 ID はソース順に 1 回ずつ挙げ、1 つもなければそのエディションは `none` と表示します。テーマが `@chain`、`@oak_sign`、`@cauldron[fluid=water]` を割り当てるビルドでは、次のようになります。
 
 ```text
-respelled:               Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
+respelled:                 Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
 ```
 
 各トークンは、テーマのスロット、セレクタ行、`path=` のいずれかがそれを割り当てる位置で、書き出す ID と表の組ごとに 1 回、その ID を書き出すバージョンとともに stderr に出力します。
@@ -497,8 +499,6 @@ ID は構造ファイルが名指すものなので、Bedrock が自分の ID �
 
 テキストの行からは、これらは何もわかりません。`buildable targets: Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)` は 5 つの原因のどれでも成り立ちます。どの原因も stderr には出ますが、形は同じではありません。下限に関する 2 つの原因は行の位置を持つ `note:` として、落ちたスコープは位置を持たずスコープ名だけを示す `note:` として、ライターが書き出せないエントリはそのエントリを示す `note:` として、拒否された lowering はそのバージョンの下に指摘そのものとして、それぞれの位置とともに出力します。`reason` が補うのは、この情報を読み取れない JSON の側です。
 
-さらに別の行 `recommended test targets` もこの軸に属し、また別の問い (どのバージョンでテストする価値があるか) に答えます。まだこれを出力するコードはありません。
-
 ### `semantic-sensitive` の行
 
 この行は、2 つ目の軸に、指定されたエディションごとに `Java: <members>   Bedrock: <members>` の形で答えます。各メンバーは `name(reason @boundary)` と書き、そのエディションに該当がなければ `(none)` と書きます。メンバーが建てるブロックを、そのエディションの `semantic_sensitivity` の行が挙げているとき ([Lint §11.4](/ja/spec/lint/#114-制約カタログ))、そのメンバーを、該当する行ごとに 1 回、メンバーの順に挙げます。名前はその `id=` で、持たない場合はアドレス ([構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス)) です。そのため、1 つのブロックを建てる 2 つのメンバーは 2 つの項目になります。ブロックは範囲全体の lowering が建てるもので、`edition portability` の行が読むのも同じなので、Bedrock のブロックは、いずれかのバージョンのステートマップがそれから作るすべての正規のブロックとして読みます。`--format json` はこの行を `semantic_sensitive` として、項目ごとに `{edition, member, reason, boundary_version}` を、指定されたエディションの順に出力します。
@@ -507,6 +507,19 @@ ID は構造ファイルが名指すものなので、Bedrock が自分の ID �
 
 コンパイルは、ターゲット自身についての答えを、そのバージョンがブロックを読むとおりに読んで、ロックの `member_version_sensitivity` に記録します。そして同じエディションの別のバージョン向けに再コンパイルするとき、2 つのバージョンの間に境界があるメンバーについて警告します ([§10.6](#106-来歴-provenance-とロック))。
 
+### `recommended test targets` の行
+
+この行は、ビルドをどのバージョンで読み込んでテストする価値があるかに、指定されたエディションごとに `Java: <versions>   Bedrock: <versions>` の形で答えます。選ぶ対象は、そのエディションの [buildable targets](#buildable-targets-の行)、つまりターゲットを固定した lowering がエラーを出さないサポート対象のバージョンです。
+
+- そのうち最も古いものと最も新しいもの
+- そのエディションの [`semantic-sensitive`](#semantic-sensitive-の行) の項目の境界ごとに、境界より前で最も新しいものと、境界以降で最も古いもの。境界の両側にビルドできるバージョンがある場合に限る
+
+各バージョンは 1 回ずつ、エディションのバージョン表の順に古いものから並べます。意味が変わりうるメンバーのないソースは、ビルドできる最も古いバージョンと最も新しいバージョンだけになります。ビルドできるバージョンがどの境界についても片側にしかないソースも同じです。どのバージョンでもビルドできないエディションは `(none)` です。`--format json` はこの行を `recommended_test_targets` として、指定されたエディションごとに 1 件の `{edition, versions}` を、指定された順に出力します。
+
+ビルドできる最も古いバージョンと最も新しいバージョンは、ビルドが対応をうたう範囲の両端です。その間にある境界では 1 つのソースが 2 通りに読まれるので、この行は、境界に最も近いビルドできるバージョンを両側に 1 つずつ加えます。2 通りの読み方を両方示す、最も近い組です。範囲の外の境界をまたいでも、このソースのビルドには違いが出ないので、`semantic-sensitive` の行がそのメンバーを挙げていても、この行には入れません。サポート対象のすべてのバージョンでビルドでき、Java 1.20.5 でアイテムフォーマットが変わるチェストを持つソースは、`Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60` になります。1.20.4 と 1.21 が 1.20.5 の両側にあり、1.21.4 で確かめられることは 1.21 と 26.3 で確かめられるからです。
+
+ほかの行と同じく、この行は報告するだけで、何も拒否しません。ビルドできるバージョンをこの行が挙げなくても、そのバージョンでビルドできることに変わりはありません。
+
 ### `verified target` の行
 
 この行が読むのは、`--lock` で指定したロックファイルです。指定しなければ、ソースの隣の `<source>.lock` を読みます。これは `cairn compile` が書き出すパスです ([§10.6](#106-来歴-provenance-とロック))。報告するのはそのロックに記録されている内容で、いまビルドしたら検証できるかどうかではありません。ロックが保証するのはそれを書き出したときのビルドで、ロックを読んでも何もビルドしません。
@@ -514,7 +527,7 @@ ID は構造ファイルが名指すものなので、Bedrock が自分の ID �
 スキーマが受け付けるロックについては、そのターゲットと、ソースがいまも `source_hash` と同じハッシュになるかどうか、そして `cairn_version` を表示します。
 
 ```text
-verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
+verified target:           java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
 ```
 
 ターゲットの表記は `W_PREVIOUSLY_VERIFIED_TARGET` の verified 側と同じですが、常にエディションを先頭に置きます。Bedrock では `DataVersion` の代わりに `block version` と書きます。`source unchanged` の代わりに `source changed` と表示された場合、ターゲットを検証したときのファイルがいまとは別の版で、ロックが保証するビルドはこのファイルのものではない、という意味です。そのことは stderr の note で伝えます。ロックは、このパスに書き出す次のコンパイルで書き直されます。`verified` が `false` のロックが記録しているのは検証されていないターゲットなので、行はターゲットの後に `(not verified)` を付けます。コンパイラがそのようなロックを書き出すことはありません。
