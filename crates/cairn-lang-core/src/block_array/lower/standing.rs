@@ -204,15 +204,15 @@ fn word_of<T: Copy>(
                 .map(|near| did_you_mean(&format!("{key}={near}"))),
         );
     }
-    Err(Box::new(diag_invalid_member(
-        member,
-        format!(
-            "unknown {} `{key}={}`",
-            member.role.keyword(),
+    let keyword = member.role.keyword();
+    let primary = match written {
+        Some(word) => format!("unknown {keyword} `{key}={word}`"),
+        None => format!(
+            "{keyword} `{key}=` must be a word, not {}",
             raw.value.describe()
         ),
-        notes,
-    )))
+    };
+    Err(Box::new(diag_invalid_member(member, primary, notes)))
 }
 
 /// Offer a `trade` from the villager its `villager=` names.

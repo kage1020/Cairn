@@ -340,6 +340,49 @@ fn a_villager_offers_the_trades_that_name_it_in_the_order_written() {
 }
 
 #[test]
+fn a_profession_or_level_the_villager_does_not_take_is_refused_with_the_words_it_takes() {
+    const PROFESSIONS: &str = "`profession=` takes none, armorer, butcher, cartographer, cleric, \
+                               farmer, fisherman, fletcher, leatherworker, librarian, mason, \
+                               nitwit, shepherd, toolsmith, weaponsmith";
+    const LEVELS: &str = "`level=` takes novice, apprentice, journeyman, expert, master";
+    let src = room(
+        "villager at=1,1,1 profession=librarin\n  villager at=2,1,1 profession=5\n  \
+         villager at=3,1,1 level=grandmaster\n  villager at=4,1,1 level=6",
+    );
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                "villager at=1,1,1 profession=librarin",
+                "unknown villager `profession=librarin`",
+                vec![PROFESSIONS, "did you mean `profession=librarian`?"],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                "villager at=2,1,1 profession=5",
+                "villager `profession=` must be a word, not integer `5`",
+                vec![PROFESSIONS],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                "villager at=3,1,1 level=grandmaster",
+                "unknown villager `level=grandmaster`",
+                vec![LEVELS],
+            ),
+            (
+                DiagnosticCode::InvalidMember,
+                "villager at=4,1,1 level=6",
+                "villager `level=` must be a word, not integer `6`",
+                vec![LEVELS],
+            ),
+        ],
+    );
+    assert_eq!(placed(&out), []);
+}
+
+#[test]
 fn a_trade_no_villager_offers_is_refused() {
     let src = room("villager id=lib at=2,1,2\n  trade villager=libr buy=book sell=emerald");
     let out = lowered(&src);
