@@ -69,7 +69,9 @@ Evolving surfaces:
   monthly minors after introduction. A new subcommand's flags, output and exit codes are Evolving
   with it, and so are the codes [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such
   a subcommand raises. What a language server command returns is the JSON document of the
-  subcommand it runs, at that document's tier.
+  subcommand it runs, at that document's tier. `cairn diff-blocks` is one such subcommand: its JSON
+  document, which `cairn.diffBlocks` returns, stays Evolving until this document moves it among the
+  Stable surfaces.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records
   its hash as zeros.

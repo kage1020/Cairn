@@ -297,11 +297,13 @@ FILE reaches with all of them appended. When no candidate helps, there is no pat
 
 ### 12.2.4 The report
 
-FILE is built first, each structure it builds is checked by the target's backend as `cairn compile`
-checks it before writing, and its findings print on stderr as `cairn compile` prints them,
-`W_INTENT_DEGRADED` among them. An error, a `@requires` floor no target declaring the blocks the
-build paints clears (`E_REQUIRES_CONFLICT`), a scope the build drops ([Lint
-§11.1](/spec/lint/#lowering)), a floor the stamp falls short of ([Versioning and
+STRUCTURE is read first, so one that cannot be read as its format refuses the run ahead of any
+finding of FILE. FILE is then built, each structure it builds is checked by the target's backend as
+`cairn compile` checks it before writing, and its findings print on stderr as `cairn compile` prints
+them, `W_INTENT_DEGRADED` among them. An error, a `@requires` floor no target declaring the blocks
+the build paints clears (`E_REQUIRES_CONFLICT`, [Versioning and
+Editions](/spec/versioning-editions/#a-floor-is-weighed-against-the-registry)), a scope the build
+drops ([Lint §11.1](/spec/lint/#lowering)), a floor the stamp falls short of ([Versioning and
 Editions](/spec/versioning-editions/)), or a structure the backend refuses refuses the comparison,
 in that order. The refusal on the stamp's floor ends with a note naming the stamp, since the command
 takes no `--target`. When STRUCTURE holds block entity data or entities, a note on stderr says they
@@ -347,9 +349,10 @@ cannot be read as its format write `{"diagnostics": []}` and say the rest on std
 no `E_DECOMPILE_DIFF` under `--format json`: the report's `code` is where it reads.
 
 The exit code is 0 when the lift converges; 1 when it does not, when FILE does not parse, raises an
-error, drops a scope, needs a later target than the stamp or builds a structure the backend refuses,
-or when STRUCTURE cannot be read as its format or was saved past every shipped target; and 2 when
-either file cannot be located or STRUCTURE's extension names no format the command reads.
+error, has a floor no target clears (`E_REQUIRES_CONFLICT`), drops a scope, needs a later target
+than the stamp or builds a structure the backend refuses, or when STRUCTURE cannot be read as its
+format or was saved past every shipped target; and 2 when either file cannot be located or
+STRUCTURE's extension names no format the command reads.
 
 ### 12.2.5 The report in an editor
 
@@ -357,18 +360,20 @@ The language server gives the same answer for a document the editor has open, as
 `workspace/executeCommand` command `cairn.diffBlocks`. Its one argument is an object: `uri`, the
 open document, and `structure`, the `file:` URI of the structure file. The result is the document
 `cairn diff-blocks --format json` prints for the two ([§12.2.4](#1224-the-report)): the report, or
-the `{"diagnostics": [ ... ]}` document where the source does not build at the stamp, empty for a
-refusal at the run level. Two inputs come from the editor rather than a command line:
+the `{"diagnostics": [ ... ]}` document where the source does not build at the stamp. Two inputs
+differ from a command-line run:
 
 - The source is the text the editor holds, saved or not, so a lift is compared as it is edited, and
   `uri` need not name a file.
 - The structure file is read from disk, as `cairn diff-blocks` reads STRUCTURE.
 
-What `cairn diff-blocks` writes on stderr is not sent: the findings it carries on past, why a run is
-refused, and `E_DECOMPILE_DIFF`, which the document carries as `code`. An argument the command
-cannot read, a document the editor does not have open, a `structure` that names no local file, or a
-file the command cannot read as a structure file is answered with an `InvalidParams` error that says
-which.
+What `cairn diff-blocks` writes on stderr is not sent: the findings it carries on past, and
+`E_DECOMPILE_DIFF`, which the document carries as `code`. An argument the command cannot read, a
+document the editor does not have open, a `structure` that names no local file, or a file the
+command cannot read as a structure file is answered with an `InvalidParams` error that says which. A
+run refused at the run level has no finding to put in the document, and no exit code to say it was
+refused, so it is answered with a `RequestFailed` error carrying the lines `cairn diff-blocks`
+writes on stderr about the refusal, a floor's ending with the note naming the stamp.
 
 ## 12.3 Three tiers of transliteration
 
