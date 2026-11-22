@@ -111,7 +111,7 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 - A per-source lockfile, and registry packs carrying per-version block IDs, rename aliases and meaning tokens, so a canonical token is written the way each target spells it.
 - A constraint catalog beside the packs: a build pinned to a target warns on a lever or torch with nothing to hold it, sand over air, water that runs out of the structure, and an entity a block, a door or another entity clips, and `cairn info` and the lockfile name the members whose meaning changes at a Java version.
 - Redstone described as logic: `cairn compile` builds each struct's circuit at full size under its floor, wired to its sensors and actuators, and checks its `assert truth`, `latency` and `always` lines against it per edition.
-- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes and the `cairn info` report, plus a [VS Code extension](editors/vscode/).
+- `cairn-lsp` with diagnostics against the target the editor pins, completion, hover, quick-fixes, and the `cairn info` and `cairn diff-blocks` reports, plus a [VS Code extension](editors/vscode/).
 - A tree-sitter grammar, for editors that want highlighting without the language server.
 - A [playground](https://cairn.kage1020.com/playground/) on the documentation site, where `cairn-lang-wasm` compiles a source in the browser as it is typed and offers its structure files to download.
 

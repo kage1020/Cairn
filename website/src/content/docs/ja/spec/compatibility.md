@@ -38,7 +38,7 @@ Stable な面:
 Evolving な面:
 
 - ドラフトと明記された仕様の章や節 ([未決事項](/ja/spec/open-issues/))。また、節が[変更の余地あり](#変更の余地あり)と示した構文。
-- 新しく追加された `cairn` サブコマンドと、`cairn compile`・`cairn check`・`cairn info` に新しく追加されたフラグとフラグの値と、`cairn.info` のような言語サーバーの新しいコマンド ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) の、最初の 3 か月分の月次マイナーリリース。サブコマンドにはそのフラグ、出力、終了コードと、[Lint §11.1](/ja/spec/lint/#111-診断コード) が挙げるコードのうちそのサブコマンドだけが出すものも含みます。`cairn.info` が返すのは `cairn info` の JSON 文書で、その文書のティアに従います。
+- 新しく追加された `cairn` サブコマンドと、`cairn compile`・`cairn check`・`cairn info` に新しく追加されたフラグとフラグの値と、`cairn.info` ([§10.5](/ja/spec/versioning-editions/#エディタでのレポート)) や `cairn.diffBlocks` ([§12.2.5](/ja/spec/ecosystem-interop/#1225-エディタでのレポート)) のような言語サーバーの新しいコマンドの、最初の 3 か月分の月次マイナーリリース。サブコマンドにはそのフラグ、出力、終了コードと、[Lint §11.1](/ja/spec/lint/#111-診断コード) が挙げるコードのうちそのサブコマンドだけが出すものも含みます。言語サーバーのコマンドが返すのは、それが実行するサブコマンドの JSON 文書で、その文書のティアに従います。`cairn diff-blocks` もそのようなサブコマンドの 1 つです。`cairn.diffBlocks` が返すその JSON 文書は、この文書が Stable な面に移すまで Evolving のままです。
 - レジストリパックと制約カタログのファイル構成 (それらの *ハッシュ* は Stable なロックの意味に含まれますが、*内部構造* は Evolving です)、そして組み込みのカタログが挙げるブロック。そのため、あるリリースが、以前のリリースが通したソースに制約の検査や `semantic-sensitive` の項目を出すことがあります ([Lint §11.4](/ja/spec/lint/#114-制約カタログ))。
 - tier-2 のブロック。各 tier-1 のトークンが、ターゲットごとに解決するブロックです ([§7.2](/ja/spec/materials-themes/#tier-1-のトークン))。
 - 正規ブロックトークン。ターゲットが受け付ける名前 (そのレジストリパックに従います) と、それぞれがそのターゲットで指すブロックです ([§7.3](/ja/spec/materials-themes/#73-バージョンとエディションをまたぐ対応付け))。
@@ -71,7 +71,7 @@ Internal な面:
 | `.crn` の構文 (5〜9 章、§10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | ロックファイルの形式 | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` のフラグ | Evolving | Evolving | **Stable** | Stable | Stable |
-| 言語サーバーのコマンド (`cairn.info`) | Evolving | Evolving | **Stable** | Stable | Stable |
+| 言語サーバーのコマンド (`cairn.info`、`cairn.diffBlocks`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | 診断コード (`E_*`、`W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | tier-1 のトークン | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP の通信プロトコル (LSP 標準) | — | — | — | **Stable** | Stable |

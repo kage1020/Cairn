@@ -48,7 +48,7 @@ function handle(message: Message): void {
       record({ id, received: message.method });
       // Echoed unless the test sets an answer, so it reads the request back
       // from what the editor shows.
-      const answer = process.env.CAIRN_TEST_INFO_ANSWER;
+      const answer = process.env.CAIRN_TEST_COMMAND_ANSWER;
       const reply = answer
         ? (JSON.parse(answer) as object)
         : { result: message.params };

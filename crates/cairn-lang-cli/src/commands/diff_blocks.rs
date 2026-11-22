@@ -2,203 +2,105 @@
 //! stamped target, the voxel diff that closes the lift loop (`spec/ecosystem-interop` "Diffing a
 //! lift").
 
-use std::borrow::Cow;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::ExitCode;
 
-use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_core::check::LineStarts;
-use cairn_lang_core::voxel_diff::{
-    DiffInput, DiffReport, Metrics, Thresholds, diff, floor3, percent,
+use cairn_lang_core::voxel_diff::{DiffReport, Metrics, Thresholds, floor3, percent};
+use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, DiffBlocksRun, diff_blocks};
+use cairn_lang_formats::import::{
+    DecodeFileError, DecodedStructure, LossKind, decode_structure_file,
 };
-use cairn_lang_core::{Edition, parse};
-use cairn_lang_formats::bedrock_structure::frames_as_blocks;
-use cairn_lang_formats::build::artifact::prepare_artifact;
-use cairn_lang_formats::build::finding::Found;
-use cairn_lang_formats::build::lowering::{BuildRefusal, Lowered, lower_for_target};
-use cairn_lang_formats::build::run_level::{RunLevelMessage, floor_refusal_message, partial_build};
-use cairn_lang_formats::build::scopes::built_scopes;
-use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::import::{DecodedStructure, ImportFormat, LossKind, decode_structure};
-use serde::Serialize;
+use cairn_lang_formats::info::FailureDocument;
 
 use crate::cli::DiffFormat;
-use crate::pipeline::load_module;
-use crate::report::{
-    print_json, report_diagnostics, report_failure_document, report_run_level,
-    report_structure_message,
-};
-use crate::structure_file::{file_name, open_structure, refuse_extension};
+use crate::pipeline::read_source;
+use crate::report::{print_json, report_diagnostics, report_run_level, report_structure_message};
+use crate::structure_file::refuse_extension;
 
 /// How many regions the text report lists before it counts the rest.
 const LISTED_REGIONS: usize = 10;
 
 pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat) -> ExitCode {
-    let report = format.failure_report();
-    let Some(structure_format) = ImportFormat::from_path(structure) else {
-        refuse_extension(structure, "diff-blocks");
-        return ExitCode::from(2);
-    };
-    let reader = match open_structure(structure) {
-        Ok(reader) => reader,
+    let source = match read_source(file) {
+        Ok(source) => source,
         Err(code) => return code,
     };
-    let (source, module) = match load_module(file, report) {
-        Ok(loaded) => loaded,
-        Err(code) => return code,
-    };
-    let decoded = match decode_structure(reader, structure_format, &file_name(structure)) {
+    let decoded = match decode_structure_file(structure) {
         Ok(decoded) => decoded,
+        Err(DecodeFileError::UnknownExtension(_)) => {
+            refuse_extension(structure, "diff-blocks");
+            return ExitCode::from(2);
+        }
         Err(err) => {
-            eprintln!("error: cannot compare `{}`: {err}", structure.display());
-            return refused(file, &source, format);
+            eprintln!("error: {err}");
+            return match err {
+                DecodeFileError::Io { source, .. } if source.kind() == ErrorKind::NotFound => {
+                    ExitCode::from(2)
+                }
+                DecodeFileError::Io { .. } => ExitCode::from(1),
+                _ => undecoded(format),
+            };
         }
     };
-    let edition = decoded.stamp.edition();
-    let lowered = lower_for_target(
-        &module,
-        edition,
-        resolve_target(edition, decoded.stamp.mc_version()),
-    );
-    let target = match compared_target(structure, file, format, &source, &lowered) {
-        Ok(target) => target,
-        Err(code) => return code,
-    };
-    match checked_by_backend(&lowered.block_ir, target) {
-        Ok(degraded) => degraded.iter().for_each(report_structure_message),
-        Err(refusal) => {
-            report_structure_message(&refusal);
-            return refused(file, &source, format);
-        }
+    let run = diff_blocks(&source, &decoded);
+    report_run(file, &source, format, &run);
+    if format == DiffFormat::Json
+        && let Err(code) = print_json("the diff", &run.json_document(&source))
+    {
+        return code;
     }
+    let Ok(compared) = &run.outcome else {
+        return ExitCode::from(1);
+    };
     if let Some(unread) = uncompared(&decoded) {
         eprintln!(
             "note: only blocks are compared, not the {unread} `{}` holds",
             structure.display()
         );
     }
-    let build = |text: &str| build_candidate(text, edition, target);
-    let verdict = diff(&DiffInput {
-        structure: decoded.bodies(),
-        source: &source,
-        module: &lowered.ir,
-        built: &as_saved(edition, Cow::Borrowed(&lowered.block_ir)),
-        build: &build,
-    });
-    match format {
-        DiffFormat::Text => print_text(structure, file, &decoded, &verdict),
-        DiffFormat::Json => {
-            let document = DiffDocument {
-                structure: &decoded.file_name,
-                target: TargetDocument {
-                    edition,
-                    version: target.mc_version(),
-                },
-                saved: decoded.stamp.saved_label(),
-                report: &verdict,
-            };
-            if let Err(code) = print_json("the diff", &document) {
-                return code;
-            }
-        }
+    let report = &compared.document.report;
+    if format == DiffFormat::Text {
+        print_text(structure, file, &decoded, report);
     }
-    if verdict.converged {
+    if report.converged {
         return ExitCode::SUCCESS;
     }
     if format == DiffFormat::Text {
-        report_unconverged(file, &verdict);
+        report_unconverged(file, report);
     }
     ExitCode::from(1)
 }
 
-/// The target `lowered` is compared at, after reporting what it found, or the exit code when it
-/// refuses the comparison: an error, a conflicting floor, a scope it dropped, or a `@requires`
-/// floor the stamped target falls short of.
-fn compared_target<'a>(
-    structure: &Path,
-    file: &Path,
-    format: DiffFormat,
-    source: &str,
-    lowered: &'a Lowered,
-) -> Result<&'a ResolvedTarget, ExitCode> {
-    let findings: Vec<Found> = lowered
-        .block_ir
-        .diagnostics
-        .iter()
-        .cloned()
-        .map(Found::Core)
-        .chain(lowered.circuits.iter().cloned().map(Found::Circuit))
-        .collect();
-    let report = format.failure_report();
+/// The exit of a structure that cannot be read as its format; under `--format json`, one document
+/// per input still, `{"diagnostics": []}`.
+fn undecoded(format: DiffFormat) -> ExitCode {
+    if format == DiffFormat::Json
+        && let Err(code) = print_json("diagnostics", &FailureDocument::new(Vec::new()))
+    {
+        return code;
+    }
+    ExitCode::from(1)
+}
+
+/// Report on stderr what building the source found, beside the document under `--format json`,
+/// and why a refused run compares nothing.
+fn report_run(file: &Path, source: &str, format: DiffFormat, run: &DiffBlocksRun) {
     let lines = LineStarts::new(source);
-    // As in `compile`, every conflict is reported, beside the error findings too.
-    let report_conflicts = || {
-        for conflict in &lowered.conflicts {
-            report_run_level(file, source, &lines, conflict);
-        }
-    };
-    let refusal = match lowered.verdict() {
-        Ok(target) => {
-            report_diagnostics(file, source, &lines, &findings);
-            return Ok(target);
-        }
-        Err(BuildRefusal::Findings) => {
-            let code = report_failure_document(file, source, report, &findings);
-            report_conflicts();
-            return Err(code);
-        }
-        Err(refusal) => refusal,
-    };
-    report_diagnostics(file, source, &lines, &findings);
-    report_conflicts();
-    match refusal {
-        BuildRefusal::Findings | BuildRefusal::Conflicts => {}
-        BuildRefusal::RunLevel(_) if !lowered.dropped_scopes.is_empty() => {
-            let message = partial_build(
-                &lowered.dropped_scopes,
-                built_scopes(&lowered.block_ir),
-                "refusing to compare a partial build",
-            );
-            report_run_level(file, source, &lines, &message);
-        }
-        BuildRefusal::RunLevel(message) => report_run_level(file, source, &lines, &message),
-        BuildRefusal::Floor(refusal) => {
-            report_run_level(file, source, &lines, &floor_refusal_message(refusal));
-            if let Ok(target) = &lowered.target {
-                eprintln!(
-                    "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, \
-                     so its `@requires` must admit that target",
-                    structure.display(),
-                    target.edition(),
-                    target.mc_version(),
-                );
+    let in_document = matches!(run.outcome, Err(DiffBlocksRefusal::Findings { .. }))
+        && format == DiffFormat::Json;
+    if !in_document {
+        report_diagnostics(file, source, &lines, &run.findings);
+    }
+    match &run.outcome {
+        Ok(compared) => compared.degraded.iter().for_each(report_structure_message),
+        Err(refusal) => {
+            for message in refusal.messages() {
+                report_run_level(file, source, &lines, message);
             }
         }
     }
-    Err(refused(file, source, format))
-}
-
-/// The exit of a refusal reported on stderr; under `--format json`, one document per input
-/// still, `{"diagnostics": []}`.
-fn refused(file: &Path, source: &str, format: DiffFormat) -> ExitCode {
-    let none: [Found; 0] = [];
-    match format {
-        DiffFormat::Json => report_failure_document(file, source, format.failure_report(), &none),
-        DiffFormat::Text => ExitCode::from(1),
-    }
-}
-
-/// Each structure of `block_ir` checked by `target`'s backend as `cairn compile` checks it before
-/// writing: the `W_INTENT_DEGRADED` warnings, or the first refusal.
-fn checked_by_backend(
-    block_ir: &BlockArrayIr,
-    target: &ResolvedTarget,
-) -> Result<Vec<RunLevelMessage>, RunLevelMessage> {
-    let mut degraded = Vec::new();
-    for (scope, array) in &block_ir.structures {
-        degraded.extend(prepare_artifact(block_ir, scope, array, target)?.degraded);
-    }
-    Ok(degraded)
 }
 
 /// What `decoded` holds besides blocks, which the comparison leaves out, `None` when nothing.
@@ -211,43 +113,6 @@ fn uncompared(decoded: &DecodedStructure) -> Option<&'static str> {
         (false, true) => Some("entities"),
         (false, false) => None,
     }
-}
-
-/// What `text` builds at `target`, `None` when the build or the backend refuses it.
-fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Option<BlockArrayIr> {
-    let module = parse(text).ok()?;
-    let lowered = lower_for_target(&module, edition, Ok(target.clone()));
-    if lowered.verdict().is_err() || checked_by_backend(&lowered.block_ir, target).is_err() {
-        return None;
-    }
-    Some(as_saved(edition, Cow::Owned(lowered.block_ir)).into_owned())
-}
-
-/// The blocks `block_ir` saves as on `edition`: on Bedrock, each item frame as its block.
-fn as_saved(edition: Edition, block_ir: Cow<'_, BlockArrayIr>) -> Cow<'_, BlockArrayIr> {
-    match edition {
-        Edition::Java => block_ir,
-        Edition::Bedrock => Cow::Owned(frames_as_blocks(&block_ir)),
-    }
-}
-
-/// The document `--format json` prints.
-#[derive(Serialize)]
-struct DiffDocument<'a> {
-    /// The structure file's name.
-    structure: &'a str,
-    /// The structure's stamp, which the source is built at.
-    target: TargetDocument<'a>,
-    /// The version the structure was saved at.
-    saved: String,
-    #[serde(flatten)]
-    report: &'a DiffReport,
-}
-
-#[derive(Serialize)]
-struct TargetDocument<'a> {
-    edition: Edition,
-    version: &'a str,
 }
 
 /// The metrics as three report lines, each with the threshold it converges at.

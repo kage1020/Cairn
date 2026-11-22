@@ -143,7 +143,7 @@ error[E_DECOMPILE_DIFF]: block IoU = 0.962 < threshold 0.985
 
 ### 12.2.4 レポート
 
-まず FILE を組み、組んだ構造物それぞれを `cairn compile` が書き出す前に確かめるのと同じようにターゲットのバックエンドで確かめ、その診断を `W_INTENT_DEGRADED` も含めて `cairn compile` と同じように stderr に出します。エラー、どのターゲットでも満たせない `@requires` の下限 (`E_REQUIRES_CONFLICT`、[バージョンとエディション](/ja/spec/versioning-editions/#下限はレジストリと突き合わせる))、組むときに落ちたスコープ ([lint §11.1](/ja/spec/lint/#lowering))、記録されたターゲットが満たさない `@requires` の下限 ([バージョンとエディション](/ja/spec/versioning-editions/))、バックエンドが拒否する構造物は、比較を拒否します。このコマンドは `--target` を受け取らないので、記録されたターゲットの下限による拒否は、記録されたターゲットを示す note で終わります。STRUCTURE がブロックエンティティのデータかエンティティを持つときは、どちらの形式でも、それを比べないことを stderr の note で伝えます。
+まず STRUCTURE を読むので、その形式として読めない STRUCTURE は、FILE の診断より先に実行を拒否します。次に FILE を組み、組んだ構造物それぞれを `cairn compile` が書き出す前に確かめるのと同じようにターゲットのバックエンドで確かめ、その診断を `W_INTENT_DEGRADED` も含めて `cairn compile` と同じように stderr に出します。エラー、ビルドが塗るブロックを宣言するどのターゲットも満たさない `@requires` の下限 (`E_REQUIRES_CONFLICT`、[バージョンとエディション](/ja/spec/versioning-editions/#下限はレジストリと突き合わせる))、組むときに落ちたスコープ ([lint §11.1](/ja/spec/lint/#lowering))、記録されたターゲットが満たさない下限 ([バージョンとエディション](/ja/spec/versioning-editions/))、バックエンドが拒否する構造物は、この順に比較を拒否します。このコマンドは `--target` を受け取らないので、記録されたターゲットの下限による拒否は、記録されたターゲットを示す note で終わります。STRUCTURE がブロックエンティティのデータかエンティティを持つときは、どちらの形式でも、それを比べないことを stderr の note で伝えます。
 
 テキストのレポートは stdout に次を出します。
 
@@ -171,9 +171,18 @@ error[E_DECOMPILE_DIFF]: block IoU = 0.962 < threshold 0.985
 | `regions` | すべての領域。`kind`、`body`、`[x, y, z]` の形の `from` と `to`、`cells`、`mat`。replaced の領域では `built`。state の領域では `states` で、`key` ごとに `structure` と `built` の値 (書かない側は `null`)。`cause` はその `kind` と、メンバーを示す 3 つでは `member` (`keyword`、書かれていれば `id`、`address`、`line`)。その領域で見つけて残した行があれば `patch`。 |
 | `patch` | 行を残したときだけある。順に並べた `edits`、達する指標、その `counts`。 |
 
-FILE が記録されたターゲットで組めないとき、文書は `cairn lower` が書くのと同じ、診断を並べた `{"diagnostics": [ ... ]}` です。実行全体の拒否 (落ちたスコープ、下限、バックエンドが拒否する構造物) と、その形式として読めない STRUCTURE では `{"diagnostics": []}` を書き、残りは stderr で伝えます。`--format json` では stderr に `E_DECOMPILE_DIFF` を出しません。それを読むのはレポートの `code` です。
+FILE が記録されたターゲットで組めないとき、文書は `cairn lower` が書くのと同じ、診断を並べた `{"diagnostics": [ ... ]}` です。実行全体の拒否 (矛盾する下限、落ちたスコープ、記録されたターゲットが満たさない下限、バックエンドが拒否する構造物) と、その形式として読めない STRUCTURE では `{"diagnostics": []}` を書き、残りは stderr で伝えます。`--format json` では stderr に `E_DECOMPILE_DIFF` を出しません。それを読むのはレポートの `code` です。
 
-終了コードは、リフトが収束すれば 0 です。収束しないとき、FILE が構文解析できない、エラーを出す、スコープを落とす、記録されたターゲットより後のターゲットを必要とする、バックエンドが拒否する構造物を組むとき、または STRUCTURE がその形式として読めない、出荷するどのターゲットより後に保存されたときは 1 です。どちらかのファイルが見つからないとき、STRUCTURE の拡張子がこのコマンドの読む形式を示さないときは 2 です。
+終了コードは、リフトが収束すれば 0 です。収束しないとき、FILE が構文解析できない、エラーを出す、どのターゲットも満たさない下限を持つ (`E_REQUIRES_CONFLICT`)、スコープを落とす、記録されたターゲットより後のターゲットを必要とする、バックエンドが拒否する構造物を組むとき、または STRUCTURE がその形式として読めない、出荷するどのターゲットより後に保存されたときは 1 です。どちらかのファイルが見つからないとき、STRUCTURE の拡張子がこのコマンドの読む形式を示さないときは 2 です。
+
+### 12.2.5 エディタでのレポート
+
+言語サーバーは、エディタで開いている文書に対して、同じ答えを `workspace/executeCommand` のコマンド `cairn.diffBlocks` として返します。引数は 1 つのオブジェクトで、開いている文書の `uri` と、構造ファイルの `file:` URI である `structure` を持ちます。結果は、`cairn diff-blocks --format json` がその 2 つに対して出力する文書です ([§12.2.4](#1224-レポート))。つまり、レポートか、記録されたターゲットでソースが組めないときの `{"diagnostics": [ ... ]}` の文書です。コマンドラインでの実行とは、次の 2 つの入力が異なります。
+
+- ソースはエディタが保持するテキストで、保存したかどうかは問いません。編集しているそのままのリフトを比べるので、`uri` はファイルを示していなくてもかまいません。
+- 構造ファイルは、`cairn diff-blocks` が STRUCTURE を読むのと同じく、ディスクから読みます。
+
+`cairn diff-blocks` が stderr に書くもの、つまり報告して先へ進む診断と、文書が `code` として持つ `E_DECOMPILE_DIFF` は送りません。コマンドが読めない引数、エディタで開いていない文書、ローカルのファイルを示さない `structure`、構造ファイルとして読めないファイルには、どれであるかを示す `InvalidParams` エラーで答えます。実行全体の拒否には文書に入れる診断がなく、拒否を伝える終了コードもないので、`cairn diff-blocks` がその拒否について stderr に書く行を持つ `RequestFailed` エラーで答えます。下限による拒否の行は、記録されたターゲットを示す note で終わります。
 
 ## 12.3 写し取りの 3 段階
 

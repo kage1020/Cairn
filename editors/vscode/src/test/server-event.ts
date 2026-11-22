@@ -16,6 +16,19 @@ export interface ShowInfo {
 }
 
 /**
+ * How a test runs `Cairn: Diff Blocks`: the file it writes what the command
+ * did to, as `{ opened?, message?, filters? }` JSON, and the structure file it
+ * compares the `.crn` file the window opened with. With `dialog`, the command
+ * asks for the file, and the open dialog, whose `filters` it writes, picks
+ * `structure` or is cancelled.
+ */
+export interface DiffBlocks {
+  readonly to: string;
+  readonly structure: string;
+  readonly dialog?: "pick" | "cancel";
+}
+
+/**
  * A line a stand-in appends to the shared record: its launch, a lifecycle
  * method it received, the client commands `initialize` declared, the pin a
  * configuration change carried, or its exit code.

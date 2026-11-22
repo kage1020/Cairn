@@ -14,7 +14,12 @@ import { pathToFileURL } from "node:url";
 import { test, type TestContext } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { runTests } from "@vscode/test-electron";
-import type { Pin, ServerEvent, ShowInfo } from "./server-event";
+import type {
+  DiffBlocks,
+  Pin,
+  ServerEvent,
+  ShowInfo,
+} from "./server-event";
 
 const EXTENSION_ROOT = resolve(__dirname, "..", "..");
 const FAKE_SERVER = join(__dirname, "fake-cairn-lsp.js");
@@ -98,6 +103,8 @@ interface Run {
   readonly setTarget?: readonly [string, string];
   /** How `Cairn: Show Info` runs once the extension is active. */
   readonly showInfo?: ShowInfo;
+  /** How `Cairn: Diff Blocks` runs once the extension is active. */
+  readonly diffBlocks?: DiffBlocks;
   /** The JSON-RPC `result` or `error` member a stand-in answers a command with. */
   readonly commandAnswer?: object;
 }
@@ -193,7 +200,8 @@ class Fixture {
         CAIRN_TEST_RECORD: this.record,
         CAIRN_TEST_SET_TARGET: run.setTarget && JSON.stringify(run.setTarget),
         CAIRN_TEST_SHOW_INFO: run.showInfo && JSON.stringify(run.showInfo),
-        CAIRN_TEST_INFO_ANSWER:
+        CAIRN_TEST_DIFF_BLOCKS: run.diffBlocks && JSON.stringify(run.diffBlocks),
+        CAIRN_TEST_COMMAND_ANSWER:
           run.commandAnswer && JSON.stringify(run.commandAnswer),
       },
     });
@@ -317,7 +325,7 @@ function settingsAt(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
 
-/** What `Cairn: Show Info` did, as the test host wrote it to `path`. */
+/** What a report command did, as the test host wrote it to `path`. */
 function shownAt(path: string): unknown {
   return JSON.parse(readFileSync(path, "utf8"));
 }
@@ -495,7 +503,7 @@ test(
     const fixture = new Fixture(t);
     const server = fixture.pathServer;
     const to = join(fixture.root, "shown.json");
-    const refused = { diagnostics: [] };
+    const refused = { diagnostics: [{ code: "E_UNKNOWN_MATERIAL" }] };
     await fixture.expectLaunches(
       { user: {}, showInfo: { to }, commandAnswer: { result: refused } },
       [probe(server), probe(server), commandSession(server)],
@@ -510,20 +518,25 @@ test(
 );
 
 test(
-  "Cairn: Show Info shows the error cairn.info answers",
+  "Cairn: Show Info shows why cairn.info has no report, and any other error it answers",
   POSIX_ONLY,
   async (t) => {
-    const fixture = new Fixture(t);
-    const server = fixture.pathServer;
-    const to = join(fixture.root, "shown.json");
-    const error = { code: -32803, message: "no report" };
-    await fixture.expectLaunches(
-      { user: {}, showInfo: { to }, commandAnswer: { error } },
-      [probe(server), probe(server), commandSession(server)],
-    );
-    assert.deepEqual(shownAt(to), {
-      message: "cairn-lsp answered cairn.info with an error: no report",
-    });
+    for (const [error, message] of [
+      [{ code: -32803, message: "no report" }, "no report"],
+      [
+        { code: -32602, message: "bad arguments" },
+        "cairn-lsp answered cairn.info with an error: bad arguments",
+      ],
+    ] as const) {
+      const fixture = new Fixture(t);
+      const server = fixture.pathServer;
+      const to = join(fixture.root, "shown.json");
+      await fixture.expectLaunches(
+        { user: {}, showInfo: { to }, commandAnswer: { error } },
+        [probe(server), probe(server), commandSession(server)],
+      );
+      assert.deepEqual(shownAt(to), { message }, error.message);
+    }
   },
 );
 
@@ -570,5 +583,100 @@ test(
         "Cairn: Show Info needs cairn-lsp, which is not running. " +
         "See the Output panel (Cairn Language Server) for why.",
     });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks opens what cairn.diffBlocks answers for the document and a structure file",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    await fixture.expectLaunches(
+      { user: {}, diffBlocks: { to, structure } },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    const request = {
+      command: "cairn.diffBlocks",
+      arguments: [
+        {
+          uri: pathToFileURL(fixture.document).href,
+          structure: pathToFileURL(structure).href,
+        },
+      ],
+    };
+    assert.deepEqual(shownAt(to), {
+      opened: `${JSON.stringify(request, null, 2)}\n`,
+    });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks shows the lines that refuse a run as a whole",
+  POSIX_ONLY,
+  async (t) => {
+    const fixture = new Fixture(t);
+    const server = fixture.pathServer;
+    const to = join(fixture.root, "shown.json");
+    const structure = join(fixture.root, "main.nbt");
+    writeFileSync(structure, "");
+    const message =
+      "`cairn.diffBlocks` has no report for file:///main.crn, and no finding refused it:\n" +
+      "error[E_PARTIAL_BUILD]: /main.crn: 1 of 2 requested scopes did not lower; refusing to " +
+      "compare a partial build\n  note: `site::s::b` produced no voxels";
+    await fixture.expectLaunches(
+      {
+        user: {},
+        diffBlocks: { to, structure },
+        commandAnswer: { error: { code: -32803, message } },
+      },
+      [probe(server), probe(server), commandSession(server)],
+    );
+    assert.deepEqual(shownAt(to), { message });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks asks for a structure file, and does nothing when none is picked",
+  POSIX_ONLY,
+  async (t) => {
+    const filters = {
+      "Structure files": ["nbt", "litematic", "schem", "mcstructure"],
+    };
+    for (const dialog of ["pick", "cancel"] as const) {
+      const fixture = new Fixture(t);
+      const server = fixture.pathServer;
+      const to = join(fixture.root, "shown.json");
+      const structure = join(fixture.root, "picked.schem");
+      writeFileSync(structure, "");
+      const picked = dialog === "pick";
+      await fixture.expectLaunches(
+        { user: {}, diffBlocks: { to, structure, dialog } },
+        [
+          probe(server),
+          probe(server),
+          picked ? commandSession(server) : session(server, [UNPINNED]),
+        ],
+      );
+      const request = {
+        command: "cairn.diffBlocks",
+        arguments: [
+          {
+            uri: pathToFileURL(fixture.document).href,
+            structure: pathToFileURL(structure).href,
+          },
+        ],
+      };
+      assert.deepEqual(
+        shownAt(to),
+        picked
+          ? { opened: `${JSON.stringify(request, null, 2)}\n`, filters }
+          : { filters },
+        dialog,
+      );
+    }
   },
 );

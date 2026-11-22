@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
+use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::finding::Found;
+use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, diff_blocks};
+use cairn_lang_formats::import::decode_structure_file;
 use cairn_lang_formats::info::{
     EditionsRefused, InfoRequest, InfoSink, ReportFormat, RequestedEditions, info,
     requested_editions,
@@ -15,8 +18,12 @@ use crate::store::DocumentStore;
 /// (`spec/versioning-editions` "The report in an editor").
 pub const INFO: &str = "cairn.info";
 
+/// The command answering with the document `cairn diff-blocks --format json` prints for an open
+/// source and a structure file (`spec/ecosystem-interop` "The report in an editor").
+pub const DIFF_BLOCKS: &str = "cairn.diffBlocks";
+
 /// Every command the server runs, as `initialize` advertises them.
-pub const COMMANDS: &[&str] = &[INFO];
+pub const COMMANDS: &[&str] = &[INFO, DIFF_BLOCKS];
 
 /// Why a command did not run: the JSON-RPC error its response carries.
 #[derive(Debug, PartialEq, Eq)]
@@ -45,6 +52,15 @@ struct InfoArguments {
     editions: Option<Vec<String>>,
 }
 
+/// `cairn.diffBlocks`' one argument.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiffBlocksArguments {
+    uri: lsp_types::Uri,
+    /// The structure file's `file:` URI.
+    structure: lsp_types::Uri,
+}
+
 /// Runs the command `params` names over the documents `store` holds, returning its result.
 ///
 /// # Errors
@@ -63,6 +79,7 @@ pub fn execute_command(
         })?;
     match params.command.as_str() {
         INFO => run_info(store, params.arguments),
+        DIFF_BLOCKS => run_diff_blocks(store, params.arguments),
         other => Err(CommandRefused::invalid_params(format!(
             "unknown command `{other}`; this server runs {}",
             COMMANDS
@@ -90,13 +107,7 @@ fn run_info(
         Some(editions) => requested_editions(&editions)
             .map_err(|refused| CommandRefused::invalid_params(editions_refused(&refused)))?,
     };
-    let source = store.get(&uri).ok_or_else(|| {
-        CommandRefused::invalid_params(format!(
-            "`{INFO}` reports on a document the editor has open, and {} is not open; send \
-             `textDocument/didOpen` for it first",
-            uri.as_str(),
-        ))
-    })?;
+    let source = open_document(store, INFO, &uri)?;
     let file = file_path(&uri).ok_or_else(|| {
         CommandRefused::invalid_params(format!(
             "`{INFO}` reads the lock beside the source, so it needs a local `file:` URI, and got \
@@ -126,10 +137,68 @@ fn run_info(
         }
         Err(refused) => serde_json::to_value(refused.document(source)),
     };
-    document.map_err(|err| CommandRefused {
+    document.map_err(|err| unserialisable(INFO, &err))
+}
+
+/// `cairn.diffBlocks` over the open document and the structure file its argument names.
+fn run_diff_blocks(
+    store: &DocumentStore,
+    arguments: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, CommandRefused> {
+    let usage = "takes one argument, `{ \"uri\": <document>, \"structure\": <file> }`";
+    let [argument] = <[serde_json::Value; 1]>::try_from(arguments).map_err(|arguments| {
+        CommandRefused::invalid_params(format!(
+            "`{DIFF_BLOCKS}` {usage}, and got {}",
+            arguments.len()
+        ))
+    })?;
+    let DiffBlocksArguments { uri, structure } = serde_json::from_value(argument)
+        .map_err(|err| CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` {usage}: {err}")))?;
+    let source = open_document(store, DIFF_BLOCKS, &uri)?;
+    let path = file_path(&structure).ok_or_else(|| {
+        CommandRefused::invalid_params(format!(
+            "`{DIFF_BLOCKS}` reads the structure file from disk, so `structure` needs a local \
+             `file:` URI, and got {}",
+            structure.as_str(),
+        ))
+    })?;
+    let decoded = decode_structure_file(&path).map_err(|err| {
+        CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` `structure`: {err}"))
+    })?;
+    let run = diff_blocks(source, &decoded);
+    match &run.outcome {
+        Ok(_) | Err(DiffBlocksRefusal::Findings { .. }) => {}
+        // No finding to put in the document, and no exit code to say the run was refused.
+        Err(refusal) => {
+            let file = file_path(&uri).map_or_else(
+                || uri.as_str().to_owned(),
+                |file| file.display().to_string(),
+            );
+            let lines = LineStarts::new(source);
+            let refusal: Vec<String> = refusal
+                .messages()
+                .iter()
+                .flat_map(|message| message.lines(&file, source, &lines))
+                .collect();
+            return Err(CommandRefused {
+                code: ErrorCode::RequestFailed as i32,
+                message: format!(
+                    "`{DIFF_BLOCKS}` has no report for {}, and no finding refused it:\n{}",
+                    uri.as_str(),
+                    refusal.join("\n"),
+                ),
+            });
+        }
+    }
+    serde_json::to_value(run.json_document(source)).map_err(|err| unserialisable(DIFF_BLOCKS, &err))
+}
+
+/// The error answering a document `command` could not serialise.
+fn unserialisable(command: &str, err: &serde_json::Error) -> CommandRefused {
+    CommandRefused {
         code: ErrorCode::InternalError as i32,
-        message: format!("failed to serialise the `{INFO}` document: {err}"),
-    })
+        message: format!("failed to serialise the `{command}` document: {err}"),
+    }
 }
 
 /// Why `cairn.info`'s `editions` names nothing to report on.
@@ -144,6 +213,21 @@ fn editions_refused(refused: &EditionsRefused) -> String {
         ),
         EditionsRefused::Unknown(unknown) => format!("`{INFO}` `editions`: {unknown}"),
     }
+}
+
+/// The text the editor holds for `uri`, or the refusal saying `command` needs it open.
+fn open_document<'a>(
+    store: &'a DocumentStore,
+    command: &str,
+    uri: &lsp_types::Uri,
+) -> Result<&'a str, CommandRefused> {
+    store.get(uri).ok_or_else(|| {
+        CommandRefused::invalid_params(format!(
+            "`{command}` reports on a document the editor has open, and {} is not open; send \
+             `textDocument/didOpen` for it first",
+            uri.as_str(),
+        ))
+    })
 }
 
 /// What `cairn info` writes on stderr, which a response has no place for.

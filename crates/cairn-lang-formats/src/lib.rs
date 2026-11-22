@@ -5,13 +5,15 @@
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
 //! IR, a reader of each, the import that writes what a reader read as raw members, the registry
 //! packs and portability reports they rely on, the build a front end runs over a source, the
-//! `cairn info` report built on it, and the Java world a structure file is installed into.
+//! `cairn info` report and `cairn diff-blocks` run built on it, and the Java world a structure file
+//! is installed into.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
 mod block_id;
 pub mod build;
 pub mod data_version;
+pub mod diff_blocks;
 mod dims;
 pub mod import;
 pub mod info;
@@ -39,8 +41,9 @@ pub use data_version::{
     resolve_java_target, resolve_target,
 };
 pub use import::{
-    DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport, SavedVersion,
-    SemanticLoss, StampFit, UnshippedVersion, decode_structure, import_raw,
+    DecodeFileError, DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport,
+    SavedVersion, SemanticLoss, StampFit, UnshippedVersion, decode_structure,
+    decode_structure_file, import_raw,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, StoredStructure, StructureReadError,

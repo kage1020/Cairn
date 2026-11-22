@@ -4,7 +4,10 @@ use std::str::FromStr;
 use cairn_lang_core::lock::{
     HashHex, LOCK_SCHEMA_VERSION, LockInputs, LockTarget, Lockfile, hash_source,
 };
-use cairn_lang_core::{CAIRN_VERSION, Edition};
+use cairn_lang_core::{CAIRN_VERSION, Edition, parse};
+use cairn_lang_formats::build::artifact::prepare_artifact;
+use cairn_lang_formats::build::lowering::lower_for_target;
+use cairn_lang_formats::data_version::resolve_target;
 use cairn_lang_formats::info::{InfoDocument, default_lock_path};
 use serde_json::json;
 
@@ -248,8 +251,8 @@ fn each_refusal_says_what_the_command_takes() {
     let store = holding(SHOP, CLEAN);
     let usage = "`cairn.info` takes one argument, `{ \"uri\": <document>, \"editions\"?: [...] }`";
     assert_eq!(
-        run(&store, "cairn.diffBlocks", &json!([])),
-        invalid("unknown command `cairn.diffBlocks`; this server runs `cairn.info`"),
+        run(&store, "cairn.lower", &json!([])),
+        invalid("unknown command `cairn.lower`; this server runs `cairn.info`, `cairn.diffBlocks`"),
     );
     assert_eq!(
         run(&store, INFO, &json!([])),
@@ -361,4 +364,256 @@ fn a_file_uri_decodes_to_the_path_it_names() {
     assert_eq!(file_path(&uri("https://example.com/shop.crn")), None);
     assert_eq!(file_path(&uri("file:shop.crn")), None);
     assert_eq!(file_path(&uri("file:///site/%FF.crn")), None);
+}
+
+/// `CLEAN` with its walls a row short.
+const SHORT_WALLS: &str = "\
+theme t:
+  slot wall -> @stone
+
+struct s size=2x2
+  floor mat_slot=wall
+  walls height=3 mat_slot=wall
+";
+
+/// A directory holding `name`, the `.nbt` that `source` compiles to at Java 1.21.4.
+fn structure_file(source: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+    let module = parse(source).expect("the source parses");
+    let target = resolve_target(Edition::Java, "1.21.4").expect("a shipped target");
+    let lowered = lower_for_target(&module, Edition::Java, Ok(target.clone()));
+    let (scope, array) = lowered.block_ir.structures.first().expect("one struct");
+    let prepared =
+        prepare_artifact(&lowered.block_ir, scope, array, &target).expect("the array prepares");
+    let dir = tempfile::tempdir().expect("a temporary directory");
+    let path = dir.path().join(name);
+    let mut file = std::fs::File::create(&path).expect("the structure file is created");
+    prepared
+        .structure
+        .write(&mut file)
+        .expect("the structure file is written");
+    (dir, path)
+}
+
+/// Each finding's code, line and column, as the failure document lists them.
+fn listed(document: &serde_json::Value) -> Vec<(String, u64, u64)> {
+    document["diagnostics"]
+        .as_array()
+        .expect("a diagnostics array")
+        .iter()
+        .map(|d| {
+            (
+                d["code"].as_str().expect("a code").to_owned(),
+                d["line"].as_u64().expect("a line"),
+                d["col"].as_u64().expect("a column"),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn diff_blocks_answers_with_the_report_cairn_diff_blocks_prints() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding(SHOP, CLEAN);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": SHOP, "structure": file_uri(&path) }]),
+    )
+    .expect("a lift is compared");
+    assert_eq!(
+        [
+            &answer["structure"],
+            &answer["target"],
+            &answer["saved"],
+            &answer["converged"],
+            &answer["block_iou"],
+            &answer["regions"],
+        ],
+        [
+            &json!("s.nbt"),
+            &json!({ "edition": "java", "version": "1.21.4" }),
+            &json!("DataVersion 4189 (1.21.4)"),
+            &json!(true),
+            &json!(1.0),
+            &json!([]),
+        ],
+    );
+}
+
+#[test]
+fn diff_blocks_compares_the_text_the_editor_holds() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding("untitled:Untitled-1", SHORT_WALLS);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": "untitled:Untitled-1", "structure": file_uri(&path) }]),
+    )
+    .expect("a lift is compared");
+    assert_eq!(
+        [&answer["converged"], &answer["code"]],
+        [&json!(false), &json!("E_DECOMPILE_DIFF")],
+        "the editor's walls are a block short of the file's: {answer}",
+    );
+}
+
+#[test]
+fn diff_blocks_answers_a_refused_source_with_the_failure_document() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let store = holding(SHOP, DUPLICATE);
+    let answer = run(
+        &store,
+        DIFF_BLOCKS,
+        &json!([{ "uri": SHOP, "structure": file_uri(&path) }]),
+    )
+    .expect("a refusal is still an answer");
+    let listed = listed(&answer);
+    let expected: Vec<(String, u64, u64)> = [
+        ("E_DUPLICATE_SIZE", 1, 19),
+        ("E_MISSING_MATERIAL", 2, 3),
+        ("E_DUPLICATE_ARG", 2, 18),
+        ("E_DUPLICATE_ID", 4, 8),
+        ("E_INVALID_MEMBER", 3, 3),
+        ("E_INVALID_MEMBER", 4, 3),
+    ]
+    .into_iter()
+    .map(|(code, line, col)| (code.to_owned(), line, col))
+    .collect();
+    assert_eq!(listed, expected);
+}
+
+/// A site whose `b` builds nothing: `nada`'s one member does not lower under a raised `level`.
+const PARTIAL: &str = "theme t:\n  slot floor -> @oak_planks\n\ndef box size=3x3:\n  floor \
+                       mat_slot=floor\n\ndef nada size=3x3:\n  level y=1\n    floor \
+                       mat_slot=floor\n\nsite s:\n  place id=a use=box theme=t at=origin\n  \
+                       place id=b use=nada theme=t east_of=a gap=2\n";
+
+#[test]
+fn diff_blocks_answers_a_run_refused_whole_with_the_lines_that_refuse_it() {
+    let (_dir, path) = structure_file(CLEAN, "s.nbt");
+    let structure = file_uri(&path);
+    let floor = format!("@requires version>=26.3\n{CLEAN}");
+    let store = holding(SHOP, &floor);
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": structure }]),
+        ),
+        Err(CommandRefused {
+            code: ErrorCode::RequestFailed as i32,
+            message: format!(
+                "`cairn.diffBlocks` has no report for {SHOP}, and no finding refused it:\n\
+                 error[E_VERSION_CAP]: {}:1:1: this file requires version>=26.3 (target \
+                 1.21.4).\n  valid java targets: 26.3\n  fix: --target 26.3, or lower the \
+                 `@requires` floor\n  note: `cairn diff-blocks` builds the source at the stamp \
+                 of `s.nbt`, java 1.21.4, so its `@requires` must admit that target",
+                shop_path().display()
+            ),
+        }),
+    );
+    let store = holding("untitled:Untitled-1", PARTIAL);
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": "untitled:Untitled-1", "structure": structure }]),
+        ),
+        Err(CommandRefused {
+            code: ErrorCode::RequestFailed as i32,
+            message: "`cairn.diffBlocks` has no report for untitled:Untitled-1, and no finding \
+                      refused it:\nerror[E_PARTIAL_BUILD]: untitled:Untitled-1: 1 of 2 \
+                      requested scopes did not lower; refusing to compare a partial build\n  \
+                      note: `site::s::b` produced no voxels"
+                .to_owned(),
+        }),
+        "a document that names no file is named by its URI",
+    );
+}
+
+#[test]
+fn each_diff_blocks_refusal_says_what_the_command_takes() {
+    let (dir, path) = structure_file(CLEAN, "s.nbt");
+    let structure = file_uri(&path);
+    let store = holding(SHOP, CLEAN);
+    let usage = "`cairn.diffBlocks` takes one argument, `{ \"uri\": <document>, \"structure\": \
+                 <file> }`";
+    assert_eq!(
+        run(&store, DIFF_BLOCKS, &json!([])),
+        invalid(&format!("{usage}, and got 0")),
+    );
+    assert_eq!(
+        run(&store, DIFF_BLOCKS, &json!([{ "uri": SHOP }])),
+        invalid(&format!("{usage}: missing field `structure`")),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": structure, "format": "text" }]),
+        ),
+        invalid(&format!(
+            "{usage}: unknown field `format`, expected `uri` or `structure`"
+        )),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": "file:///no/such/dir/other.crn", "structure": structure }]),
+        ),
+        invalid(
+            "`cairn.diffBlocks` reports on a document the editor has open, and \
+             file:///no/such/dir/other.crn is not open; send `textDocument/didOpen` for it first"
+        ),
+    );
+    assert_eq!(
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": "https://example.com/s.nbt" }]),
+        ),
+        invalid(
+            "`cairn.diffBlocks` reads the structure file from disk, so `structure` needs a local \
+             `file:` URI, and got https://example.com/s.nbt"
+        ),
+    );
+    let refused = |path: &Path| {
+        run(
+            &store,
+            DIFF_BLOCKS,
+            &json!([{ "uri": SHOP, "structure": file_uri(path) }]),
+        )
+    };
+    let schematic = dir.path().join("s.schematic");
+    assert_eq!(
+        refused(&schematic),
+        invalid(&format!(
+            "`cairn.diffBlocks` `structure`: `{}` is not a structure file this build reads; a \
+             `.schematic` stores the numeric block ids of the releases before 1.13, which this \
+             version does not read; save it as a `.schem` from WorldEdit 7 or later and name \
+             that; name a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file",
+            schematic.display()
+        )),
+    );
+    let missing = dir.path().join("missing.nbt");
+    let not_found = std::fs::File::open(&missing).expect_err("the file is absent");
+    assert_eq!(
+        refused(&missing),
+        invalid(&format!(
+            "`cairn.diffBlocks` `structure`: cannot read `{}`: {not_found}",
+            missing.display()
+        )),
+    );
+    let truncated = dir.path().join("truncated.nbt");
+    let bytes = std::fs::read(&path).expect("the structure file reads");
+    std::fs::write(&truncated, &bytes[..bytes.len() / 2]).expect("the cut file is written");
+    assert_eq!(
+        refused(&truncated),
+        invalid(&format!(
+            "`cairn.diffBlocks` `structure`: cannot read `{}` as a Java structure file: nbt I/O: \
+             incomplete deflate stream",
+            truncated.display()
+        )),
+    );
 }

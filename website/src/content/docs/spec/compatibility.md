@@ -64,11 +64,14 @@ Evolving surfaces:
   list), and the syntax a section flags [subject to change](#subject-to-change).
 - New `cairn` subcommands, new flags and flag values of `cairn compile`, `cairn check` and
   `cairn info`, and new language server commands such as `cairn.info`
-  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)), during their first three monthly
-  minors after introduction. A new subcommand's flags, output and exit codes are Evolving with it,
-  and so are the codes [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such a
-  subcommand raises. What `cairn.info` returns is `cairn info`'s JSON document, at that document's
-  tier.
+  ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)) and `cairn.diffBlocks`
+  ([§12.2.5](/spec/ecosystem-interop/#1225-the-report-in-an-editor)), during their first three
+  monthly minors after introduction. A new subcommand's flags, output and exit codes are Evolving
+  with it, and so are the codes [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such
+  a subcommand raises. What a language server command returns is the JSON document of the
+  subcommand it runs, at that document's tier. `cairn diff-blocks` is one such subcommand: its JSON
+  document, which `cairn.diffBlocks` returns, stays Evolving until this document moves it among the
+  Stable surfaces.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving), and which blocks the built-in catalog lists, so a
   release may raise a constraint check or a `semantic-sensitive` entry on a source an earlier one
@@ -132,7 +135,7 @@ project matures along the [roadmap](/roadmap/). The table is the canonical recor
 | `.crn` syntax (chapters 5-9, §10.7) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Lockfile format | Evolving | **Stable** | Stable | Stable | Stable |
 | `cairn compile/check/info` flags | Evolving | Evolving | **Stable** | Stable | Stable |
-| Language server commands (`cairn.info`) | Evolving | Evolving | **Stable** | Stable | Stable |
+| Language server commands (`cairn.info`, `cairn.diffBlocks`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Diagnostic codes (`E_*`, `W_*`) | Evolving | Evolving | **Stable** | Stable | Stable |
 | Tier-1 material vocabulary | Evolving | Evolving | **Stable** | Stable | Stable |
 | LSP wire protocol (LSP std) | — | — | — | **Stable** | Stable |

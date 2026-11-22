@@ -1,9 +1,16 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { commands, extensions, window, workspace } from "vscode";
-import type { InfoShown } from "../extension";
-import type { ServerEvent, ShowInfo } from "./server-event";
+import {
+  OpenDialogOptions,
+  Uri,
+  commands,
+  extensions,
+  window,
+  workspace,
+} from "vscode";
+import type { ReportShown } from "../extension";
+import type { DiffBlocks, ServerEvent, ShowInfo } from "./server-event";
 
 const EXTENSION_ID = "kage1020.cairn-lang";
 const ACTIVATION_TIMEOUT_MS = 30_000;
@@ -13,8 +20,9 @@ const PIN_TIMEOUT_MS = 30_000;
  * Waits for the `.crn` document the window opened with to activate the
  * extension, runs `cairn.setTarget` with the edition and version
  * `CAIRN_TEST_SET_TARGET` holds as JSON, runs `Cairn: Show Info` as the
- * `ShowInfo` `CAIRN_TEST_SHOW_INFO` holds as JSON says, then stops its
- * language client through `deactivate`.
+ * `ShowInfo` `CAIRN_TEST_SHOW_INFO` holds as JSON says, and `Cairn: Diff
+ * Blocks` as the `DiffBlocks` `CAIRN_TEST_DIFF_BLOCKS` holds says, then stops
+ * its language client through `deactivate`.
  */
 export async function run(): Promise<void> {
   const extension = extensions.getExtension(EXTENSION_ID);
@@ -48,11 +56,26 @@ export async function run(): Promise<void> {
         await workspace.openTextDocument({ language, content: "" }),
       );
     }
-    const shown = await commands.executeCommand<InfoShown>("cairn.showInfo");
-    writeFileSync(
-      to,
-      JSON.stringify({ opened: shown.opened?.getText(), message: shown.message }),
-    );
+    writeShown(to, await commands.executeCommand<ReportShown>("cairn.showInfo"));
+  }
+  const diffBlocks = process.env.CAIRN_TEST_DIFF_BLOCKS;
+  if (diffBlocks) {
+    const { to, structure, dialog } = JSON.parse(diffBlocks) as DiffBlocks;
+    if (dialog) {
+      const { shown, filters } = await withOpenDialog(
+        dialog === "pick" ? [Uri.file(structure)] : undefined,
+        () => commands.executeCommand<ReportShown>("cairn.showDiffBlocks"),
+      );
+      writeShown(to, shown, filters);
+    } else {
+      writeShown(
+        to,
+        await commands.executeCommand<ReportShown>(
+          "cairn.showDiffBlocks",
+          Uri.file(structure),
+        ),
+      );
+    }
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];
@@ -63,6 +86,47 @@ export async function run(): Promise<void> {
   // kill the stand-in before it records shutdown and exit.
   const { deactivate } = loaded.exports as typeof import("../extension");
   await deactivate();
+}
+
+/**
+ * Writes what a report command did to `to`, as `{ opened?, message?, filters? }`
+ * JSON, with the filters its open dialog offered.
+ */
+function writeShown(
+  to: string,
+  shown: ReportShown,
+  filters?: OpenDialogOptions["filters"],
+): void {
+  writeFileSync(
+    to,
+    JSON.stringify({
+      opened: shown.opened?.getText(),
+      message: shown.message,
+      filters,
+    }),
+  );
+}
+
+/**
+ * Runs `command` with `window.showOpenDialog` answering `picked`, and returns
+ * what it did and the filters the dialog was asked to offer.
+ */
+async function withOpenDialog(
+  picked: Uri[] | undefined,
+  command: () => Thenable<ReportShown>,
+): Promise<{ shown: ReportShown; filters?: OpenDialogOptions["filters"] }> {
+  const stubbed = window as { showOpenDialog: typeof window.showOpenDialog };
+  const showOpenDialog = stubbed.showOpenDialog;
+  let filters: OpenDialogOptions["filters"];
+  stubbed.showOpenDialog = async (options) => {
+    filters = options?.filters;
+    return picked;
+  };
+  try {
+    return { shown: await command(), filters };
+  } finally {
+    stubbed.showOpenDialog = showOpenDialog;
+  }
 }
 
 /**

@@ -32,21 +32,8 @@ pub(crate) fn refuse_extension(file: &Path, command: &str) {
         "error: `{}` is not a structure file `cairn {command}` reads",
         file.display()
     );
-    let legacy = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("schematic"));
-    if legacy {
-        eprintln!(
-            "  note: a `.schematic` stores the numeric block ids of the releases before 1.13, \
-             which this version does not read; save it as a `.schem` from WorldEdit 7 or later \
-             and name that"
-        );
+    if let Some(note) = ImportFormat::unread_note(file) {
+        eprintln!("  note: {note}");
     }
-    let names: Vec<String> = ImportFormat::ALL
-        .iter()
-        .map(|format| format!("`.{}`", format.extension()))
-        .collect();
-    let (last, rest) = names.split_last().expect("an import reads some format");
-    eprintln!("  note: name a {} or {last} file", rest.join(", "));
+    eprintln!("  note: name a {} file", ImportFormat::choices());
 }

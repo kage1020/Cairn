@@ -55,12 +55,12 @@ the `cairn` binary, so it measures what an author sees; nothing depends on it.
 - **`cairn-lang-redstone` reads sensors, actuators, and `circuit` reservations from core's Intent
   IR**, then lays its own pads and owns its own IR layers
   ([Redstone §14.8](/spec/redstone#148-connection-to-the-ir-and-phases)).
-- **What the front ends report is built in a library.** `cairn-lang-formats`' `build` module
-  holds what a front end runs over a source for a build: the gate `cairn check` applies, the
-  lowering at a target, and the run-level refusals. Its `info` module builds the `cairn info`
-  report on those passes. `cairn`, the language server and the playground all call them, so they
-  report the same findings in the same words, and neither `cairn-lang-lsp` nor `cairn-lang-wasm`
-  depends on `cairn-lang-cli`.
+- **What the front ends report is built in a library.** `cairn-lang-formats`' `build` module holds
+  what a front end runs over a source for a build: the gate `cairn check` applies, the lowering at a
+  target, and the run-level refusals. Its `info` module builds the `cairn info` report on those
+  passes, and its `diff_blocks` module the `cairn diff-blocks` run. `cairn`, the language server and
+  the playground all call them, so they report the same findings in the same words, and neither
+  `cairn-lang-lsp` nor `cairn-lang-wasm` depends on `cairn-lang-cli`.
 
 ## Toolchain
 
