@@ -66,6 +66,7 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::builtin_pack` | The block, alias, absence, material, meaning, connection, and data-version tables for one edition, and Bedrock's state maps, built in and parsed once per process. |
 | `registry::load_builtin_pack` | The same pack as a `Result`, for a caller that wants the parse error rather than the panic. |
 | `registry::builtin_version_tables` | Core's `VersionTables` from the built-in packs: each edition's version order and the versions `--target` may name. What a front end hands the core passes that weigh a version. |
+| `registry::BuiltinEditions` | Both editions' built-in packs as core's `EditionTables`: what `findings_without_target` and `findings_under_guards` read to weigh an id, a painting or a missing entity at every version of an edition, when no target pins one. |
 | `registry::load_from_dir` | The same tables from an external pack directory. Loads it as a Java pack; there is no Bedrock equivalent yet. |
 | `registry::RegistryPack` | A loaded and validated pack. Its fields are private and read through accessors, so a pack cannot be built without passing the validators or changed after. |
 | `registry::RegistryError` | Everything reading or validating a pack can refuse: a missing or unreadable component, a schema version past what this build understands, a failed validator. |
