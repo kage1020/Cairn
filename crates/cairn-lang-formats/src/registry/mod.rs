@@ -1,11 +1,12 @@
 //! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, absences,
-//! meanings, state maps and connection tables a compile depends on, hashed into the lockfile so a
-//! build is reproducible.
+//! meanings, state maps and connection tables a compile depends on, and the constraint catalog
+//! beside them, each hashed into the lockfile so a build is reproducible.
 
 pub mod absent;
 pub mod aliases;
 pub mod blocks;
 pub mod connections;
+pub mod constraints;
 pub mod data_versions;
 pub mod hash;
 pub mod load;
@@ -25,12 +26,17 @@ pub use connections::{
     ByState, ConnectionIndex, ConnectionKind, ConnectionRow, ConnectionsCatalog, ConnectionsError,
     SUPPORTED_CONNECTIONS_SCHEMA, StateLookup,
 };
+pub use constraints::{
+    AttachmentRow, Boundary, CenterRow, ConstraintIndex, ConstraintsCatalog, ConstraintsError,
+    EntityAabbRow, EntityBox, GravityRow, HangsBy, SUPPORTED_CONSTRAINTS_SCHEMA, SensitivityRow,
+    SupportRow,
+};
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
     PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_pack, builtin_version_tables, load_builtin_pack,
-    load_from_dir,
+    SUPPORTED_MANIFEST_SCHEMA, builtin_constraints, builtin_pack, builtin_version_tables,
+    builtin_view, load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use states::{

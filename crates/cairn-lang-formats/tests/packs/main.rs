@@ -9,6 +9,7 @@ mod aliases;
 mod blockstate_members;
 mod canonical_spelling;
 mod connections;
+mod constraints;
 mod declared_elsewhere;
 mod eave_stair_shapes;
 mod ids_exist;

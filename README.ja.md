@@ -92,7 +92,7 @@ edition portability:     Java: portable: 12  degraded: 0  unsupported: 0   Bedro
 respelled:               Java: none   Bedrock: none
 buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
 intended targets:        (none declared)
-semantic-sensitive:      (none)
+semantic-sensitive:      Java: (none)   Bedrock: (none)
 verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
@@ -107,6 +107,7 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 - スロットを持つテーマと、そのエディション別バリアント。部位のブロックを割り当てるセレクタ行 (`walls` の隅柱と、ドアや窓を囲む枠)
 - `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます
 - ソースごとのロックファイルと、バージョン別のブロック ID、改名前の旧名、意味トークンを収めたレジストリパック。正規トークンはターゲットごとの綴りで書き出されます
+- パックの隣に置く制約カタログ。ターゲットを固定したビルドは、支えるもののないレバーや松明、空気の上の砂、構造物から流れ出す水を警告し、`cairn info` とロックファイルは、Java のあるバージョンで意味が変わるメンバーを示します
 - 論理として書くレッドストーン。`cairn compile` は各 struct の回路を床下に実寸で組み上げてセンサーとアクチュエーターにつなぎ、`assert truth`、`latency`、`always` の各行をエディションごとにその回路で検査します。
 - エディタで固定したターゲットに対する診断と、補完、ホバー、クイックフィックス、`cairn info` のレポートを提供する `cairn-lsp` と [VS Code 拡張](editors/vscode/)
 - tree-sitter 文法 (言語サーバーなしでハイライトだけ使いたいエディタ向け)
