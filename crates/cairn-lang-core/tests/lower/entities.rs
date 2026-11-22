@@ -4,8 +4,8 @@
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::block_array::{
-    AbsentEntity, BlockIdSet, BlockState, Enchantment, Entity, EntityData, Face, Item,
-    PaintingLookup, PaintingVariant, StateDomain, TargetRegistry, Trade,
+    AbsentEntity, BlockEntityData, BlockIdSet, BlockState, Enchantment, Entity, EntityData, Face,
+    Item, PaintingLookup, PaintingVariant, SignText, StateDomain, TargetRegistry, Trade,
 };
 use cairn_lang_core::{BlockArrayIr, DiagnosticCode, Edition, lower, parse, resolve};
 
@@ -635,17 +635,22 @@ fn a_hologram_is_built_as_the_member_form_its_slot_binds_with_the_form_s_keys() 
     let as_sign = hologram("sign glowing=true");
     assert_eq!(placed(&as_sign), []);
     let array = only_structure(&as_sign);
+    let face = |lines: &[&str]| {
+        SignText::new(lines.iter().map(|line| (*line).to_owned()).collect(), true)
+            .expect("a sign's lines")
+    };
     assert_eq!(
         array
             .block_entities
             .iter()
-            .map(|entity| (entity.pos, format!("{:?}", entity.data)))
+            .map(|entity| (entity.pos, &entity.data))
             .collect::<Vec<_>>(),
         [(
             (3, 1, 2),
-            "Sign { front: SignText { lines: [\"Inn\"], glowing: true }, back: SignText { lines: \
-             [], glowing: true } }"
-                .to_owned()
+            &BlockEntityData::Sign {
+                front: face(&["Inn"]),
+                back: face(&[]),
+            }
         )],
     );
 }

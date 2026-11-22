@@ -165,13 +165,13 @@ fn a_java_item_and_text_take_the_shape_each_data_version_reads() {
 fn a_novice_is_saved_with_one_experience_to_keep_its_profession() {
     let source = java_room().replace("level=apprentice", "level=novice");
     let array = lowered(&source, Edition::Java, "26.3");
-    let nbt = java_nbt(&array, "26.3", 0);
-    assert!(
-        nbt.starts_with(
-            "{id:\"minecraft:villager\",Rotation:[0f,0f],VillagerData:{type:\"minecraft:plains\",\
-             profession:\"minecraft:librarian\",level:1},Xp:1,"
-        ),
-        "{nbt}"
+    assert_eq!(
+        java_nbt(&array, "26.3", 0),
+        "{id:\"minecraft:villager\",Rotation:[0f,0f],VillagerData:{type:\"minecraft:plains\",\
+         profession:\"minecraft:librarian\",level:1},Xp:1,Offers:{Recipes:[{buy:{id:\
+         \"minecraft:emerald\",count:24},sell:{id:\"minecraft:enchanted_book\",count:1,\
+         components:{minecraft:stored_enchantments:{minecraft:mending:1}}},uses:0,maxUses:12,\
+         rewardExp:1b,xp:1,priceMultiplier:0.05f,specialPrice:0,demand:0}]}}",
     );
 }
 
@@ -252,13 +252,13 @@ fn a_bedrock_structure_lists_each_entity_and_builds_an_item_frame_as_a_frame_blo
              definitions:[\"+minecraft:painting\"]}",
         ],
     );
-    assert!(
-        written_palette(&root).contains(
-            &"minecraft:frame[facing_direction=3,item_frame_map_bit=0,item_frame_photo_bit=0]"
-                .to_owned()
-        ),
-        "{:?}",
-        written_palette(&root)
+    assert_eq!(
+        written_palette(&root),
+        [
+            "minecraft:air[]",
+            "minecraft:cobblestone[]",
+            "minecraft:frame[facing_direction=3,item_frame_map_bit=0,item_frame_photo_bit=0]",
+        ],
     );
     // A voxel's place in `block_indices` is `(x * 4 + y) * 5 + z` in this 7x4x5 array.
     assert_eq!(
