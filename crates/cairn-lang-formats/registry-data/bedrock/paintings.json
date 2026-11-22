@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "namespace": "minecraft",
-  "source": "Each targetable version's paintings and the `Motive` each saves as, from GeyserMC's `PaintingType` table at the commit whose block palette that version's `blocks` table came from; the sizes match Java's, which name the same paintings.",
+  "source": "Each targetable version's paintings and the `Motive` each saves as, from GeyserMC's `PaintingType` table at the commit whose block palette that version's `blocks` table came from, with the twenty Tricky Trials paintings in 1.21.0 too, which its release added (Minecraft Wiki, Bedrock Edition 1.21.0); the sizes match Java's, which name the same paintings.",
   "tables": [
     {
       "versions": ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
@@ -39,7 +39,7 @@
       ]
     },
     {
-      "versions": ["1.21.40", "1.21.60", "1.26.60"],
+      "versions": ["1.21.0", "1.21.40", "1.21.60", "1.26.60"],
       "paintings": [
         {"variant": "meditative", "width": 1, "height": 1, "spelling": "meditative"},
         {"variant": "prairie_ride", "width": 1, "height": 2, "spelling": "prairie_ride"},
