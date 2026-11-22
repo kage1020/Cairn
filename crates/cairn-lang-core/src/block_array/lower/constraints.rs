@@ -511,7 +511,7 @@ fn entity_aabb(entity: &Entity, shape: EntityBox) -> Aabb {
         };
     };
     let (across, up) = match entity.data {
-        EntityData::Painting { width, height, .. } => (width, height),
+        EntityData::Painting { width, height, .. } => (width.get(), height.get()),
         _ => (1, 1),
     };
     let facing = entity.facing;

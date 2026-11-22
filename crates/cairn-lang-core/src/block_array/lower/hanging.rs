@@ -1,6 +1,8 @@
 //! Hanging a `painting` or an `item_frame` on the face of the block behind it
 //! (`spec/entities` "Hanging entities").
 
+use std::num::NonZeroU32;
+
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
 use crate::intent::Member;
@@ -92,7 +94,7 @@ fn hang_painting(
                 member, name, &registry, &known, &elsewhere,
             )));
         }
-        PaintingLookup::Unrecorded => (None, 1, 1),
+        PaintingLookup::Unrecorded => (None, NonZeroU32::MIN, NonZeroU32::MIN),
     };
     let right = placed
         .facing
@@ -110,7 +112,7 @@ fn hang_painting(
         ))
     };
     let outside = || Box::new(super::fixture::outside_the_array(PAINTING, member));
-    let far = at(width - 1, height - 1).ok_or_else(outside)?;
+    let far = at(width.get() - 1, height.get() - 1).ok_or_else(outside)?;
     declare_box(
         PAINTING,
         member,
@@ -120,7 +122,7 @@ fn hang_painting(
         far,
         placed.host_face,
     )?;
-    let hung = at((width - 1) / 2, (height - 1) / 2).ok_or_else(outside)?;
+    let hung = at((width.get() - 1) / 2, (height.get() - 1) / 2).ok_or_else(outside)?;
     canvas.place_entity(
         member.span.start,
         crate::block_array::Entity {

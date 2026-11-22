@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{
 };
 use cairn_lang_core::{Diagnostic, Edition, lower, parse, resolve};
 
-use crate::common::{DECLARED, Tables, lowered, notes, slice};
+use crate::common::{DECLARED, Tables, blocks, lowered, notes, slice};
 
 /// `source`'s findings lowered with no target, for `edition` or for both, `standing` saying what
 /// the versions of an edition make of an id.
@@ -571,8 +571,8 @@ fn paintings(edition: Edition, variant: &str) -> PaintingLookup {
     match known.iter().find(|(name, _)| *name == variant) {
         Some(&(name, side)) => PaintingLookup::Known(PaintingVariant {
             spelling: format!("minecraft:{name}"),
-            width: side,
-            height: side,
+            width: blocks(side),
+            height: blocks(side),
         }),
         None => PaintingLookup::Unknown {
             registry: edition.as_str().to_owned(),

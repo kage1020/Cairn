@@ -27,8 +27,8 @@ fn index(tables: &str) -> Result<PaintingIndex, PaintingsError> {
 fn painting(spelling: &str, width: u32, height: u32) -> Painting {
     Painting {
         spelling: spelling.to_owned(),
-        width,
-        height,
+        width: NonZeroU32::new(width).expect("a painting's width"),
+        height: NonZeroU32::new(height).expect("a painting's height"),
     }
 }
 

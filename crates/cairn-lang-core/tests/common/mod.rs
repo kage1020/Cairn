@@ -1,5 +1,6 @@
 //! Helpers shared by the core integration test binaries.
 
+use std::num::NonZeroU32;
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -12,6 +13,15 @@ use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse, 
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
 pub const SHIPPED_EXAMPLES: usize = 17;
+
+/// `n` blocks, as a painting's side.
+///
+/// # Panics
+///
+/// When `n` is 0.
+pub fn blocks(n: u32) -> NonZeroU32 {
+    NonZeroU32::new(n).expect("a painting's side is a block or more")
+}
 
 /// The repository's `examples/` directory.
 pub fn examples_dir() -> PathBuf {

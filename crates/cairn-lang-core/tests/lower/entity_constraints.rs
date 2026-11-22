@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{
     BlockIdSet, BlockState, EntityBox, PaintingLookup, PaintingVariant, StateDomain, TargetRegistry,
 };
 
-use crate::common::{Finding, findings, lowered, lowered_with};
+use crate::common::{Finding, blocks, findings, lowered, lowered_with};
 
 /// A pinned target whose catalog boxes the structured entities, whose cobblestone is the one full
 /// block, and whose painting table has `kebab` 1x1 and `bust` 2x2.
@@ -55,8 +55,8 @@ impl TargetRegistry for Boxes {
         let side = if variant == "bust" { 2 } else { 1 };
         PaintingLookup::Known(PaintingVariant {
             spelling: format!("minecraft:{variant}"),
-            width: side,
-            height: side,
+            width: blocks(side),
+            height: blocks(side),
         })
     }
 }

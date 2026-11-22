@@ -2,6 +2,8 @@
 //! the size each hangs at and the way the edition's entity data spells it, which a `painting`'s
 //! `variant=` is checked against (`spec/entities` "Hanging entities").
 
+use std::num::NonZeroU32;
+
 use indexmap::IndexMap;
 use serde::Deserialize;
 
@@ -60,9 +62,9 @@ pub struct Painting {
     /// The way the edition's entity data spells it.
     pub spelling: String,
     /// Its width in blocks.
-    pub width: u32,
+    pub width: NonZeroU32,
     /// Its height in blocks.
-    pub height: u32,
+    pub height: NonZeroU32,
 }
 
 /// Validated paintings, by version and then by name, in table order.
@@ -184,15 +186,17 @@ fn painting_of(namespace: &str, row: &PaintingRow) -> Result<Painting, Paintings
             variant: row.variant.clone(),
         });
     }
-    for (side, value) in [("width", row.width), ("height", row.height)] {
-        if !(1..=MAX_PAINTING_SIDE).contains(&value) {
-            return Err(PaintingsError::BadSize {
+    let size = |side, value| {
+        NonZeroU32::new(value)
+            .filter(|value| value.get() <= MAX_PAINTING_SIDE)
+            .ok_or_else(|| PaintingsError::BadSize {
                 variant: row.variant.clone(),
                 side,
                 value,
-            });
-        }
-    }
+            })
+    };
+    let width = size("width", row.width)?;
+    let height = size("height", row.height)?;
     let spelling = match &row.spelling {
         Some(spelling) if spelling.trim().is_empty() => {
             return Err(PaintingsError::EmptySpelling {
@@ -204,8 +208,8 @@ fn painting_of(namespace: &str, row: &PaintingRow) -> Result<Painting, Paintings
     };
     Ok(Painting {
         spelling,
-        width: row.width,
-        height: row.height,
+        width,
+        height,
     })
 }
 

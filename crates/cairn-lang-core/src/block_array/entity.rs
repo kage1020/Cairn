@@ -1,6 +1,8 @@
 //! The entities a body places, in no edition's shape: each writer saves them in its own
 //! (`spec/entities` "Two tiers").
 
+use std::num::NonZeroU32;
+
 use serde::Serialize;
 
 use super::BlockState;
@@ -38,9 +40,9 @@ pub enum EntityData {
         #[serde(skip_serializing_if = "Option::is_none")]
         spelling: Option<String>,
         /// Its width in blocks, along the wall to the right as seen from in front of it.
-        width: u32,
+        width: NonZeroU32,
         /// Its height in blocks.
-        height: u32,
+        height: NonZeroU32,
     },
     /// An item frame, or a glow item frame by its id.
     ItemFrame {

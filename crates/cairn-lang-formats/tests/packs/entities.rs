@@ -2,6 +2,8 @@
 //! entities an edition lacks, and the boxes and solid blocks the constraint checks read, pinned or
 //! not (`spec/entities` "Hanging entities").
 
+use std::num::NonZeroU32;
+
 use cairn_lang_core::block_array::{
     AbsentEntity, BlockState, EntityBox, PaintingLookup, PaintingVariant, TargetRegistry,
 };
@@ -13,8 +15,8 @@ use cairn_lang_formats::registry::{builtin_pack, builtin_view};
 fn known(spelling: &str, width: u32, height: u32) -> PaintingLookup {
     PaintingLookup::Known(PaintingVariant {
         spelling: spelling.to_owned(),
-        width,
-        height,
+        width: NonZeroU32::new(width).expect("a painting's width"),
+        height: NonZeroU32::new(height).expect("a painting's height"),
     })
 }
 

@@ -11,7 +11,8 @@ use cairn_lang_core::block_array::{
 use cairn_lang_core::{BlockArrayIr, DiagnosticCode, Edition, lower, parse, resolve};
 
 use crate::common::{
-    Finding, findings, lowered, lowered_with, lowered_with_resolver_diagnostics, only_structure,
+    Finding, blocks, findings, lowered, lowered_with, lowered_with_resolver_diagnostics,
+    only_structure,
 };
 
 const THEME: &str = "theme t:\n  slot wall -> @cobblestone\n\n";
@@ -91,8 +92,8 @@ impl TargetRegistry for Paintings {
         let known = |spelling: &str, side| {
             PaintingLookup::Known(PaintingVariant {
                 spelling: spelling.to_owned(),
-                width: side,
-                height: side,
+                width: blocks(side),
+                height: blocks(side),
             })
         };
         match variant {
@@ -131,8 +132,8 @@ fn a_painting_by_a_wall_hangs_in_the_cell_inside_it_facing_away() {
             EntityData::Painting {
                 variant: "kebab".to_owned(),
                 spelling: None,
-                width: 1,
-                height: 1,
+                width: blocks(1),
+                height: blocks(1),
             },
         )],
     );
@@ -156,8 +157,8 @@ fn a_wide_painting_runs_right_and_up_from_its_anchor_and_hangs_by_the_game_s_cel
             EntityData::Painting {
                 variant: "pointer".to_owned(),
                 spelling: Some("Pointer".to_owned()),
-                width: 4,
-                height: 4,
+                width: blocks(4),
+                height: blocks(4),
             },
         )],
     );

@@ -1,6 +1,8 @@
 //! Translate a resolved theme-slot value into a [`BlockState`], and the pinned target's answers
 //! about its id and its states.
 
+use std::num::NonZeroU32;
+
 use indexmap::IndexMap;
 
 use crate::Edition;
@@ -226,9 +228,9 @@ pub struct PaintingVariant {
     /// The variant as the target's entity data spells it, as `minecraft:kebab` or `Kebab`.
     pub spelling: String,
     /// Its width in blocks.
-    pub width: u32,
+    pub width: NonZeroU32,
     /// Its height in blocks.
-    pub height: u32,
+    pub height: NonZeroU32,
 }
 
 /// An entity of one edition that the other has no counterpart for, as
