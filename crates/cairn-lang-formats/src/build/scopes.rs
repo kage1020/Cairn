@@ -39,7 +39,7 @@ pub(crate) fn dropped_scopes(resolution: &Resolution, block_ir: &BlockArrayIr) -
 
 /// How many structures hold at least one block.
 #[must_use]
-pub(crate) fn built_scopes(block_ir: &BlockArrayIr) -> usize {
+pub fn built_scopes(block_ir: &BlockArrayIr) -> usize {
     block_ir
         .structures
         .values()

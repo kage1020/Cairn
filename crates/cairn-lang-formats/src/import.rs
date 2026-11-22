@@ -15,6 +15,7 @@ use cairn_lang_core::block_array::PALETTE_CAPACITY;
 use cairn_lang_core::transliterate::{
     GridUnit, Stamp, TransliterateError, Transliteration, transliterate, unit_names,
 };
+use cairn_lang_core::voxel_diff::StructureBodies;
 use thiserror::Error;
 
 use crate::bedrock_structure::{BedrockVolume, McStructureReadError, read_mcstructure};
@@ -149,6 +150,15 @@ pub struct DecodedStructure {
 }
 
 impl DecodedStructure {
+    /// The grids as the voxel diff compares them, under the file's stem.
+    #[must_use]
+    pub fn bodies(&self) -> StructureBodies<'_> {
+        StructureBodies {
+            stem: stem(&self.file_name),
+            units: &self.units,
+        }
+    }
+
     /// The registry view of the stamped target, which checks the written blocks.
     #[must_use]
     pub fn registry(&self) -> PackView<'_> {
@@ -243,10 +253,7 @@ pub fn decode_structure<R: Read>(
     format: ImportFormat,
     file_name: &str,
 ) -> Result<DecodedStructure, ImportError> {
-    let stem = Path::new(file_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(file_name);
+    let stem = stem(file_name);
     let mut losses = vec![SemanticLoss {
         unit: None,
         kind: LossKind::Intent,
@@ -268,6 +275,14 @@ pub fn decode_structure<R: Read>(
         units,
         losses,
     })
+}
+
+/// `file_name` without its extension.
+fn stem(file_name: &str) -> &str {
+    Path::new(file_name)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(file_name)
 }
 
 /// The stamp and grid of a Java structure file.
@@ -298,6 +313,7 @@ fn decode_nbt<R: Read>(
     let unit = GridUnit {
         name,
         grid: grid::java_grid(&read.volume),
+        corner: (0, 0, 0),
         comment: Vec::new(),
     };
     Ok((stamp, vec![unit]))
@@ -329,6 +345,7 @@ fn decode_litematic<R: Read>(
             GridUnit {
                 name,
                 grid: grid::java_grid(&region.volume),
+                corner: region.min_corner,
                 comment: vec![format!(
                     "region `{}`, its minimum corner at {x},{y},{z} of the schematic",
                     region.name
@@ -362,6 +379,7 @@ fn decode_schem<R: Read>(
     let unit = GridUnit {
         name,
         grid: grid::java_grid(&read.volume),
+        corner: (0, 0, 0),
         comment,
     };
     Ok((stamp, vec![unit]))
@@ -399,6 +417,7 @@ fn decode_mcstructure<R: Read>(
     let unit = GridUnit {
         name,
         grid: grid.grid,
+        corner: (0, 0, 0),
         comment,
     };
     Ok((stamp, vec![unit]))

@@ -99,9 +99,10 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 
 ## いま使える機能
 
-- `cairn parse` / `check` / `info` / `lower` / `compile` / `import` / `install` / `docs`
+- `cairn parse` / `check` / `info` / `lower` / `compile` / `import` / `diff-blocks` / `install` / `docs`
 - 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
 - `cairn import`。この 4 つのどのファイルも、同じブロックへコンパイルし直せる生のメンバーの `.crn` として読み戻します。復元するのはブロックとその規則性で、意図ではないことを `W_SEMANTIC_LOSS` で示します。
+- `cairn diff-blocks`。構造ファイルを、`.crn` がそのファイルのターゲットで組むものと比べ、block IoU、食い違う領域とその考えられる原因、それを埋める `edit` の行を示します。リフトが収束するまで繰り返せます。
 - `/place template` が読み込めるように Java の構造ファイルをワールドに入れる `cairn install`。ワールドより新しいバージョン向けの構造は拒否し、古いバージョン向けの構造は `--allow-cross-version` がなければ拒否します。
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、文字を持つ看板、ベッド、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill` / `raw_repeat`)、`level` による階ごとのまとまり
 - エンティティ: 絵画、額縁、防具立て、売り物を持つ村人、display (`text_display` / `block_display` / `item_display`)、ID で置くほかのエンティティ (`spawn`)、テーマがエディションごとに組み上げる `hologram` (Java ではテキストの display、Bedrock では光る看板)
@@ -119,7 +120,7 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 **未実装の機能。**
 
 - 流水 (`flow=` と `level=` を取る `water` キーワード)
-- `cairn diff-blocks` と、取り込んだものを壁や窓やテーマへリフトするループ
+- 取り込んだものを壁や窓やテーマへ引き上げるリフト。逆方向の変換はこれを LLM に任せ、`cairn diff-blocks` が確かめます
 
 ## 基本の考え方
 

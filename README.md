@@ -99,9 +99,10 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 
 ## What works today
 
-- `cairn parse`, `check`, `info`, `lower`, `compile`, `import`, `install`, and `docs`.
+- `cairn parse`, `check`, `info`, `lower`, `compile`, `import`, `diff-blocks`, `install`, and `docs`.
 - Java `.nbt`, Litematica `.litematic` or Sponge Schematic `.schem`, and Bedrock `.mcstructure`, output from one source.
 - `cairn import`, which reads any of those four files back as a `.crn` of raw members that compiles back to the same blocks. It recovers blocks and their regularity, not intent, and says so with `W_SEMANTIC_LOSS`.
+- `cairn diff-blocks`, which compares a structure file with what a `.crn` builds at the file's target: the block IoU, the regions that differ with their likely causes, and `edit` lines that close them, until a lift converges.
 - `cairn install`, which puts Java structure files into a world for `/place template` to load, refusing one built for a newer version than the world, and one built for an older version unless `--allow-cross-version` is given.
 - Members: floors, walls, doors, windows, roofs (`gable`, `shed`, `hip`, `flat`), stairs, beams, chests, trapdoors, note blocks, signs with their text, beds, the redstone sensors and actuators (pressure plates, levers, buttons, daylight detectors, observers, lamps, pistons, dispensers), redstone parts placed by hand (`repeater`, `comparator`, `redstone_torch`, `redstone_dust`), fills of a material or of water, raw blocks that name a block id (`raw_block`, `raw_fill`, `raw_repeat`), and `level` grouping.
 - Entities: paintings, item frames, armor stands, villagers with the trades they sell, the displays (`text_display`, `block_display`, `item_display`), any other entity by its id (`spawn`), and a `hologram` a theme builds per edition, a text display on Java and a glowing sign on Bedrock.
@@ -119,7 +120,7 @@ verified target:           bedrock 1.21.60/block version 18168865, source unchan
 **Not yet.**
 
 - Flowing water, the `water` keyword with its `flow=` and `level=`.
-- `cairn diff-blocks`, and the loop that lifts an import into walls, windows and themes.
+- Lifting an import into walls, windows and themes, which the reverse direction leaves to an LLM and `cairn diff-blocks` checks.
 
 ## Key ideas
 

@@ -1,9 +1,11 @@
 //! Every shipped example that builds, written in each format of its edition, imported, and the
-//! import compiled for the same target: it builds the blocks the file holds.
+//! import compiled for the same target: it builds the blocks the file holds, and the voxel diff
+//! finds no cell of the file that it or the example builds otherwise.
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
+use cairn_lang_core::voxel_diff::{Metrics, compare};
 use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
 use cairn_lang_formats::import::{ImportFormat, LossKind, RawImport, import_raw};
 use cairn_lang_formats::java_structure::{prepare_structure, read_structure};
@@ -14,14 +16,17 @@ use cairn_lang_formats::schem::{prepare_schem, read_schem, schem_files};
 use cairn_lang_nbt::tag::Compound;
 
 use crate::common::{
-    BedrockCell, admitted_versions, bedrock_cells, compile_source, examples, latest, states_for,
+    BedrockCell, admitted_versions, bedrock_cells, compile_source, examples, examples_dir, latest,
+    states_for,
 };
 
-/// One structure file an example writes: its name, its bytes, and the arrays it holds in order.
+/// One structure file an example writes: its name, its bytes, and the arrays it holds in order
+/// with the `structures` key of each.
 struct Written<'a> {
     name: String,
     bytes: Vec<u8>,
     arrays: Vec<&'a BlockArray>,
+    scopes: Vec<&'a str>,
 }
 
 /// The version an example is built at for `edition`: `latest` when its floors admit it, else the
@@ -71,6 +76,7 @@ fn written<'a>(
                         name: format!("{}.nbt", ir.artifact_stem(scope)),
                         bytes,
                         arrays: vec![array],
+                        scopes: vec![scope],
                     }
                 })
                 .collect()
@@ -82,6 +88,7 @@ fn written<'a>(
                 .map(|file| {
                     let name = format!("{}.litematic", file.stem);
                     let arrays = file.regions.iter().map(|r| r.block_array).collect();
+                    let scopes = file.regions.iter().map(|r| r.scope).collect();
                     let mut bytes = Vec::new();
                     prepare_litematic(file, &target)
                         .expect("the file prepares")
@@ -91,6 +98,7 @@ fn written<'a>(
                         name,
                         bytes,
                         arrays,
+                        scopes,
                     }
                 })
                 .collect()
@@ -102,6 +110,7 @@ fn written<'a>(
                 .map(|file| {
                     let name = format!("{}.schem", file.stem);
                     let arrays = vec![file.block_array];
+                    let scopes = vec![file.scope];
                     let mut bytes = Vec::new();
                     prepare_schem(file, &target)
                         .expect("the file prepares")
@@ -111,6 +120,7 @@ fn written<'a>(
                         name,
                         bytes,
                         arrays,
+                        scopes,
                     }
                 })
                 .collect()
@@ -122,6 +132,7 @@ fn written<'a>(
                 name: format!("{}.mcstructure", ir.artifact_stem(scope)),
                 bytes: mcstructure_bytes(array, version),
                 arrays: vec![array],
+                scopes: vec![scope],
             })
             .collect(),
     }
@@ -343,4 +354,91 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
         }
     }
     assert_eq!(unbuilt, Vec::<(String, Edition)>::new());
+}
+
+#[test]
+fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_and_its_source() {
+    for (name, source) in examples() {
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let Some(version) = version_for(&source, edition) else {
+                continue;
+            };
+            let Ok(ir) = compile_source(&source, edition, &version) else {
+                continue;
+            };
+            let formats: &[ImportFormat] = match edition {
+                Edition::Java => &[
+                    ImportFormat::Nbt,
+                    ImportFormat::Litematic,
+                    ImportFormat::Schem,
+                ],
+                Edition::Bedrock => &[ImportFormat::Mcstructure],
+            };
+            for &format in formats {
+                for file in written(&ir, format, &version) {
+                    let import = imported(&file, format);
+                    let label = format!("{name} as {} at {edition} {version}", file.name);
+                    let lifted = compile_source(&import.transliteration.source, edition, &version)
+                        .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
+                    let counts = compare(import.decoded.bodies(), &lifted).counts;
+                    assert_eq!(
+                        counts.metrics(),
+                        Metrics {
+                            block_iou: 1.0,
+                            state_accuracy: 1.0,
+                            residual_ratio: 1.0,
+                        },
+                        "{label}: the import"
+                    );
+                    // A file holds one struct, one site or one of a site's arrays: one body.
+                    let mut held = ir.clone();
+                    held.structures
+                        .retain(|scope, _| file.scopes.contains(&scope.as_str()));
+                    let comparison = compare(import.decoded.bodies(), &held);
+                    let metrics = comparison.counts.metrics();
+                    assert_eq!(
+                        (
+                            comparison.bodies.len(),
+                            metrics.block_iou,
+                            metrics.state_accuracy
+                        ),
+                        (1, 1.0, 1.0),
+                        "{label}: the source"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_site_written_as_one_litematic_compares_with_the_site_as_one_body_named_after_the_file() {
+    let path = examples_dir().join("l-walkway.crn");
+    let source = std::fs::read_to_string(&path).expect("the example reads");
+    let version = latest(Edition::Java);
+    let ir = compile_source(&source, Edition::Java, version).expect("the example compiles");
+    let [file] = written(&ir, ImportFormat::Litematic, version)
+        .try_into()
+        .unwrap_or_else(|files: Vec<Written<'_>>| panic!("{} files", files.len()));
+    let import = imported(&file, ImportFormat::Litematic);
+    assert_eq!(
+        import.decoded.units.len(),
+        4,
+        "three placements and a walkway"
+    );
+    let comparison = compare(import.decoded.bodies(), &ir);
+    let pairs: Vec<_> = comparison
+        .bodies
+        .iter()
+        .map(|body| (body.structure.as_deref(), body.source.as_deref()))
+        .collect();
+    assert_eq!(pairs, [(Some("duo"), Some("duo"))]);
+    assert_eq!(
+        comparison.counts.metrics(),
+        Metrics {
+            block_iou: 1.0,
+            state_accuracy: 1.0,
+            residual_ratio: 0.0,
+        }
+    );
 }

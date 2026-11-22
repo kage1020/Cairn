@@ -67,6 +67,8 @@ pub fn check_lowering(
 /// lowering failed to produce.
 #[derive(Debug)]
 pub struct Lowered {
+    /// The source's Intent IR.
+    pub ir: IntentModule,
     /// The target the build was asked for, or why it does not resolve.
     pub target: Result<ResolvedTarget, UnsupportedTarget>,
     /// The lowered structures, whose diagnostics are every finding `cairn check` reports for the
@@ -135,6 +137,7 @@ pub fn lower_for_target(
     let dropped_scopes = dropped_scopes(&resolution, &block_ir);
     let circuits = lay_circuits(&ir, &mut block_ir, edition, &registry);
     Lowered {
+        ir,
         target,
         block_ir,
         circuits,

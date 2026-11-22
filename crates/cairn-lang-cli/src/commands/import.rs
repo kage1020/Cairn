@@ -2,8 +2,7 @@
 //! compiles for (`spec/ecosystem-interop` "Reverse direction: the compiler transliterates, an LLM
 //! lifts").
 
-use std::fs::File;
-use std::io::{BufReader, Write as _};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -12,10 +11,11 @@ use cairn_lang_formats::import::{ImportFormat, import_raw};
 
 use crate::report::report_diagnostics;
 use crate::staging::{Kind, StagedSet};
+use crate::structure_file::{file_name, open_structure, refuse_extension};
 
 pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let Some(format) = ImportFormat::from_path(file) else {
-        refuse_extension(file);
+        refuse_extension(file, "import");
         return ExitCode::from(2);
     };
     let out = out.map_or_else(|| default_out(file), Path::to_path_buf);
@@ -27,19 +27,11 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
         eprintln!("  note: give `--out` a `.crn` path, or leave it out to write `<stem>.raw.crn`");
         return ExitCode::from(2);
     }
-    let reader = match File::open(file) {
-        Ok(opened) => BufReader::new(opened),
-        Err(err) => {
-            eprintln!("error: cannot read `{}`: {err}", file.display());
-            return match err.kind() {
-                std::io::ErrorKind::NotFound => ExitCode::from(2),
-                _ => ExitCode::from(1),
-            };
-        }
+    let reader = match open_structure(file) {
+        Ok(reader) => reader,
+        Err(code) => return code,
     };
-    let name = file
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let name = file_name(file);
     let import = match import_raw(reader, format, &name) {
         Ok(import) => import,
         Err(err) => {
@@ -67,31 +59,6 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     );
     outln!("wrote {}", out.display());
     ExitCode::SUCCESS
-}
-
-/// The refusal of a path whose extension names no format an import reads.
-fn refuse_extension(file: &Path) {
-    eprintln!(
-        "error: `{}` is not a structure file `cairn import` reads",
-        file.display()
-    );
-    let legacy = file
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("schematic"));
-    if legacy {
-        eprintln!(
-            "  note: a `.schematic` stores the numeric block ids of the releases before 1.13, \
-             which this version does not read; save it as a `.schem` from WorldEdit 7 or later \
-             and import that"
-        );
-    }
-    let names: Vec<String> = ImportFormat::ALL
-        .iter()
-        .map(|format| format!("`.{}`", format.extension()))
-        .collect();
-    let (last, rest) = names.split_last().expect("an import reads some format");
-    eprintln!("  note: name a {} or {last} file", rest.join(", "));
 }
 
 /// `<stem>.raw.crn` beside `file`.
