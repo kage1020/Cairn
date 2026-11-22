@@ -38,6 +38,17 @@ cairn compile examples/cottage.crn --edition java    --target 1.21.4
 cairn compile examples/cottage.crn --edition bedrock --target 1.21.40
 ```
 
+`cairn install` puts the Java build into a world saved by 1.21.4, where
+`/place template minecraft:cottage` builds it:
+
+```sh
+cairn install examples/cottage.nbt --world ~/.minecraft/saves/MyWorld
+```
+
+Into a world saved by another release, `cairn install` refuses the file and names the `--target`
+to recompile at, where one fits
+([Versioning and Editions](/spec/versioning-editions/#cross-version-application)).
+
 **The source never picks the Minecraft version.** It lives in `--target`, and `--edition` is
 required alongside it. What the source *may* declare is `@requires`, a floor on what the target has
 to support; `@intended_targets`, a hint naming the versions the author has in mind; and `@cairn`,
