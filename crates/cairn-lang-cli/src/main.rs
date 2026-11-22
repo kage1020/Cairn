@@ -28,6 +28,7 @@ use commands::check::run_check;
 use commands::compile::run_compile;
 use commands::docs::run_docs;
 use commands::info::run_info;
+use commands::install::run_install;
 use commands::lower::run_lower;
 use commands::parse::run_parse;
 use commands::synth::run_synth;
@@ -89,6 +90,7 @@ fn main() -> ExitCode {
             out.as_deref(),
             lock.as_deref(),
         ),
+        Some(Command::Install(args)) => run_install(&args),
         Some(Command::Docs { page, title, toc }) => {
             run_docs(page.as_deref(), title.as_deref(), toc)
         }
