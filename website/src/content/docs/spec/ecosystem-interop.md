@@ -82,7 +82,8 @@ The root holds one `Schematic` compound:
   spelling would read back as another, such as one with a comma in a property value, is refused.
   `Data` holds each voxel's index as a varint, in `(y, z, x)` order. `BlockEntities` holds each
   block entity as its `Pos`, its `Id`, and a `Data` holding the fields the `.nbt` writer writes in
-  its `nbt`, without `id`.
+  its `nbt`, without `id`. Since `Id` names a block entity, one with no string `id`, which a
+  `raw_block`'s `nbt=` compound can leave out, is refused.
 
 Biomes and entities are not written.
 

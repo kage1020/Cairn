@@ -171,6 +171,10 @@ fn schem_fix(refusal: &SchemError) -> Option<&'static str> {
             "compile with `--structure-format nbt` or `litematic`, which store each property \
              apart rather than spelled into one key",
         ),
+        SchemError::BlockEntityWithoutId { .. } => Some(
+            "name the block entity in its `raw_block`'s `nbt=` with a string `id`, such as \
+             `id:\"minecraft:chest\"`",
+        ),
         SchemError::DuplicateState { .. } => Some(
             "every palette the compiler builds holds each state once, so this is a bug in Cairn \
              rather than in the source; please report it with the source that produced it",

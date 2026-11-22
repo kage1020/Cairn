@@ -228,6 +228,37 @@ fn a_struct_wider_than_a_schem_extent_is_refused_with_a_format_that_holds_it() {
 }
 
 #[test]
+fn a_raw_block_compound_without_a_string_id_is_refused_as_a_schem_and_written_as_an_nbt() {
+    let source = "struct store size=3x3\n  @edition java\n    \
+                  raw_block mat=minecraft:chest at=1,0,1 nbt={Items:[]}\n";
+    let fixture = Fixture::new(source);
+    let out = fixture.out();
+    let result = cairn(
+        "compile",
+        &[
+            fixture.source().to_str().expect("utf-8 path"),
+            "--edition",
+            "java",
+            "--target",
+            "1.21.4",
+            "--out",
+            out.to_str().expect("utf-8 path"),
+            "--structure-format",
+            "schem",
+        ],
+    );
+    assert_eq!(result.status.code(), Some(1));
+    assert_eq!(
+        String::from_utf8_lossy(&result.stderr),
+        "error: checking `struct::store`: the block entity at (1, 0, 1) has no string `id`, which \
+         a `.schem` file names it by\n  note: name the block entity in its `raw_block`'s `nbt=` \
+         with a string `id`, such as `id:\"minecraft:chest\"`\n",
+    );
+    assert!(fixture.artifacts().is_empty(), "{:?}", fixture.artifacts());
+    compile_with(&fixture, &["--structure-format", "nbt"]);
+}
+
+#[test]
 fn a_structure_format_for_bedrock_is_refused_before_the_file_is_read() {
     let result = cairn(
         "compile",
