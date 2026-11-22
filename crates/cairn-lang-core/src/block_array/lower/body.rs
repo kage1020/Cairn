@@ -105,15 +105,8 @@ pub(super) fn lower_body_to_block_array<'a>(
     let wall_column = WallColumn::from_walls(painting_walls.iter().copied());
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
     let imported = imported_rows(&flattened, &repeats);
-
-    let dims = Dims {
-        x: interior_w.saturating_add(overhang.saturating_mul(2)),
-        y: 1u32
-            .saturating_add(max_wall_top)
-            .saturating_add(roof_extra)
-            .max(imported),
-        z: interior_h.saturating_add(overhang.saturating_mul(2)),
-    };
+    let height = 1u32.saturating_add(max_wall_top).saturating_add(roof_extra);
+    let dims = body_dims(interior_w, interior_h, overhang, height.max(imported));
     if !dims.fits_volume_budget() {
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
@@ -192,6 +185,17 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// The extent of a body with an `interior_w` by `interior_h` interior, `overhang` cells of roof
+/// past each side, and `height` rows.
+fn body_dims(interior_w: u32, interior_h: u32, overhang: u32, height: u32) -> Dims {
+    let widened = |side: u32| side.saturating_add(overhang.saturating_mul(2));
+    Dims {
+        x: widened(interior_w),
+        y: height,
+        z: widened(interior_h),
+    }
 }
 
 /// A `W_PHASE_CONFLICT` for each pair of members, and each pair of frames, of one phase on
