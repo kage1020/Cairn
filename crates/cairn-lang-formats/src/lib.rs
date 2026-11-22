@@ -39,8 +39,9 @@ pub use data_version::{
     resolve_java_target, resolve_target,
 };
 pub use import::{
-    DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport, SavedVersion,
-    SemanticLoss, StampFit, UnshippedVersion, decode_structure, import_raw,
+    DecodeFileError, DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport,
+    SavedVersion, SemanticLoss, StampFit, UnshippedVersion, decode_structure,
+    decode_structure_file, import_raw,
 };
 pub use java_structure::{
     Compound, JavaStructure, JavaStructureError, OutputExt, StoredStructure, StructureReadError,

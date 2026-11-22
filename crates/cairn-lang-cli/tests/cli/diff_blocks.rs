@@ -381,10 +381,9 @@ fn a_source_that_does_not_build_at_the_stamp_is_refused_before_comparing() {
         "error[E_VERSION_CAP]: {}:2:1: this file requires version>=26.3 (target 1.21.4).\n  \
          valid java targets: 26.3\n  \
          fix: --target 26.3, or lower the `@requires` floor\n  \
-         note: `cairn diff-blocks` builds the source at the stamp of `{}`, java 1.21.4, so its \
-         `@requires` must admit that target\n",
+         note: `cairn diff-blocks` builds the source at the stamp of `cottage.nbt`, java 1.21.4, \
+         so its `@requires` must admit that target\n",
         later.display(),
-        artifact.display()
     );
     assert_eq!(
         (run.code, run.stdout.as_str(), run.stderr.as_str()),
@@ -468,7 +467,8 @@ fn a_file_diff_blocks_cannot_read_is_refused() {
             vec![&truncated, &src],
             1,
             format!(
-                "error: cannot compare `{}`: nbt I/O: unexpected end of file\n",
+                "error: cannot read `{}` as a Java structure file: nbt I/O: unexpected end of \
+                 file\n",
                 truncated.display()
             ),
         ),
@@ -490,6 +490,37 @@ fn a_file_diff_blocks_cannot_read_is_refused() {
             cases[3].2.as_str()
         ),
         "a structure that cannot be read as its format still writes one document"
+    );
+}
+
+#[test]
+fn a_structure_that_cannot_be_read_is_refused_ahead_of_a_source_that_does_not_parse() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let truncated = tmp.path().join("truncated.nbt");
+    fs::write(&truncated, b"junk").expect("write the truncated file");
+    let broken = write_source(
+        tmp.path(),
+        "broken.crn",
+        "struct s size=2x2\n  floor mat_slot=(\n",
+    );
+    let stderr = format!(
+        "error: cannot read `{}` as a Java structure file: nbt I/O: unexpected end of file\n",
+        truncated.display()
+    );
+    let run = diff_blocks(&[&truncated, &broken]);
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(1), "", stderr.as_str())
+    );
+    let json = diff_blocks(&[
+        &truncated,
+        &broken,
+        Path::new("--format"),
+        Path::new("json"),
+    ]);
+    assert_eq!(
+        (json.code, json.stdout.as_str(), json.stderr.as_str()),
+        (Some(1), "{\n  \"diagnostics\": []\n}\n", stderr.as_str())
     );
 }
 

@@ -1,12 +1,11 @@
 //! The `workspace/executeCommand` commands, run over the documents the editor holds open.
 
-use std::fs::File;
-use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::finding::Found;
-use cairn_lang_formats::diff_blocks::diff_blocks;
-use cairn_lang_formats::import::{DecodedStructure, ImportFormat, decode_structure};
+use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, diff_blocks};
+use cairn_lang_formats::import::decode_structure_file;
 use cairn_lang_formats::info::{
     EditionsRefused, InfoRequest, InfoSink, ReportFormat, RequestedEditions, info,
     requested_editions,
@@ -163,34 +162,35 @@ fn run_diff_blocks(
             structure.as_str(),
         ))
     })?;
-    let decoded = read_structure(&path).map_err(|message| {
-        CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` `structure`: {message}"))
+    let decoded = decode_structure_file(&path).map_err(|err| {
+        CommandRefused::invalid_params(format!("`{DIFF_BLOCKS}` `structure`: {err}"))
     })?;
     let run = diff_blocks(source, &decoded);
-    let document = match &run.outcome {
-        Ok(document) => serde_json::to_value(document),
-        Err(_) => serde_json::to_value(run.failure_document(source)),
-    };
-    document.map_err(|err| unserialisable(DIFF_BLOCKS, &err))
-}
-
-/// The structure file at `path`, decoded as its extension names, or why it cannot be.
-fn read_structure(path: &Path) -> Result<DecodedStructure, String> {
-    let Some(format) = ImportFormat::from_path(path) else {
-        return Err(format!(
-            "`{}` is not a structure file `cairn diff-blocks` reads; name a {} file",
-            path.display(),
-            ImportFormat::choices(),
-        ));
-    };
-    let reader = File::open(path)
-        .map(BufReader::new)
-        .map_err(|err| format!("cannot read `{}`: {err}", path.display()))?;
-    let name = path
-        .file_name()
-        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    decode_structure(reader, format, &name)
-        .map_err(|err| format!("cannot compare `{}`: {err}", path.display()))
+    match &run.outcome {
+        Ok(_) | Err(DiffBlocksRefusal::Findings { .. }) => {}
+        // No finding to put in the document, and no exit code to say the run was refused.
+        Err(refusal) => {
+            let file = file_path(&uri).map_or_else(
+                || uri.as_str().to_owned(),
+                |file| file.display().to_string(),
+            );
+            let lines = LineStarts::new(source);
+            let refusal: Vec<String> = refusal
+                .messages()
+                .iter()
+                .flat_map(|message| message.lines(&file, source, &lines))
+                .collect();
+            return Err(CommandRefused {
+                code: ErrorCode::RequestFailed as i32,
+                message: format!(
+                    "`{DIFF_BLOCKS}` has no report for {}, and no finding refused it:\n{}",
+                    uri.as_str(),
+                    refusal.join("\n"),
+                ),
+            });
+        }
+    }
+    serde_json::to_value(run.json_document(source)).map_err(|err| unserialisable(DIFF_BLOCKS, &err))
 }
 
 /// The error answering a document `command` could not serialise.

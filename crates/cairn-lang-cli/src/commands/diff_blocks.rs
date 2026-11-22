@@ -2,52 +2,57 @@
 //! stamped target, the voxel diff that closes the lift loop (`spec/ecosystem-interop` "Diffing a
 //! lift").
 
+use std::io::ErrorKind;
 use std::path::Path;
 use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::voxel_diff::{DiffReport, Metrics, Thresholds, floor3, percent};
-use cairn_lang_formats::build::finding::Found;
-use cairn_lang_formats::diff_blocks::{
-    DiffBlocksDocument, DiffBlocksRefusal, DiffBlocksRun, diff_blocks,
+use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, DiffBlocksRun, diff_blocks};
+use cairn_lang_formats::import::{
+    DecodeFileError, DecodedStructure, LossKind, decode_structure_file,
 };
-use cairn_lang_formats::import::{DecodedStructure, ImportFormat, LossKind, decode_structure};
+use cairn_lang_formats::info::FailureDocument;
 
 use crate::cli::DiffFormat;
 use crate::pipeline::read_source;
-use crate::report::{
-    print_json, report_diagnostics, report_failure_document, report_run_level,
-    report_structure_message,
-};
-use crate::structure_file::{file_name, open_structure, refuse_extension};
+use crate::report::{print_json, report_diagnostics, report_run_level, report_structure_message};
+use crate::structure_file::refuse_extension;
 
 /// How many regions the text report lists before it counts the rest.
 const LISTED_REGIONS: usize = 10;
 
 pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat) -> ExitCode {
-    let Some(structure_format) = ImportFormat::from_path(structure) else {
-        refuse_extension(structure, "diff-blocks");
-        return ExitCode::from(2);
-    };
-    let reader = match open_structure(structure) {
-        Ok(reader) => reader,
-        Err(code) => return code,
-    };
     let source = match read_source(file) {
         Ok(source) => source,
         Err(code) => return code,
     };
-    let decoded = match decode_structure(reader, structure_format, &file_name(structure)) {
+    let decoded = match decode_structure_file(structure) {
         Ok(decoded) => decoded,
+        Err(DecodeFileError::UnknownExtension(_)) => {
+            refuse_extension(structure, "diff-blocks");
+            return ExitCode::from(2);
+        }
         Err(err) => {
-            eprintln!("error: cannot compare `{}`: {err}", structure.display());
-            return refused(file, &source, format);
+            eprintln!("error: {err}");
+            return match err {
+                DecodeFileError::Io { source, .. } if source.kind() == ErrorKind::NotFound => {
+                    ExitCode::from(2)
+                }
+                DecodeFileError::Io { .. } => ExitCode::from(1),
+                _ => undecoded(format),
+            };
         }
     };
     let run = diff_blocks(&source, &decoded);
-    let document = match report_run(structure, file, &source, format, &decoded, run) {
-        Ok(document) => document,
-        Err(code) => return code,
+    report_run(file, &source, format, &run);
+    if format == DiffFormat::Json
+        && let Err(code) = print_json("the diff", &run.json_document(&source))
+    {
+        return code;
+    }
+    let Ok(compared) = &run.outcome else {
+        return ExitCode::from(1);
     };
     if let Some(unread) = uncompared(&decoded) {
         eprintln!(
@@ -55,86 +60,46 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
             structure.display()
         );
     }
-    match format {
-        DiffFormat::Text => print_text(structure, file, &decoded, &document.report),
-        DiffFormat::Json => {
-            if let Err(code) = print_json("the diff", &document) {
-                return code;
-            }
-        }
+    let report = &compared.document.report;
+    if format == DiffFormat::Text {
+        print_text(structure, file, &decoded, report);
     }
-    if document.report.converged {
+    if report.converged {
         return ExitCode::SUCCESS;
     }
     if format == DiffFormat::Text {
-        report_unconverged(file, &document.report);
+        report_unconverged(file, report);
     }
     ExitCode::from(1)
 }
 
-/// Report what building the source found, and return the document, or the exit code of the
-/// refusal `run` ends in.
-fn report_run(
-    structure: &Path,
-    file: &Path,
-    source: &str,
-    format: DiffFormat,
-    decoded: &DecodedStructure,
-    run: DiffBlocksRun,
-) -> Result<DiffBlocksDocument, ExitCode> {
-    let DiffBlocksRun {
-        findings,
-        conflicts,
-        degraded,
-        outcome,
-    } = run;
-    let lines = LineStarts::new(source);
-    // As in `compile`, every conflict is reported, beside the error findings too.
-    let report_conflicts = || {
-        for conflict in &conflicts {
-            report_run_level(file, source, &lines, conflict);
-        }
-    };
-    let refusal = match outcome {
-        Ok(document) => {
-            report_diagnostics(file, source, &lines, &findings);
-            degraded.iter().for_each(report_structure_message);
-            return Ok(document);
-        }
-        Err(DiffBlocksRefusal::Findings) => {
-            let code = report_failure_document(file, source, format.failure_report(), &findings);
-            report_conflicts();
-            return Err(code);
-        }
-        Err(refusal) => refusal,
-    };
-    report_diagnostics(file, source, &lines, &findings);
-    report_conflicts();
-    match refusal {
-        DiffBlocksRefusal::Findings | DiffBlocksRefusal::Conflicts => {}
-        DiffBlocksRefusal::RunLevel(message) => report_run_level(file, source, &lines, &message),
-        DiffBlocksRefusal::Floor(message) => {
-            report_run_level(file, source, &lines, &message);
-            eprintln!(
-                "  note: `cairn diff-blocks` builds the source at the stamp of `{}`, {} {}, so its \
-                 `@requires` must admit that target",
-                structure.display(),
-                decoded.stamp.edition(),
-                decoded.stamp.mc_version(),
-            );
-        }
-        DiffBlocksRefusal::Backend(message) => report_structure_message(&message),
+/// The exit of a structure that cannot be read as its format; under `--format json`, one document
+/// per input still, `{"diagnostics": []}`.
+fn undecoded(format: DiffFormat) -> ExitCode {
+    if format == DiffFormat::Json
+        && let Err(code) = print_json("diagnostics", &FailureDocument::new(Vec::new()))
+    {
+        return code;
     }
-    Err(refused(file, source, format))
+    ExitCode::from(1)
 }
 
-/// The exit of a refusal reported on stderr; under `--format json`, one document per input
-/// still, `{"diagnostics": []}`.
-fn refused(file: &Path, source: &str, format: DiffFormat) -> ExitCode {
-    let none: [Found; 0] = [];
-    match format {
-        DiffFormat::Json => report_failure_document(file, source, format.failure_report(), &none),
-        DiffFormat::Text => ExitCode::from(1),
+/// Report on stderr what building the source found, beside the document under `--format json`,
+/// and why a refused run compares nothing.
+fn report_run(file: &Path, source: &str, format: DiffFormat, run: &DiffBlocksRun) {
+    let lines = LineStarts::new(source);
+    let in_document = matches!(run.outcome, Err(DiffBlocksRefusal::Findings { .. }))
+        && format == DiffFormat::Json;
+    if !in_document {
+        report_diagnostics(file, source, &lines, &run.findings);
+    }
+    match &run.outcome {
+        Ok(compared) => compared.degraded.iter().for_each(report_structure_message),
+        Err(refusal) => {
+            for message in refusal.messages() {
+                report_run_level(file, source, &lines, message);
+            }
+        }
     }
 }
 

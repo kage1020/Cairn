@@ -684,15 +684,6 @@ impl InfoFormat {
     }
 }
 
-impl DiffFormat {
-    pub(crate) fn failure_report(self) -> FailureReport {
-        match self {
-            Self::Json => FailureReport::Json,
-            Self::Text => FailureReport::Text,
-        }
-    }
-}
-
 impl LowerFormat {
     pub(crate) fn failure_report(self) -> FailureReport {
         match self {

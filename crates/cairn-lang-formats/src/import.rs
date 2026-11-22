@@ -7,8 +7,9 @@ mod grid;
 mod stamp;
 
 use std::fmt;
-use std::io::Read;
-use std::path::Path;
+use std::fs::File;
+use std::io::{self, BufReader, Read};
+use std::path::{Path, PathBuf};
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::PALETTE_CAPACITY;
@@ -60,6 +61,19 @@ impl ImportFormat {
     pub fn choices() -> String {
         let [rest @ .., last] = Self::ALL.map(|format| format!("`.{}`", format.extension()));
         format!("{} or {last}", rest.join(", "))
+    }
+
+    /// Why a path whose extension names no format may still hold a structure, when it may.
+    #[must_use]
+    pub fn unread_note(path: &Path) -> Option<&'static str> {
+        let legacy = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("schematic"));
+        legacy.then_some(
+            "a `.schematic` stores the numeric block ids of the releases before 1.13, which this \
+             version does not read; save it as a `.schem` from WorldEdit 7 or later and name that",
+        )
     }
 
     /// The extension, without its dot.
@@ -245,6 +259,73 @@ pub enum ImportError {
     /// The grids have no transliteration.
     #[error("{0}")]
     Transliterate(#[from] TransliterateError),
+}
+
+/// Why a structure file on disk has no decoding.
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum DecodeFileError {
+    /// The path's extension names no format an import reads.
+    #[error("{}", unknown_extension(.0))]
+    UnknownExtension(PathBuf),
+    /// The file cannot be opened.
+    #[error("cannot read `{}`: {source}", .path.display())]
+    Io {
+        /// The file.
+        path: PathBuf,
+        /// Why it cannot be opened.
+        source: io::Error,
+    },
+    /// The bytes have no decoding as the format the extension names.
+    #[error("cannot read `{}` as {}: {source}", .path.display(), .format.label())]
+    Decode {
+        /// The file.
+        path: PathBuf,
+        /// The format its extension names.
+        format: ImportFormat,
+        /// Why the bytes have no decoding.
+        source: ImportError,
+    },
+}
+
+/// The refusal of `path` as a structure file, with what may be in it and what to name instead.
+fn unknown_extension(path: &Path) -> String {
+    let note = ImportFormat::unread_note(path).map_or_else(String::new, |note| format!("; {note}"));
+    format!(
+        "`{}` is not a structure file this build reads{note}; name a {} file",
+        path.display(),
+        ImportFormat::choices(),
+    )
+}
+
+/// Opens the structure file at `path` and decodes it as the format its extension names.
+///
+/// # Errors
+///
+/// [`DecodeFileError`] for an extension naming no format, a file that cannot be opened, or
+/// bytes [`decode_structure`] refuses.
+///
+/// # Panics
+///
+/// Those of [`decode_structure`].
+pub fn decode_structure_file(path: &Path) -> Result<DecodedStructure, DecodeFileError> {
+    let Some(format) = ImportFormat::from_path(path) else {
+        return Err(DecodeFileError::UnknownExtension(path.to_owned()));
+    };
+    let reader = File::open(path)
+        .map(BufReader::new)
+        .map_err(|source| DecodeFileError::Io {
+            path: path.to_owned(),
+            source,
+        })?;
+    let file_name = path
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    decode_structure(reader, format, &file_name).map_err(|source| DecodeFileError::Decode {
+        path: path.to_owned(),
+        format,
+        source,
+    })
 }
 
 /// Decodes `reader`, a file `file_name` of `format`, into its stamped block grids.
