@@ -198,6 +198,35 @@ fn a_shared_block_version_is_stamped_with_the_oldest_target_whose_map_spells_eve
 }
 
 #[test]
+fn a_shared_block_version_no_map_spells_whole_is_stamped_with_the_oldest_that_spells_the_most() {
+    let mut root = root(
+        &array(
+            "corner",
+            Dims { x: 2, y: 1, z: 1 },
+            &["minecraft:oak_stairs[shape=outer_left]", "minecraft:dirt"],
+        ),
+        "1.26.60",
+    );
+    let Tag::Compound(dirt) = &mut block_palette(&mut root)[2] else {
+        panic!("a compound");
+    };
+    let mut odd = Compound::new();
+    odd.insert("bogus", Tag::Int(1));
+    dirt.insert("states", Tag::Compound(odd));
+    let import = imported(&root, "corner.mcstructure");
+    assert_eq!(import.decoded.stamp.mc_version(), "1.26.60");
+    assert_eq!(
+        import.decoded.losses[1..],
+        [loss(
+            "corner",
+            LossKind::Unspelled,
+            "`minecraft:dirt[bogus=1]` (1 cell) has no canonical state at bedrock 1.26.60, so it \
+             is written by its id alone and builds that block's default states"
+        )]
+    );
+}
+
+#[test]
 fn a_block_version_between_shipped_targets_is_stamped_with_the_next() {
     let mut root = root(
         &array("one", Dims { x: 1, y: 1, z: 1 }, &["minecraft:stone"]),

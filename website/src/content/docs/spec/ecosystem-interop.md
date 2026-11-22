@@ -245,7 +245,7 @@ the build ships, chosen by what the file says it was saved at:
 
 - A file saved at a shipped target's `DataVersion`, or at its block version, is stamped with that
   target. Of several that share a block version, it is the oldest whose state map has a canonical
-  state for every block of the file, or the oldest when none has.
+  state for every block of the file, or, when none has, for the most of them.
 - A file saved between two shipped targets is stamped with the nearest after it. The game loads a
   file an older release saved, renaming what it has renamed since, so the later target reads the
   file as the game would. A block the file spells as that release no longer does is refused
