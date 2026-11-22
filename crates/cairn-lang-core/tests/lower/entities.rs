@@ -4,8 +4,9 @@
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::block_array::{
-    AbsentEntity, BlockEntityData, BlockIdSet, BlockState, Enchantment, Entity, EntityData, Face,
-    Item, PaintingLookup, PaintingVariant, SignText, StateDomain, TargetRegistry, Trade,
+    AbsentEntity, Billboard, BlockEntityData, BlockIdSet, BlockState, Enchantment, Entity,
+    EntityData, Face, Item, PaintingLookup, PaintingVariant, Profession, SignText, StateDomain,
+    TargetRegistry, Trade, VillagerLevel,
 };
 use cairn_lang_core::{BlockArrayIr, DiagnosticCode, Edition, lower, parse, resolve};
 
@@ -317,8 +318,8 @@ fn a_villager_offers_the_trades_that_name_it_in_the_order_written() {
             (2, 1, 2),
             Face::South,
             EntityData::Villager {
-                profession: "librarian".to_owned(),
-                level: 4,
+                profession: Profession::Librarian,
+                level: VillagerLevel::Expert,
                 trades: vec![
                     Trade {
                         buy: item("emerald", 24),
@@ -401,8 +402,8 @@ fn librarian(nbt: &str) -> Entity {
             (2, 1, 2),
             Face::South,
             EntityData::Villager {
-                profession: "librarian".to_owned(),
-                level: 4,
+                profession: Profession::Librarian,
+                level: VillagerLevel::Expert,
                 trades: vec![Trade {
                     buy: item("book", 1),
                     sell: item("emerald", 1),
@@ -510,7 +511,7 @@ fn a_display_stands_on_its_cell_s_floor_showing_what_its_keys_name() {
                 Face::South,
                 EntityData::TextDisplay {
                     lines: vec!["Inn".to_owned(), "rooms".to_owned()],
-                    billboard: "center".to_owned(),
+                    billboard: Billboard::Center,
                     scale: 1.5,
                 },
             ),
@@ -627,7 +628,7 @@ fn a_hologram_is_built_as_the_member_form_its_slot_binds_with_the_form_s_keys() 
             Face::North,
             EntityData::TextDisplay {
                 lines: vec!["Inn".to_owned()],
-                billboard: "vertical".to_owned(),
+                billboard: Billboard::Vertical,
                 scale: 1.0,
             },
         )],

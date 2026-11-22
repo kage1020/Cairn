@@ -7,7 +7,7 @@ use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
-use crate::block_array::{Enchantment, EntityData, Item, Trade};
+use crate::block_array::{Enchantment, EntityData, Item, Profession, Trade, VillagerLevel};
 
 use super::canvas::MemberCanvas;
 use super::entity::{
@@ -36,28 +36,6 @@ const SPAWN: Fixture = Fixture {
 
 /// What becomes of an unread argument of an entity that is not built.
 const NOT_BUILT: &str = "this entity is not built either way — see the finding on the same line";
-
-/// The professions a villager's `profession=` takes, `none` first.
-pub(super) const PROFESSIONS: [&str; 15] = [
-    "none",
-    "armorer",
-    "butcher",
-    "cartographer",
-    "cleric",
-    "farmer",
-    "fisherman",
-    "fletcher",
-    "leatherworker",
-    "librarian",
-    "mason",
-    "nitwit",
-    "shepherd",
-    "toolsmith",
-    "weaponsmith",
-];
-
-/// The levels a villager's `level=` takes, from level 1.
-pub(super) const LEVELS: [&str; 5] = ["novice", "apprentice", "journeyman", "expert", "master"];
 
 /// The most items of one kind a trade buys or sells.
 const STACK: i64 = 64;
@@ -97,15 +75,15 @@ pub(super) fn fill_villager(
         canvas,
         diagnostics,
         |member| {
-            let profession = word_of(member, "profession", &PROFESSIONS)?.unwrap_or(PROFESSIONS[0]);
-            let level = word_of(member, "level", &LEVELS)?
-                .and_then(|level| LEVELS.iter().position(|known| *known == level))
-                .unwrap_or(0);
+            let profession = word_of(member, "profession", Profession::ALL, Profession::as_str)?
+                .unwrap_or(Profession::None);
+            let level = word_of(member, "level", VillagerLevel::ALL, VillagerLevel::as_str)?
+                .unwrap_or(VillagerLevel::Novice);
             Ok((
                 "minecraft:villager".to_owned(),
                 EntityData::Villager {
-                    profession: profession.to_owned(),
-                    level: u8::try_from(level + 1).expect("five levels fit a byte"),
+                    profession,
+                    level,
                     trades: Vec::new(),
                 },
             ))
@@ -184,23 +162,31 @@ fn stand(
     });
 }
 
-/// `key=` when it is one of `words`, `None` when the line writes none, or the refusal of any
-/// other value.
-fn word_of<'m>(
-    member: &'m Member,
+/// The one of `all` that `key=` names by its `name`, `None` when the line writes none, or the
+/// refusal of any other value.
+fn word_of<T: Copy>(
+    member: &Member,
     key: &str,
-    words: &[&'static str],
-) -> Result<Option<&'m str>, Refusal> {
+    all: &[T],
+    name: fn(T) -> &'static str,
+) -> Result<Option<T>, Refusal> {
     let Some(raw) = member.written(key) else {
         return Ok(None);
     };
-    if let ValueKind::Ident(word) = &raw.value.kind
-        && words.contains(&word.as_str())
+    let written = match &raw.value.kind {
+        ValueKind::Ident(word) => Some(word.as_str()),
+        _ => None,
+    };
+    if let Some(found) = all
+        .iter()
+        .copied()
+        .find(|known| Some(name(*known)) == written)
     {
-        return Ok(Some(word.as_str()));
+        return Ok(Some(found));
     }
+    let words: Vec<&str> = all.iter().map(|known| name(*known)).collect();
     let mut notes = vec![format!("`{key}=` takes {}", words.join(", "))];
-    if let ValueKind::Ident(word) = &raw.value.kind {
+    if let Some(word) = written {
         notes.extend(
             nearest_match(word, words.iter().copied())
                 .map(|near| did_you_mean(&format!("{key}={near}"))),

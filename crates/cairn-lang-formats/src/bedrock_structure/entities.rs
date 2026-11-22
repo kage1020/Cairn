@@ -2,39 +2,18 @@
 //! as the frame block Bedrock has for one, with its block entity, and every other entity in the
 //! structure's `entities`, each with its point in the structure's coordinates.
 
-use cairn_lang_core::block_array::{Entity, EntityData, Face, Item, Trade};
+use cairn_lang_core::block_array::{Entity, EntityData, Face, Item, Profession, Trade};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::BedrockStructureError;
 use crate::nbt_text::{compound_of, first_unencodable, put_over};
-
-/// The experience each villager level starts at, from level 1.
-const LEVEL_XP: [i32; 5] = [0, 10, 70, 150, 250];
+use crate::villager::saved_experience;
 
 /// How many times a trade sells before its villager restocks.
 const TRADE_USES: i32 = 12;
 
 /// How much a trade's price moves with demand.
 const TRADE_PRICE_MULTIPLIER: f32 = 0.05;
-
-/// Each profession with the number Bedrock's villager saves as its `Variant`, `none` 0.
-const PROFESSIONS: [(&str, i32); 15] = [
-    ("none", 0),
-    ("farmer", 1),
-    ("fisherman", 2),
-    ("shepherd", 3),
-    ("fletcher", 4),
-    ("librarian", 5),
-    ("cartographer", 6),
-    ("cleric", 7),
-    ("armorer", 8),
-    ("weaponsmith", 9),
-    ("toolsmith", 10),
-    ("butcher", 11),
-    ("leatherworker", 12),
-    ("mason", 13),
-    ("nitwit", 14),
-];
 
 /// Each enchantment by its Java id, without the namespace, with the number Bedrock saves it as.
 const ENCHANTMENTS: [(&str, i16); 41] = [
@@ -226,21 +205,17 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
             level,
             trades,
         } => {
-            let variant = PROFESSIONS
-                .iter()
-                .find(|(known, _)| known == profession)
-                .map_or(0, |&(_, variant)| variant);
-            if variant != 0 {
-                definitions.push(Tag::String(format!("+{profession}")));
+            if *profession != Profession::None {
+                definitions.push(Tag::String(format!("+{}", profession.as_str())));
             }
-            let tier = i32::from(level.clamp(&1, &5) - 1);
-            nbt.insert("Variant", Tag::Int(variant));
-            nbt.insert("PreferredProfession", Tag::String(profession.clone()));
-            nbt.insert("TradeTier", Tag::Int(tier));
+            let tier = i32::from(level.number()) - 1;
+            nbt.insert("Variant", Tag::Int(variant(*profession)));
             nbt.insert(
-                "TradeExperience",
-                Tag::Int(LEVEL_XP[usize::try_from(tier).unwrap_or(0)].max(1)),
+                "PreferredProfession",
+                Tag::String(profession.as_str().to_owned()),
             );
+            nbt.insert("TradeTier", Tag::Int(tier));
+            nbt.insert("TradeExperience", Tag::Int(saved_experience(*level)));
             if !trades.is_empty() {
                 let recipes = trades
                     .iter()
@@ -255,6 +230,27 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
     }
     nbt.insert("definitions", Tag::List(List::of_tags(8, definitions)));
     Ok(nbt)
+}
+
+/// The number Bedrock's villager saves as its `Variant` for `profession`.
+const fn variant(profession: Profession) -> i32 {
+    match profession {
+        Profession::None => 0,
+        Profession::Farmer => 1,
+        Profession::Fisherman => 2,
+        Profession::Shepherd => 3,
+        Profession::Fletcher => 4,
+        Profession::Librarian => 5,
+        Profession::Cartographer => 6,
+        Profession::Cleric => 7,
+        Profession::Armorer => 8,
+        Profession::Weaponsmith => 9,
+        Profession::Toolsmith => 10,
+        Profession::Butcher => 11,
+        Profession::Leatherworker => 12,
+        Profession::Mason => 13,
+        Profession::Nitwit => 14,
+    }
 }
 
 fn floats(values: &[f32]) -> Tag {

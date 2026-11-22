@@ -52,10 +52,10 @@ pub enum EntityData {
     ArmorStand,
     /// A villager and the trades it offers, in the order written.
     Villager {
-        /// Its profession, as `librarian`.
-        profession: String,
-        /// Its level, 1 for novice to 5 for master.
-        level: u8,
+        /// Its profession.
+        profession: Profession,
+        /// Its level.
+        level: VillagerLevel,
         /// Its trades.
         #[serde(skip_serializing_if = "Vec::is_empty")]
         trades: Vec<Trade>,
@@ -64,8 +64,8 @@ pub enum EntityData {
     TextDisplay {
         /// Its lines, top first.
         lines: Vec<String>,
-        /// How it turns toward the viewer, as `fixed`.
-        billboard: String,
+        /// How it turns toward the viewer.
+        billboard: Billboard,
         /// Its scale on every axis, as the float the game saves.
         scale: f32,
     },
@@ -85,6 +85,104 @@ pub enum EntityData {
     },
     /// An entity a `spawn` places, which holds only what its `nbt=` writes.
     Spawn,
+}
+
+/// Declares a field-less enum named by the words of its `ALL`, in the order its variants are listed.
+macro_rules! named {
+    ($(#[$meta:meta])* $name:ident { $($(#[$v_meta:meta])* $variant:ident => $word:literal,)+ }) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+        pub enum $name {
+            $($(#[$v_meta])* #[serde(rename = $word)] $variant,)+
+        }
+
+        impl $name {
+            /// Every value, in the order a key lists its words.
+            pub const ALL: &'static [Self] = &[$(Self::$variant),+];
+
+            /// The word a line writes for it.
+            #[must_use]
+            pub const fn as_str(self) -> &'static str {
+                match self {
+                    $(Self::$variant => $word,)+
+                }
+            }
+        }
+    };
+}
+
+named! {
+    /// A villager's profession, as `profession=` names it (`spec/entities` "Standing entities").
+    Profession {
+        /// No profession, the default.
+        None => "none",
+        /// An armorer.
+        Armorer => "armorer",
+        /// A butcher.
+        Butcher => "butcher",
+        /// A cartographer.
+        Cartographer => "cartographer",
+        /// A cleric.
+        Cleric => "cleric",
+        /// A farmer.
+        Farmer => "farmer",
+        /// A fisherman.
+        Fisherman => "fisherman",
+        /// A fletcher.
+        Fletcher => "fletcher",
+        /// A leatherworker.
+        Leatherworker => "leatherworker",
+        /// A librarian.
+        Librarian => "librarian",
+        /// A mason.
+        Mason => "mason",
+        /// A nitwit, who never takes a profession.
+        Nitwit => "nitwit",
+        /// A shepherd.
+        Shepherd => "shepherd",
+        /// A toolsmith.
+        Toolsmith => "toolsmith",
+        /// A weaponsmith.
+        Weaponsmith => "weaponsmith",
+    }
+}
+
+named! {
+    /// A villager's level, as `level=` names it.
+    VillagerLevel {
+        /// Level 1, the default.
+        Novice => "novice",
+        /// Level 2.
+        Apprentice => "apprentice",
+        /// Level 3.
+        Journeyman => "journeyman",
+        /// Level 4.
+        Expert => "expert",
+        /// Level 5.
+        Master => "master",
+    }
+}
+
+impl VillagerLevel {
+    /// Its number, 1 for a novice to 5 for a master.
+    #[must_use]
+    pub const fn number(self) -> u8 {
+        self as u8 + 1
+    }
+}
+
+named! {
+    /// How a text display turns toward the viewer, as `billboard=` names it.
+    Billboard {
+        /// It keeps the way it faces, the default.
+        Fixed => "fixed",
+        /// It turns about the vertical axis.
+        Vertical => "vertical",
+        /// It turns about the horizontal axis.
+        Horizontal => "horizontal",
+        /// It turns about its centre to face the viewer.
+        Center => "center",
+    }
 }
 
 /// An item stack an entity holds or a trade names.

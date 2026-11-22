@@ -23,6 +23,7 @@ pub mod registry;
 pub mod schem;
 mod site_frame;
 pub mod target;
+mod villager;
 pub mod volume;
 pub mod world;
 

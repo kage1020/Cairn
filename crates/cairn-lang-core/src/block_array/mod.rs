@@ -23,7 +23,9 @@ use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
 pub use constraint::{Constraint, Contents, EntityBox, Support, Vertical};
-pub use entity::{Enchantment, Entity, EntityData, Item, Trade};
+pub use entity::{
+    Billboard, Enchantment, Entity, EntityData, Item, Profession, Trade, VillagerLevel,
+};
 pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{

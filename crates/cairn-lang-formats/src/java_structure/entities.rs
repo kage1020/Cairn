@@ -1,11 +1,12 @@
 //! The IR's entities as a Java structure's `entities` saves them: each with its point, its cell
 //! and its `nbt`, in the shape the target's `DataVersion` reads (`spec/entities` "Two tiers").
 
-use cairn_lang_core::block_array::{Entity, EntityData, Face, Item, Trade};
+use cairn_lang_core::block_array::{Billboard, Entity, EntityData, Face, Item, Trade};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::{JavaStructureError, palette_entry, palette_entry_keys, text_component};
 use crate::nbt_text::{compound_of, first_unencodable, put_over};
+use crate::villager::saved_experience;
 
 /// The first `DataVersion` whose items are saved as data components, 1.20.5's.
 const ITEM_COMPONENTS_FROM: i32 = 3837;
@@ -15,9 +16,6 @@ const BARE_ENCHANTMENT_LEVELS_FROM: i32 = 4325;
 
 /// The item that keeps its enchantment as a stored one.
 const ENCHANTED_BOOK: &str = "minecraft:enchanted_book";
-
-/// The experience each villager level starts at, from level 1, as the game levels one up.
-const LEVEL_XP: [i32; 5] = [0, 10, 70, 150, 250];
 
 /// How many times a trade sells before its villager restocks.
 const TRADE_USES: i32 = 12;
@@ -104,10 +102,13 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
             nbt.insert("Rotation", rotation(entity.facing));
             let mut data = Compound::new();
             data.insert("type", Tag::String("minecraft:plains".to_owned()));
-            data.insert("profession", Tag::String(format!("minecraft:{profession}")));
-            data.insert("level", Tag::Int(i32::from(*level)));
+            data.insert(
+                "profession",
+                Tag::String(format!("minecraft:{}", profession.as_str())),
+            );
+            data.insert("level", Tag::Int(i32::from(level.number())));
             nbt.insert("VillagerData", Tag::Compound(data));
-            nbt.insert("Xp", Tag::Int(villager_xp(*level)));
+            nbt.insert("Xp", Tag::Int(saved_experience(*level)));
             if !trades.is_empty() {
                 let recipes = trades
                     .iter()
@@ -123,36 +124,29 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
             billboard,
             scale,
         } => {
-            display(&mut nbt, entity.facing, billboard, *scale);
+            display(&mut nbt, entity.facing, *billboard, *scale);
             nbt.insert(
                 "text",
                 Tag::String(text_component(&lines.join("\n"), data_version)),
             );
         }
         EntityData::BlockDisplay { block, scale } => {
-            display(&mut nbt, entity.facing, "fixed", *scale);
+            display(&mut nbt, entity.facing, Billboard::Fixed, *scale);
             let keys = palette_entry_keys(data_version);
             nbt.insert("block_state", Tag::Compound(palette_entry(block, keys)));
         }
         EntityData::ItemDisplay { item, scale } => {
-            display(&mut nbt, entity.facing, "fixed", *scale);
+            display(&mut nbt, entity.facing, Billboard::Fixed, *scale);
             nbt.insert("item", Tag::Compound(item_stack(item, data_version)));
         }
     }
     nbt
 }
 
-/// The experience a villager of `level` is saved with: its level's start, and 1 for a novice,
-/// whom the game would otherwise take the profession of without a job site.
-fn villager_xp(level: u8) -> i32 {
-    let start = LEVEL_XP[usize::from(level.clamp(1, 5) - 1)];
-    start.max(1)
-}
-
 /// What a display's `nbt` holds beside what it shows: its yaw, its billboard and its scale.
-fn display(nbt: &mut Compound, facing: Face, billboard: &str, scale: f32) {
+fn display(nbt: &mut Compound, facing: Face, billboard: Billboard, scale: f32) {
     nbt.insert("Rotation", rotation(facing));
-    nbt.insert("billboard", Tag::String(billboard.to_owned()));
+    nbt.insert("billboard", Tag::String(billboard.as_str().to_owned()));
     let floats = |values: &[f32]| {
         Tag::List(List::of_tags(
             5,

@@ -6,7 +6,7 @@ use crate::diagnostic::Diagnostic;
 use crate::intent::{Member, MemberRole};
 
 use crate::block_array::args::{diag_invalid_member, read_or_ignore, strings_or_ignore};
-use crate::block_array::{EntityData, Item};
+use crate::block_array::{Billboard, EntityData, Item};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::entity::{
@@ -34,9 +34,6 @@ const ITEM_DISPLAY: Fixture = Fixture {
     keyword: "item_display",
     noun: "item display",
 };
-
-/// The ways a text display's `billboard=` turns it toward the viewer, its default first.
-pub(super) const BILLBOARDS: [&str; 4] = ["fixed", "vertical", "horizontal", "center"];
 
 /// What becomes of an unread argument of an entity that is not built.
 const NOT_BUILT: &str = "this entity is not built either way — see the finding on the same line";
@@ -88,7 +85,10 @@ fn show_text(
         member,
         "billboard",
         |kind| match kind {
-            ValueKind::Ident(word) => BILLBOARDS.iter().find(|known| **known == word.as_str()),
+            ValueKind::Ident(word) => Billboard::ALL
+                .iter()
+                .copied()
+                .find(|known| known.as_str() == word.as_str()),
             _ => None,
         },
         "one of `fixed`, `vertical`, `horizontal` and `center`",
@@ -97,8 +97,7 @@ fn show_text(
         unread.push(argument);
         None
     })
-    .copied()
-    .unwrap_or(BILLBOARDS[0]);
+    .unwrap_or(Billboard::Fixed);
     let scale = scale_of(member, &mut unread);
     let built = match place(
         TEXT_DISPLAY,
@@ -117,7 +116,7 @@ fn show_text(
                 standing_point(placed.cell),
                 EntityData::TextDisplay {
                     lines,
-                    billboard: billboard.to_owned(),
+                    billboard,
                     scale,
                 },
                 &mut unread,
