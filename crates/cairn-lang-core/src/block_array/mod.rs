@@ -505,6 +505,10 @@ impl BlockState {
     /// Canonical Minecraft id for the air block.
     pub const AIR_ID: &'static str = "minecraft:air";
 
+    /// The ids a cell holds no block at: [`Self::AIR_ID`], cave air and void air.
+    pub const AIR_IDS: [&'static str; 3] =
+        ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
+
     /// Canonical Minecraft id for water, which a water `fill` pours.
     pub const WATER_ID: &'static str = "minecraft:water";
 

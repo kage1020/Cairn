@@ -15,6 +15,8 @@ title: "13. 評価フレームワーク"
 
 lint の段階は、実行のターゲットでの `cairn check` と `cairn compile` です。そのため、ループには作者が見るものがそのまま見え、ハーネスが独自にジオメトリを調べることはありません。上の 2 つのジオメトリの不具合のうち、壁外の窓は `E_INVALID_MEMBER` になります。空中のドアは、ジオメトリの区分のうちまだどのコマンドも検査しない部分なので ([lint](/ja/spec/lint/#意味カテゴリ))、これを含むプログラムも合格し得ます。`cairn check` がこれを報告するようになれば、ハーネスを変えずにループがそれを見るようになります。
 
+[§13.2](#132-逆変換の補助指標) の逆変換の指標のうち、`block_iou`、`state_accuracy`、`residual_ratio` は `cairn diff-blocks` が計算し、それ以外はまだどれも計算しません。
+
 ## 13.1 主要な指標
 
 | 指標 | 測るもの |
@@ -50,8 +52,8 @@ lint の段階は、実行のターゲットでの `cairn check` と `cairn comp
 
 逆変換の品質 ([エコシステム連携](/ja/spec/ecosystem-interop/)) は主要な評価から外し、補助的な指標として扱います。情報の欠落を許容する方針と合わせるためです。測るのは「形を再現できたか」ではなく、**「編集しやすい DSL になったか」** です。
 
-- `block_iou`、`state_accuracy` (facing / shape / waterlogged の一致)、`entity_accuracy` (額縁 / 看板 / 村人 / display の保持)。
-- `residual_ratio`: リフト後に残った raw の体積。`compression_ratio`: ボクセル数 ÷ トークン数。
+- `block_iou` と `state_accuracy` (facing / shape / waterlogged の一致)。定義は [エコシステム連携 §12.2.1](/ja/spec/ecosystem-interop/#1221-リフトの差分) のとおりです。`entity_accuracy` (額縁 / 看板 / 村人 / display の保持)。
+- `residual_ratio`: リフトのブロックのうち、まだ raw のメンバーが組む割合。定義は §12.2.1 のとおりです。`compression_ratio`: ボクセル数 ÷ トークン数。
 - `editability_score`: 名前付きメンバーの数、スロット化の割合、安定したアドレスの割合。
 - `theme_extraction_score`: 具体的なブロックがインラインで書かれず、スロットとテーマに分離されているか。
 - `symmetry_score`: `repeat` / `mirror` / `def` に畳み込まれた割合。`version_portability`: 正規トークンの割合。

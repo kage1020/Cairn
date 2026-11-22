@@ -189,9 +189,11 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   boundary version and reason. Cauldron split @1.17, wall connection bool→none/low/tall @1.16, item
   format @1.20.5 are the built-in catalog's. See
   [versioning-editions](/spec/versioning-editions/#the-semantic-sensitive-row).
-- **Block IoU.** Voxel intersection-over-union used for the import self-correction loop. Convergence
-  threshold ≥ 0.985. See
-  [ecosystem-interop §12.2](/spec/ecosystem-interop/#122-reverse-direction-the-compiler-transliterates-an-llm-lifts),
+- **Block IoU.** `block_iou`, the voxel intersection-over-union `cairn diff-blocks` scores a lift
+  by: the cells where a structure file and a build hold the same block id, over the cells either
+  holds a block at. A lift converges at ≥ 0.985, with `state_accuracy` ≥ 0.995 (matched cells whose
+  states agree) and residual raw ≤ 5% (`residual_ratio`, built cells a raw member builds). See
+  [ecosystem-interop §12.2.1](/spec/ecosystem-interop/#1221-diffing-a-lift),
   [evaluation §13.2](/spec/evaluation/#132-reverse-conversion-auxiliary-metrics).
 - **Zero-shot Compile Rate / Fix Convergence Rate / Token Efficiency / Edit Stability.** The four
   primary spec-iteration metrics. See [evaluation §13.1](/spec/evaluation/#131-primary-metrics).
@@ -233,3 +235,7 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   `origin=imported` so they are not treated as first-class design DSL: an imported raw member sizes
   the volume and takes the connection states it leaves out from its neighbours. See
   [materials-themes §7.4](/spec/materials-themes/#74-raw-blocks).
+- **Region.** Cells a voxel diff finds missing, extra, replaced or in another state, of one block
+  and standing together, reported with the member that likely caused them and, when building with
+  one closes them, an `edit` line. See
+  [ecosystem-interop §12.2.2](/spec/ecosystem-interop/#1222-regions-and-their-causes).

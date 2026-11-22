@@ -20,6 +20,7 @@ use crate::block_array::{BlockState, Dims, PaletteIndex, TargetRegistry};
 use crate::diagnostic::{Diagnostic, DiagnosticCode};
 use crate::edition::Edition;
 
+pub(crate) use emit::spelled;
 pub use names::unit_names;
 
 /// The widest and deepest footprint one written body takes; a grid past it on `x` or `z` is
@@ -147,23 +148,42 @@ impl GridEntry {
 
     /// Whether `built` builds the same block as this entry at the target.
     fn is_built_as(&self, built: &BlockState) -> bool {
-        if built.id != self.state.id {
-            return false;
+        built.id == self.state.id
+            && self
+                .compared_keys(built)
+                .all(|key| self.read(&self.state, key) == self.read(built, key))
+    }
+
+    /// Each property `built` holds at another value than this entry, as `(key, this entry's
+    /// value, built's value)`, a property one side leaves out read as the target's default.
+    pub(crate) fn differing_states(
+        &self,
+        built: &BlockState,
+    ) -> Vec<(String, Option<String>, Option<String>)> {
+        let mut out: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+        for key in self.compared_keys(built) {
+            let (expected, got) = (self.read(&self.state, key), self.read(built, key));
+            if expected != got && !out.iter().any(|(seen, _, _)| seen == key) {
+                out.push((key.clone(), expected.cloned(), got.cloned()));
+            }
         }
-        let read = |state: &BlockState, key: &str| {
-            state
-                .properties
-                .get(key)
-                .or_else(|| self.defaults.get(key))
-                .cloned()
-        };
-        let keys = built
+        out
+    }
+
+    /// Every property either side writes or the target gives a default for, but those the target
+    /// does not read; a key both sides name comes up more than once.
+    fn compared_keys<'a>(&'a self, built: &'a BlockState) -> impl Iterator<Item = &'a String> {
+        built
             .properties
             .keys()
             .chain(self.state.properties.keys())
-            .chain(self.defaults.keys());
-        keys.filter(|key| !self.unread.contains(key))
-            .all(|key| read(built, key) == read(&self.state, key))
+            .chain(self.defaults.keys())
+            .filter(|key| !self.unread.contains(key))
+    }
+
+    /// The value `state` builds for `key`: its own, else the target's default.
+    fn read<'a>(&'a self, state: &'a BlockState, key: &str) -> Option<&'a String> {
+        state.properties.get(key).or_else(|| self.defaults.get(key))
     }
 }
 
@@ -174,6 +194,9 @@ pub struct GridUnit {
     pub name: String,
     /// The blocks.
     pub grid: BlockGrid,
+    /// Where the grid's `(0, 0, 0)` cell stands in its file: a Litematica region's minimum corner,
+    /// else `(0, 0, 0)`.
+    pub corner: (i32, i32, i32),
     /// Comment lines written above the body, each without its `#`.
     pub comment: Vec<String>,
 }
