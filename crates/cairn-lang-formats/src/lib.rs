@@ -55,8 +55,9 @@ pub use portability::{
     portability_for_java,
 };
 pub use registry::{
-    PackFiles, PackManifest, PackSource, RegistryError, RegistryPack, builtin_pack,
-    builtin_version_tables, load_builtin_pack, load_from_dir,
+    ConstraintIndex, ConstraintsError, PackFiles, PackManifest, PackSource, RegistryError,
+    RegistryPack, builtin_constraints, builtin_pack, builtin_version_tables, builtin_view,
+    load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
 };
 pub use schem::{
     Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,
