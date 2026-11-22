@@ -2,6 +2,7 @@
 //! stamped target, the voxel diff that closes the lift loop (`spec/ecosystem-interop` "Diffing a
 //! lift").
 
+use std::borrow::Cow;
 use std::path::Path;
 use std::process::ExitCode;
 
@@ -11,6 +12,7 @@ use cairn_lang_core::voxel_diff::{
     DiffInput, DiffReport, Metrics, Thresholds, diff, floor3, percent,
 };
 use cairn_lang_core::{Edition, parse};
+use cairn_lang_formats::bedrock_structure::frames_as_blocks;
 use cairn_lang_formats::build::artifact::prepare_artifact;
 use cairn_lang_formats::build::finding::Found;
 use cairn_lang_formats::build::lowering::{BuildRefusal, Lowered, lower_for_target};
@@ -80,7 +82,7 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
         structure: decoded.bodies(),
         source: &source,
         module: &lowered.ir,
-        built: &lowered.block_ir,
+        built: &as_saved(edition, Cow::Borrowed(&lowered.block_ir)),
         build: &build,
     });
     match format {
@@ -218,7 +220,15 @@ fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Opt
     if lowered.verdict().is_err() || checked_by_backend(&lowered.block_ir, target).is_err() {
         return None;
     }
-    Some(lowered.block_ir)
+    Some(as_saved(edition, Cow::Owned(lowered.block_ir)).into_owned())
+}
+
+/// The blocks `block_ir` saves as on `edition`: on Bedrock, each item frame as its block.
+fn as_saved(edition: Edition, block_ir: Cow<'_, BlockArrayIr>) -> Cow<'_, BlockArrayIr> {
+    match edition {
+        Edition::Java => block_ir,
+        Edition::Bedrock => Cow::Owned(frames_as_blocks(&block_ir)),
+    }
 }
 
 /// The document `--format json` prints.

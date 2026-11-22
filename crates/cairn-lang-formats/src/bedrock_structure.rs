@@ -12,7 +12,7 @@ mod read;
 use std::collections::HashMap;
 
 use cairn_lang_core::block_array::{
-    BlockArray, BlockEntityData, BlockState, DyeColor, PaletteIndex, SignText,
+    BlockArray, BlockArrayIr, BlockEntityData, BlockState, DyeColor, PaletteIndex, SignText,
 };
 use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
@@ -294,6 +294,36 @@ impl std::fmt::Debug for McStructure<'_> {
             .field("entities", &self.entities.len())
             .finish_non_exhaustive()
     }
+}
+
+/// `block_ir` with each item frame's cell holding the block Bedrock builds the frame as, by its
+/// id alone, as an import reads that block back (`spec/ecosystem-interop` "Diffing a lift").
+#[must_use]
+pub fn frames_as_blocks(block_ir: &BlockArrayIr) -> BlockArrayIr {
+    let mut saved = block_ir.clone();
+    for array in saved.structures.values_mut() {
+        let frames: Vec<_> = array
+            .entities
+            .iter()
+            .filter_map(|entity| {
+                let (x, y, z) = entity.block_pos;
+                Some((
+                    array.dims.index(x, y, z)?,
+                    entities::frame_block_id(entity)?,
+                ))
+            })
+            .collect();
+        for (index, id) in frames {
+            // The writer refuses a frame in a taken cell, or past a full palette.
+            if array.voxels[index] != PaletteIndex::AIR {
+                continue;
+            }
+            if let Ok(slot) = array.palette.try_intern(BlockState::bare(id)) {
+                array.voxels[index] = slot;
+            }
+        }
+    }
+    saved
 }
 
 /// Checks that `block_array` writes as a `.mcstructure` for `target`, with the [`ParityNote`]s

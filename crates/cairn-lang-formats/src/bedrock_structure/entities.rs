@@ -74,6 +74,17 @@ pub(super) struct Frame {
     pub(super) block_entity: Compound,
 }
 
+/// The block Bedrock builds `entity` as, when it is an item frame.
+pub(super) fn frame_block_id(entity: &Entity) -> Option<&'static str> {
+    matches!(entity.data, EntityData::ItemFrame { .. }).then(|| {
+        if entity.id == "minecraft:glow_item_frame" {
+            "minecraft:glow_frame"
+        } else {
+            "minecraft:frame"
+        }
+    })
+}
+
 /// The entities of `entities` as Bedrock saves them: the frames, then the `entities` list.
 pub(super) fn bedrock_entities(
     entities: &[Entity],
@@ -159,11 +170,7 @@ fn frame(
     Ok(Frame {
         entity: entity.id.clone(),
         pos: entity.block_pos,
-        id: if glowing {
-            "minecraft:glow_frame"
-        } else {
-            "minecraft:frame"
-        },
+        id: frame_block_id(entity).expect("an item frame's entity"),
         states,
         block_entity,
     })

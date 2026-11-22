@@ -6,7 +6,9 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockState, Dims};
 use cairn_lang_core::transliterate::{CHUNK_FOOTPRINT, WrittenBody};
 use cairn_lang_core::voxel_diff::{Metrics, compare};
-use cairn_lang_formats::bedrock_structure::{prepare_mcstructure, read_mcstructure};
+use cairn_lang_formats::bedrock_structure::{
+    frames_as_blocks, prepare_mcstructure, read_mcstructure,
+};
 use cairn_lang_formats::import::{ImportFormat, LossKind, RawImport, import_raw};
 use cairn_lang_formats::java_structure::{prepare_structure, read_structure};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic, read_litematic};
@@ -394,6 +396,9 @@ fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_a
                     let mut held = ir.clone();
                     held.structures
                         .retain(|scope, _| file.scopes.contains(&scope.as_str()));
+                    if edition == Edition::Bedrock {
+                        held = frames_as_blocks(&held);
+                    }
                     let comparison = compare(import.decoded.bodies(), &held);
                     let metrics = comparison.counts.metrics();
                     assert_eq!(

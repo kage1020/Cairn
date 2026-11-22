@@ -186,13 +186,16 @@ Each side is a set of bodies. STRUCTURE's are the bodies an import writes: one f
 region, at the minimum corner the schematic gives it, else one for the file, its structure voids
 read as air. FILE's are its structs and its sites, each site laid as one body: its placements and
 walkways at their positions in the site, a later array's block over an earlier one's and its air
-over nothing, moved so its lowest corner is `(0, 0, 0)`. When FILE builds one body, it is compared
-with the whole of STRUCTURE, whatever either is named: with STRUCTURE's one body, or with its
-regions laid as one body by the same rule, each at its corner, in the order the file stores them.
-So the `.litematic` a site compiles to compares with that site cell for cell. Laid regions are named
-after STRUCTURE's stem, as the body of a `.nbt` is. Otherwise a body pairs with the body of the
-other side that has its name, and a body with none is compared with nothing. Two paired bodies are
-compared cell by cell from their `(0, 0, 0)` cells, over the box that holds both.
+over nothing, moved so its lowest corner is `(0, 0, 0)`. On Bedrock, an item frame takes its cell as
+the `frame` or `glow_frame` block Bedrock builds it as ([Entities
+§8.1](/spec/entities/#hanging-entities)), by its id alone, as an import reads that block. When FILE
+builds one body, it is compared with the whole of STRUCTURE, whatever either is named: with
+STRUCTURE's one body, or with its regions laid as one body by the same rule, each at its corner, in
+the order the file stores them. So the `.litematic` a site compiles to compares with that site cell
+for cell. Laid regions are named after STRUCTURE's stem, as the body of a `.nbt` is. Otherwise a
+body pairs with the body of the other side that has its name, and a body with none is compared with
+nothing. Two paired bodies are compared cell by cell from their `(0, 0, 0)` cells, over the box that
+holds both.
 
 A cell holds a block unless it lies outside its body or holds `minecraft:air`, `minecraft:cave_air`
 or `minecraft:void_air`. Only blocks are compared: the block entity data and entities STRUCTURE
