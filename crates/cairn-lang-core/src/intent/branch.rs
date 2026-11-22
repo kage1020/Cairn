@@ -35,7 +35,14 @@ impl IntentModule {
     /// Whether any member, at any depth, stands under an `@edition` guard.
     #[must_use]
     pub fn has_edition_guards(&self) -> bool {
-        self.member_lists().any(|members| any_guarded(members))
+        self.any_member(&|member| member.edition_guard.is_some())
+    }
+
+    /// Whether any member of a struct, def or site, at any depth, is one `holds` holds of.
+    #[must_use]
+    pub fn any_member(&self, holds: &dyn Fn(&Member) -> bool) -> bool {
+        self.member_lists()
+            .any(|members| any_member_of(members, holds))
     }
 
     /// The lines of the members under an `@edition` guard for `edition`, which only its build reads.
@@ -69,10 +76,10 @@ impl IntentModule {
     }
 }
 
-fn any_guarded(members: &[Member]) -> bool {
+fn any_member_of(members: &[Member], holds: &dyn Fn(&Member) -> bool) -> bool {
     members
         .iter()
-        .any(|member| member.edition_guard.is_some() || any_guarded(&member.children.members))
+        .any(|member| holds(member) || any_member_of(&member.children.members, holds))
 }
 
 fn keep_branch(members: &mut Vec<Member>, edition: Option<Edition>) {

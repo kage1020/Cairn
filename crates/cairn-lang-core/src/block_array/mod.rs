@@ -30,9 +30,10 @@ pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
 };
 pub use material::{
-    AbsentConcept, AbsentEntity, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, IdStanding,
-    MaterialDeferred, OutOfDomain, PaintingLookup, PaintingVariant, StateDomain, TargetRegistry,
-    UnknownId, UnmappedState, bound_canonical_tokens, resolve_block_state,
+    AbsentConcept, AbsentEntity, BlockIdSet, DeclaredElsewhere, DomainFault, EditionTables,
+    IdOrigin, IdStanding, MaterialDeferred, OutOfDomain, PaintingLookup, PaintingVariant,
+    StateDomain, TargetRegistry, UnknownId, UnmappedState, bound_canonical_tokens,
+    resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.

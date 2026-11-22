@@ -1082,19 +1082,25 @@ is still a `W_PHASE_CONFLICT`, since no pack names air. A `beam`, `door`, `chest
 `note_block`, `sign`, `bed`, sensor or actuator built from its default block takes the block the
 pack names for it, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a
 pinned check would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`,
-`E_PARITY_UNSUPPORTED` and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised,
-nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, the four [constraint
-checks](#constraint-checks), which read the pinned version's blocks, and `E_PARTIAL_BUILD`, which
-counts what a build at a target loses. `--edition` alone picks that edition's theme variants and
-keeps its `@edition` guards. With neither flag, each edition's variants are lowered, with that
-edition's guards: a finding whose span is on a line only one edition's variant reads, or whose span
-or one of whose notes' spans is on a line under that edition's guard, is that edition's verdict and
-is reported, and any other finding is reported when every edition raises it with the same code at
-the same span, once for each wording the editions give it. Where some line stands under a guard,
-resolution's findings are kept by the same rule, each edition's branch resolved with no variant
-pinned, so the edition-variant softening of `E_UNRESOLVED_SLOT` ([§11.1](#materials-and-targets))
-holds on every line as it does in a source with no guard. A check with `--target` lowers once,
-against the target, so no finding is reported twice.
+`E_PARITY_UNSUPPORTED` on a block and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not
+raised, nor are `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, the four
+[constraint checks](#constraint-checks), which read the pinned version's blocks, and
+`E_PARTIAL_BUILD`, which counts what a build at a target loses. An edition's paintings and the
+entities it lacks are weighed across its versions: a painting hangs at the size its edition gives
+it, or is `E_INVALID_MEMBER` for a `variant=` no version has ([Entities
+§8.1](/spec/entities/#hanging-entities)), and an entity the edition lacks is `E_PARITY_UNSUPPORTED`
+([Versioning and Editions §10.7](/spec/versioning-editions/#a-block-only-the-other-edition-has)).
+Since each edition answers these apart, a source with a painting, a display or a `hologram` is
+lowered once for each edition, as one with an `@edition` guard is. `--edition` alone picks that
+edition's theme variants and keeps its `@edition` guards. With neither flag, each edition's variants
+are lowered, with that edition's guards: a finding whose span is on a line only one edition's
+variant reads, or whose span or one of whose notes' spans is on a line under that edition's guard,
+is that edition's verdict and is reported, and any other finding is reported when every edition
+raises it with the same code at the same span, once for each wording the editions give it. Where
+some line stands under a guard, resolution's findings are kept by the same rule, each edition's
+branch resolved with no variant pinned, so the edition-variant softening of `E_UNRESOLVED_SLOT`
+([§11.1](#materials-and-targets)) holds on every line as it does in a source with no guard. A check
+with `--target` lowers once, against the target, so no finding is reported twice.
 
 `E_MISSING_MATERIAL` is an **error** by the first rule above rather than the second: the member is
 dropped from the build and nothing is put in its place, which is implicit dropping and not a

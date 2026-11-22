@@ -256,13 +256,39 @@ pub enum IdStanding {
     Declared,
 }
 
+/// What the shipped versions of each edition answer a lowering that pins none of them
+/// (`spec/lint` "Error vs warning").
+pub trait EditionTables {
+    /// What the versions of `edition` make of block `id`.
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding;
+
+    /// What `edition`'s painting table, read across its versions, says of `variant`.
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup;
+
+    /// The other edition's entity `id` names, when no version of `edition` has one.
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity>;
+}
+
 /// The registry of a lowering with no target. It lifts every abstract token, block id no version
 /// of the edition declares, and canonical token none writes to a stand-in rather than a canonical
 /// state, which is safe because nothing it lowers leaves
 /// [`findings_without_target`](super::findings_without_target).
 pub(crate) struct NoTarget<'a> {
-    /// What the versions of the editions being lowered make of a block id.
-    pub(crate) standing: &'a dyn Fn(&str) -> IdStanding,
+    /// The editions the lowering stands for, the first answering for paintings and entities.
+    pub(crate) editions: &'a [Edition],
+    /// What the versions of each edition answer.
+    pub(crate) tables: &'a dyn EditionTables,
+}
+
+impl NoTarget<'_> {
+    /// The least standing any of the editions gives `id`.
+    fn standing(&self, id: &str) -> IdStanding {
+        self.editions
+            .iter()
+            .map(|edition| self.tables.id_standing(*edition, id))
+            .min()
+            .unwrap_or(IdStanding::Declared)
+    }
 }
 
 impl TargetRegistry for NoTarget<'_> {
@@ -279,15 +305,29 @@ impl TargetRegistry for NoTarget<'_> {
     }
 
     fn may_declare(&self, id: &str) -> bool {
-        id.starts_with(STAND_IN_MARK) || (self.standing)(id) == IdStanding::Declared
+        id.starts_with(STAND_IN_MARK) || self.standing(id) == IdStanding::Declared
     }
 
     fn may_write_token(&self, id: &str) -> bool {
-        (self.standing)(id) > IdStanding::Unknown
+        self.standing(id) > IdStanding::Unknown
     }
 
     fn state_domain(&self, _state: &BlockState) -> StateDomain {
         StateDomain::Unpinned
+    }
+
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        self.editions
+            .first()
+            .map_or(PaintingLookup::Unrecorded, |edition| {
+                self.tables.painting(*edition, variant)
+            })
+    }
+
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        self.editions
+            .first()
+            .and_then(|edition| self.tables.absent_entity(*edition, id))
     }
 }
 

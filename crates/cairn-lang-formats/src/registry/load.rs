@@ -8,8 +8,8 @@ use std::sync::OnceLock;
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     AbsentConcept, AbsentEntity, BlockArrayIr, BlockIdSet, BlockState, Constraint, Contents,
-    DeclaredElsewhere, DomainFault, EntityBox, Face, Faces, IdStanding, JoinKind, Joins,
-    OutOfDomain, PaintingLookup, PaintingVariant, StateDomain, Support, TargetRegistry,
+    DeclaredElsewhere, DomainFault, EditionTables, EntityBox, Face, Faces, IdStanding, JoinKind,
+    Joins, OutOfDomain, PaintingLookup, PaintingVariant, StateDomain, Support, TargetRegistry,
     UnmappedState,
 };
 use cairn_lang_core::check::VersionTables;
@@ -1445,6 +1445,25 @@ pub fn builtin_view(edition: Edition, pinned: Option<&str>) -> PackView<'_> {
     builtin_pack(edition)
         .view(pinned)
         .with_constraints(builtin_constraints())
+}
+
+/// Both editions' built-in packs, as a check with no target reads them (`spec/lint` "Error vs
+/// warning").
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuiltinEditions;
+
+impl EditionTables for BuiltinEditions {
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding {
+        builtin_pack(edition).id_standing(id)
+    }
+
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup {
+        builtin_pack(edition).view(None).painting(variant)
+    }
+
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity> {
+        builtin_pack(edition).view(None).absent_entity(id)
+    }
 }
 
 /// Loads a Java pack from a directory holding `pack.json` and the files it names.

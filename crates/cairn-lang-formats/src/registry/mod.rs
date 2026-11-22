@@ -35,9 +35,10 @@ pub use constraints::{
 pub use data_versions::{DataVersionEntry, DataVersionTable};
 pub use hash::pack_hash;
 pub use load::{
-    PackSource, PackView, RegistryError, RegistryPack, Respelling, SUPPORTED_DATA_VERSIONS_SCHEMA,
-    SUPPORTED_MANIFEST_SCHEMA, builtin_constraints, builtin_pack, builtin_version_tables,
-    builtin_view, load_builtin_constraints, load_builtin_pack, load_from_dir, parse_constraints,
+    BuiltinEditions, PackSource, PackView, RegistryError, RegistryPack, Respelling,
+    SUPPORTED_DATA_VERSIONS_SCHEMA, SUPPORTED_MANIFEST_SCHEMA, builtin_constraints, builtin_pack,
+    builtin_version_tables, builtin_view, load_builtin_constraints, load_builtin_pack,
+    load_from_dir, parse_constraints,
 };
 pub use manifest::{PackFiles, PackManifest};
 pub use paintings::{

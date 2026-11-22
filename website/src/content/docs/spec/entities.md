@@ -106,9 +106,10 @@ above it, rounded down, so that cell is its cell, and its point is that cell's. 
 cells leave the body's block array is not hung, `W_DEFERRED_MEMBER`. A `variant=` the pinned
 target has no painting of is `E_INVALID_MEMBER`, with the paintings it has, or, where other
 versions have it, those versions. With an edition and no version pinned, a variant some version
-has hangs at the size every version that has it agrees on; with no pack, the variant is not
-checked and the painting covers its one cell. A missing `variant=` and one that is no identifier
-are `E_INVALID_MEMBER`.
+has hangs at the size every version that has it agrees on, and covers its one cell where they
+disagree, and a variant no version has is `E_INVALID_MEMBER` with the paintings the versions have;
+with no pack, the variant is not checked and the painting covers its one cell. A missing
+`variant=` and one that is no identifier are `E_INVALID_MEMBER`.
 
 An `item_frame` holds the item its `item=` names, one of it, and with none it hangs empty.
 `glowing=true` makes it a glow item frame. An `item=` that is no id and a `glowing=` that is no

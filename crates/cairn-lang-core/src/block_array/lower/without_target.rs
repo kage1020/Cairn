@@ -10,27 +10,29 @@ use crate::intent::IntentModule;
 use crate::resolve::{Resolution, resolve};
 
 use crate::block_array::PALETTE_CAPACITY;
-use crate::block_array::material::{IdStanding, NoTarget};
+use crate::block_array::material::{EditionTables, NoTarget};
+use crate::intent::{Member, MemberRole};
 
 use super::lower_to_block_array_within;
 
 /// The findings every target that reads their line raises on `intent`, under `edition`'s theme
-/// variants or each edition's when it is `None` (`spec/lint` "Error vs warning"); `standing`
-/// answers what the versions of an edition make of a block id.
+/// variants or each edition's when it is `None` (`spec/lint` "Error vs warning"), as `tables`
+/// says each edition's versions answer.
 #[must_use]
 pub fn findings_without_target(
     intent: &IntentModule,
     edition: Option<Edition>,
-    standing: &dyn Fn(Edition, &str) -> IdStanding,
+    tables: &dyn EditionTables,
 ) -> Vec<Diagnostic> {
     let editions = edition.map_or_else(|| vec![Edition::Java, Edition::Bedrock], |e| vec![e]);
-    let guarded = intent.has_edition_guards();
+    // An edition answers a painting or a display from its own tables, as it reads its own guards.
+    let apart = intent.has_edition_guards() || intent.any_member(&reads_entity_tables);
     let mut shared: Vec<(Vec<Edition>, Resolution)> = Vec::new();
     for edition in editions {
         let resolution = resolve(intent, Some(edition));
         match shared
             .iter_mut()
-            .find(|(_, seen)| lowers_alike(seen, &resolution, guarded))
+            .find(|(_, seen)| lowers_alike(seen, &resolution, apart))
         {
             Some((editions, _)) => editions.push(edition),
             None => shared.push((vec![edition], resolution)),
@@ -39,14 +41,10 @@ pub fn findings_without_target(
     let lowerings: Vec<(Resolution, Vec<Diagnostic>)> = shared
         .into_iter()
         .map(|(editions, resolution)| {
-            let in_each = |id: &str| {
-                editions
-                    .iter()
-                    .map(|edition| standing(*edition, id))
-                    .min()
-                    .unwrap_or(IdStanding::Declared)
+            let registry = NoTarget {
+                editions: &editions,
+                tables,
             };
-            let registry = NoTarget { standing: &in_each };
             let found =
                 lower_to_block_array_within(intent, &resolution, Some(&registry), PALETTE_CAPACITY)
                     .diagnostics;
@@ -56,10 +54,22 @@ pub fn findings_without_target(
     agreed_lowerings(intent, lowerings)
 }
 
-/// Whether lowering reads the same input from both: the scopes, the connects and, when `guarded`
-/// says some member stands under an `@edition` guard, the edition.
-fn lowers_alike(a: &Resolution, b: &Resolution, guarded: bool) -> bool {
-    a.scopes == b.scopes && a.connects == b.connects && (!guarded || a.edition == b.edition)
+/// Whether `member` places a painting or a display, which each edition's tables answer apart.
+fn reads_entity_tables(member: &Member) -> bool {
+    matches!(
+        member.role,
+        MemberRole::Painting
+            | MemberRole::TextDisplay
+            | MemberRole::BlockDisplay
+            | MemberRole::ItemDisplay
+            | MemberRole::Hologram
+    )
+}
+
+/// Whether lowering reads the same input from both: the scopes, the connects and, when `apart`
+/// says a line reads what only its edition answers, the edition.
+fn lowers_alike(a: &Resolution, b: &Resolution, apart: bool) -> bool {
+    a.scopes == b.scopes && a.connects == b.connects && (!apart || a.edition == b.edition)
 }
 
 /// The findings [`agreed`] keeps of `lowerings`, where a theme only one lowering binds is that
@@ -99,12 +109,9 @@ fn agreed_lowerings(
 }
 
 /// The findings each edition's lowering raises on the lines under its `@edition` guards, which a
-/// lowering that pins no edition leaves out; `standing` is [`findings_without_target`]'s.
+/// lowering that pins no edition leaves out; `tables` is [`findings_without_target`]'s.
 #[must_use]
-pub fn findings_under_guards(
-    intent: &IntentModule,
-    standing: &dyn Fn(Edition, &str) -> IdStanding,
-) -> Vec<Diagnostic> {
+pub fn findings_under_guards(intent: &IntentModule, tables: &dyn EditionTables) -> Vec<Diagnostic> {
     let guarded: Vec<&Span> = intent
         .guarded_members()
         .into_iter()
@@ -113,7 +120,7 @@ pub fn findings_under_guards(
     if guarded.is_empty() {
         return Vec::new();
     }
-    findings_without_target(intent, None, standing)
+    findings_without_target(intent, None, tables)
         .into_iter()
         .filter(|finding| finding.touches(&guarded))
         .collect()

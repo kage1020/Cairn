@@ -9,8 +9,12 @@ use super::phase::Phase;
 use super::plate::{PRESSURE_PLATE_BASE_ID, PRESSURE_PLATE_TOKEN};
 use super::site_floor::{FloorExtent, FloorOwner, collect_floor_cells};
 use super::*;
+use crate::Edition;
 use crate::ast::ValueKind;
-use crate::block_array::material::{IdStanding, NoTarget, resolve_block_state, stand_in};
+use crate::block_array::material::{
+    AbsentEntity, EditionTables, IdStanding, NoTarget, PaintingLookup, resolve_block_state,
+    stand_in,
+};
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
@@ -516,13 +520,28 @@ fn a_place_whose_def_paints_more_states_than_its_palette_holds_is_refused() {
     );
 }
 
+/// Tables that declare every id and record no painting and no absent entity.
+struct Declared;
+impl EditionTables for Declared {
+    fn id_standing(&self, _: Edition, _: &str) -> IdStanding {
+        IdStanding::Declared
+    }
+    fn painting(&self, _: Edition, _: &str) -> PaintingLookup {
+        PaintingLookup::Unrecorded
+    }
+    fn absent_entity(&self, _: Edition, _: &str) -> Option<AbsentEntity> {
+        None
+    }
+}
+
 #[test]
 fn without_a_target_the_palette_counts_no_stand_in() {
     /// Each finding as its code and the first line it covers.
     fn without_target(source: &str) -> Vec<(&'static str, &str)> {
         let ir = lower(&parse(source).expect("parse"));
         let registry = NoTarget {
-            standing: &|_| IdStanding::Declared,
+            editions: &[Edition::Java],
+            tables: &Declared,
         };
         let out = lower_to_block_array_within(&ir, &resolve(&ir, None), Some(&registry), 4);
         out.diagnostics

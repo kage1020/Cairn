@@ -5,9 +5,10 @@ use std::path::PathBuf;
 
 use cairn_lang_core::ast::ValueKind;
 use cairn_lang_core::block_array::{
-    BlockArray, BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, Walkway, lower_to_block_array,
+    AbsentEntity, BlockArray, BlockArrayIr, BlockIdSet, BlockState, EditionTables, IdStanding,
+    PaintingLookup, TargetRegistry, Walkway, lower_to_block_array,
 };
-use cairn_lang_core::{Diagnostic, DiagnosticCode, check, lower, parse, resolve};
+use cairn_lang_core::{Diagnostic, DiagnosticCode, Edition, check, lower, parse, resolve};
 
 /// The number of `.crn` files `examples/` ships, pinned so a sweep cannot pass over fewer.
 pub const SHIPPED_EXAMPLES: usize = 17;
@@ -214,6 +215,37 @@ pub fn lowered_with(source: &str, registry: &dyn TargetRegistry) -> BlockArrayIr
     let ir = lower(&module);
     lower_to_block_array(&ir, &resolve(&ir, None), Some(registry))
 }
+
+/// Each edition's answers to a lowering with no target, as a test gives them.
+pub struct Tables<'a> {
+    /// What an edition's versions make of a block id.
+    pub standing: &'a dyn Fn(Edition, &str) -> IdStanding,
+    /// What an edition's painting table says of a variant.
+    pub painting: &'a dyn Fn(Edition, &str) -> PaintingLookup,
+    /// The other edition's entity an id names, when an edition has none.
+    pub absent: &'a dyn Fn(Edition, &str) -> Option<AbsentEntity>,
+}
+
+impl EditionTables for Tables<'_> {
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding {
+        (self.standing)(edition, id)
+    }
+
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup {
+        (self.painting)(edition, variant)
+    }
+
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity> {
+        (self.absent)(edition, id)
+    }
+}
+
+/// Tables that declare every id and record no painting and no absent entity.
+pub const DECLARED: Tables<'static> = Tables {
+    standing: &|_, _| IdStanding::Declared,
+    painting: &|_, _| PaintingLookup::Unrecorded,
+    absent: &|_, _| None,
+};
 
 /// [`lowered`], with the resolver's diagnostics ahead of the block-array pass's.
 ///

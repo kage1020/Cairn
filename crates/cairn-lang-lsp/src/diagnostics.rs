@@ -8,7 +8,7 @@ use cairn_lang_core::{
     Diagnostic as CoreDiagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
     resolve,
 };
-use cairn_lang_formats::{builtin_pack, builtin_version_tables, builtin_view};
+use cairn_lang_formats::{BuiltinEditions, builtin_version_tables, builtin_view};
 
 use crate::line_index::LineIndex;
 use crate::pin::Pin;
@@ -39,7 +39,6 @@ pub fn compute_diagnostics(
 /// What `cairn check` reports on `module` with `pin`'s edition, or, for a target, what
 /// `cairn compile` refuses on before it writes anything, circuits aside.
 fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
-    let standing = |edition: Edition, id: &str| builtin_pack(edition).id_standing(id);
     let tables = builtin_version_tables();
     let ir = lower(module);
     let edition = match pin {
@@ -50,7 +49,7 @@ fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
     let mut found =
         check_with_intended_targets(module, &ir, edition, &Edition::weighed(edition), &tables);
     let Pin::Target(target) = pin else {
-        found.extend(findings_without_target(&ir, edition, &standing));
+        found.extend(findings_without_target(&ir, edition, &BuiltinEditions));
         return found;
     };
     let edition = target.edition();

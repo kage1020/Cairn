@@ -11,6 +11,7 @@ mod connections;
 mod constraints;
 mod declared_elsewhere;
 mod eave_stair_shapes;
+mod entities;
 mod ids_exist;
 mod respelling;
 mod spelling;

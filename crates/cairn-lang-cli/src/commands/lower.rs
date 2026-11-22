@@ -13,7 +13,7 @@ use cairn_lang_core::{Edition, Severity, lower};
 use cairn_lang_formats::build::circuits::lay_circuits;
 use cairn_lang_formats::build::finding::{Finding, Found};
 use cairn_lang_formats::build::gate::build_diagnostics;
-use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_formats::registry::{BuiltinEditions, builtin_pack};
 
 use crate::cli::LowerFormat;
 use crate::pipeline::load_module;
@@ -32,10 +32,9 @@ pub(crate) fn run_lower(file: &Path, edition: Option<Edition>, format: LowerForm
     // With no edition pinned the guarded lines are left out, but an error on one still fails the
     // command.
     if edition.is_none() {
-        let standing = |edition, id: &str| builtin_pack(edition).id_standing(id);
         block_ir
             .diagnostics
-            .extend(findings_under_guards(&ir, &standing));
+            .extend(findings_under_guards(&ir, &BuiltinEditions));
     }
     // Check findings lead, ahead of the lowering deferrals they cascade into.
     block_ir.diagnostics = build_diagnostics(
