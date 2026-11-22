@@ -341,7 +341,7 @@ fn a_floor_below_the_range_is_no_conflict() {
          respelled:               Java: none\n\
          buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)\n\
          intended targets:        (none declared)\n\
-         semantic-sensitive:      (none)\n\
+         semantic-sensitive:      Java: (none)\n\
          verified target:         (no lock)\n",
         "the declared row and the inferred row side by side",
     );
@@ -375,7 +375,7 @@ fn a_floor_above_the_range_is_reported_and_the_report_completes() {
          respelled:               Bedrock: none\n\
          buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)\n\
          intended targets:        (none declared)\n\
-         semantic-sensitive:      (none)\n\
+         semantic-sensitive:      Bedrock: (none)\n\
          verified target:         (no lock)\n",
     );
     assert_eq!(

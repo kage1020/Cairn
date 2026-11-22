@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 
 use indexmap::IndexMap;
 
-use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
 use crate::intent::{Member, MemberRole, Size, patched_actuator, role_of};
 use crate::resolve::ScopeResolution;
@@ -23,6 +23,7 @@ use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::cell_box::Cell;
 use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
 use super::connections::derive_connections;
+use super::constraints::constraint_findings;
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
@@ -79,6 +80,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         palette_capacity,
     } = bodies;
     let (interior_w, interior_h) = (body.size.w.get(), body.size.h.get());
+    let raised = diagnostics.len();
 
     let theme_missing = scope.is_none_or(|sc| sc.bound_theme.is_none());
 
@@ -103,15 +105,8 @@ pub(super) fn lower_body_to_block_array<'a>(
     let wall_column = WallColumn::from_walls(painting_walls.iter().copied());
     let roof_extra = max_roof_extra_height(&flattened, interior_w, interior_h, overhang);
     let imported = imported_rows(&flattened, &repeats);
-
-    let dims = Dims {
-        x: interior_w.saturating_add(overhang.saturating_mul(2)),
-        y: 1u32
-            .saturating_add(max_wall_top)
-            .saturating_add(roof_extra)
-            .max(imported),
-        z: interior_h.saturating_add(overhang.saturating_mul(2)),
-    };
+    let height = 1u32.saturating_add(max_wall_top).saturating_add(roof_extra);
+    let dims = body_dims(interior_w, interior_h, overhang, height.max(imported));
     if !dims.fits_volume_budget() {
         diagnostics.push(diag_structure_too_large(&body, dims));
         return None;
@@ -168,6 +163,20 @@ pub(super) fn lower_body_to_block_array<'a>(
     let members = resolved_members(&flattened, &canvas, &array);
     if let Some(registry) = registry {
         diagnostics.extend(state_findings(&members, registry));
+        // A member an error refuses may paint nothing, and no block of the body is judged against
+        // the air it leaves.
+        let refused = flattened.iter().any(|(_, member)| {
+            scope
+                .and_then(|scope| scope.members.get(&member.span.start))
+                .is_some_and(|binding| binding.refused)
+        });
+        if !refused
+            && diagnostics[raised..]
+                .iter()
+                .all(|d| d.severity() != Severity::Error)
+        {
+            diagnostics.extend(constraint_findings(&members, &array, overhang, registry));
+        }
     }
 
     Some(LoweredBody {
@@ -176,6 +185,17 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// The extent of a body with an `interior_w` by `interior_h` interior, `overhang` cells of roof
+/// past each side, and `height` rows.
+fn body_dims(interior_w: u32, interior_h: u32, overhang: u32, height: u32) -> Dims {
+    let widened = |side: u32| side.saturating_add(overhang.saturating_mul(2));
+    Dims {
+        x: widened(interior_w),
+        y: height,
+        z: widened(interior_h),
+    }
 }
 
 /// A `W_PHASE_CONFLICT` for each pair of members, and each pair of frames, of one phase on

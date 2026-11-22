@@ -6,6 +6,7 @@
 
 mod args;
 mod attach;
+mod constraint;
 mod geometry;
 mod joins;
 mod lower;
@@ -20,6 +21,7 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
+pub use constraint::{Constraint, Contents, Support, Vertical};
 pub use geometry::{Bbox, MemberGeometry};
 pub use joins::{Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
@@ -506,6 +508,9 @@ impl BlockState {
     /// The ids a cell holds no block at: [`Self::AIR_ID`], cave air and void air.
     pub const AIR_IDS: [&'static str; 3] =
         ["minecraft:air", "minecraft:cave_air", "minecraft:void_air"];
+
+    /// Canonical Minecraft id for water, which a water `fill` pours.
+    pub const WATER_ID: &'static str = "minecraft:water";
 
     /// The [`Self::AIR_ID`] state, with no properties.
     #[must_use]
