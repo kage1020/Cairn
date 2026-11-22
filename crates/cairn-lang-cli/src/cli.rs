@@ -131,20 +131,23 @@ pub(crate) enum Command {
         format: CheckFormat,
     },
     /// Report a .crn source file's declared and inferred version ranges, edition portability,
-    /// respelled tokens, semantic-sensitive members and verified lock target.
+    /// respelled tokens, semantic-sensitive members, the versions worth testing it in and its
+    /// verified lock target.
     #[command(
-        long_about = "Report the three version axes (the registry range the file declares and \
-            the one the blocks it paints imply per edition, semantic-sensitive members, verified \
-            lock target) for a .crn source file, with each requested edition's portability, the \
-            canonical tokens its versions write under another id, and its buildable targets \
-            beside them. A floor above an edition's inferred range is printed \
-            as `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. \
-            Exits 0 on success, including when the lockfile is missing or cannot be read; 1 on a \
-            parse failure, on any `Error`-severity diagnostic (the check passes run here, as does \
-            each requested edition's lowering with its circuits laid, and a range derived from a \
-            file `cairn check` rejects is a confident wrong answer), or on any other I/O error \
-            reading the source (permission denied, non-UTF-8 contents); 2 when the source file \
-            cannot be located, and rejects an empty `--editions` value with exit 2"
+        long_about = "Report the three version axes (the registry range the file declares and the \
+            one the blocks it paints imply per edition, semantic-sensitive members, verified lock \
+            target) for a .crn source file, with each requested edition's portability, the \
+            canonical tokens its versions write under another id, and its buildable targets beside \
+            them, and the `recommended test targets` among the buildable ones: the oldest and the \
+            newest, and the pair either side of each semantic-sensitivity boundary that falls \
+            between them. A floor above an edition's inferred range is printed as \
+            `E_REQUIRES_CONFLICT`, which `cairn compile` refuses and this report does not. Exits 0 \
+            on success, including when the lockfile is missing or cannot be read; 1 on a parse \
+            failure, on any `Error`-severity diagnostic (the check passes run here, as does each \
+            requested edition's lowering with its circuits laid, and a range derived from a file \
+            `cairn check` rejects is a confident wrong answer), or on any other I/O error reading \
+            the source (permission denied, non-UTF-8 contents); 2 when the source file cannot be \
+            located, and rejects an empty `--editions` value with exit 2"
     )]
     Info {
         /// Path to the .crn file to inspect.
@@ -156,7 +159,8 @@ pub(crate) enum Command {
             default_values_t = vec!["java".to_owned(), "bedrock".to_owned()],
             long_help = "Comma-separated editions to evaluate portability against. Each distinct \
                 edition produces one entry in the output's `inferred range`, `edition \
-                portability` and `buildable targets` sections; a repeated name is reported once",
+                portability`, `buildable targets` and `recommended test targets` sections; a \
+                repeated name is reported once",
         )]
         editions: Vec<String>,
         /// Lockfile to report the verified target of; defaults to `<source>.lock` next to the

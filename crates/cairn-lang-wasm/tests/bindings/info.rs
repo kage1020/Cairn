@@ -69,6 +69,10 @@ fn a_clean_source_answers_the_report_with_no_lock_verifying_a_target() {
                 },
             ],
             "intended_targets": [],
+            "recommended_test_targets": [
+                { "edition": "java", "versions": ["1.20.4", "26.3"] },
+                { "edition": "bedrock", "versions": ["1.21.0", "1.26.60"] },
+            ],
             "verified_target": { "path": "", "status": "missing" },
         }),
     );
@@ -82,6 +86,7 @@ fn one_edition_asked_about_gets_only_its_rows() {
         "edition_portability",
         "respelled",
         "buildable_targets",
+        "recommended_test_targets",
     ] {
         let editions: Vec<&Value> = report[row]
             .as_array()
