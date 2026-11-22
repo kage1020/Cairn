@@ -86,14 +86,15 @@ cottage.crn:6:17: error[E_UNKNOWN_ID]: `minecraft:cobblestoen` is not a block in
 
 ```
 $ cairn info cottage.crn
-registry compatibility:  1.20 .. latest
-inferred range:          Java: 0.0 .. latest   Bedrock: 0.0 .. latest
-edition portability:     Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
-respelled:               Java: none   Bedrock: none
-buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
-intended targets:        (none declared)
-semantic-sensitive:      Java: (none)   Bedrock: (none)
-verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
+registry compatibility:    1.20 .. latest
+inferred range:            Java: 0.0 .. latest   Bedrock: 0.0 .. latest
+edition portability:       Java: portable: 12  degraded: 0  unsupported: 0   Bedrock: portable: 12  degraded: 0  unsupported: 0
+respelled:                 Java: none   Bedrock: none
+buildable targets:         Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, 1.21.60, 1.26.60
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)   Bedrock: (none)
+recommended test targets:  Java: 1.20.4, 26.3   Bedrock: 1.21.0, 1.26.60
+verified target:           bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 ## いま使える機能

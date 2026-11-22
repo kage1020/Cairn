@@ -1286,7 +1286,7 @@ version is a `semantic_sensitivity` row.
 
 | Table | A row gives | Read by |
 |---|---|---|
-| `semantic_sensitivity` | `edition`, a `boundary` version of it, the `reason`, and the `ids` whose meaning changes there. | `cairn info`'s `semantic-sensitive` row, the lock's `member_version_sensitivity` and `W_SEMANTIC_SENSITIVITY` ([Versioning and Editions](/spec/versioning-editions/#the-semantic-sensitive-row)) |
+| `semantic_sensitivity` | `edition`, a `boundary` version of it, the `reason`, and the `ids` whose meaning changes there. | `cairn info`'s `semantic-sensitive` and `recommended test targets` rows, the lock's `member_version_sensitivity` and `W_SEMANTIC_SENSITIVITY` ([Versioning and Editions](/spec/versioning-editions/#the-semantic-sensitive-row)) |
 | `attachment` | `ids` and `hangs_by`, `face` for a block that reads `face` and `facing`, `facing` for one that reads `facing` alone. | `W_NO_ATTACHMENT_FACE` |
 | `support` | `ids`, `on` (`below` or `above`), `needs` (`sturdy` or `center`), and `also_on`, the blocks that hold them whatever their faces. | `W_UNSUPPORTED_BLOCK` |
 | `gravity` | `ids`. | `W_UNSUPPORTED_BLOCK` |

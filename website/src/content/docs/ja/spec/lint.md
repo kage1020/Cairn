@@ -493,7 +493,7 @@ roof kind=gable slope_to=front
 
 | 表 | 行が与えるもの | 読むもの |
 |---|---|---|
-| `semantic_sensitivity` | `edition`、そのエディションの `boundary` バージョン、`reason`、そしてそこで意味が変わる `ids`。 | `cairn info` の `semantic-sensitive` の行、ロックの `member_version_sensitivity`、`W_SEMANTIC_SENSITIVITY` ([バージョンとエディション](/ja/spec/versioning-editions/#semantic-sensitive-の行)) |
+| `semantic_sensitivity` | `edition`、そのエディションの `boundary` バージョン、`reason`、そしてそこで意味が変わる `ids`。 | `cairn info` の `semantic-sensitive` と `recommended test targets` の行、ロックの `member_version_sensitivity`、`W_SEMANTIC_SENSITIVITY` ([バージョンとエディション](/ja/spec/versioning-editions/#semantic-sensitive-の行)) |
 | `attachment` | `ids` と `hangs_by`。`face` と `facing` を読むブロックなら `face`、`facing` だけを読むブロックなら `facing`。 | `W_NO_ATTACHMENT_FACE` |
 | `support` | `ids`、`on` (`below` か `above`)、`needs` (`sturdy` か `center`)、そして面にかかわらずそれを支えるブロックの `also_on`。 | `W_UNSUPPORTED_BLOCK` |
 | `gravity` | `ids`。 | `W_UNSUPPORTED_BLOCK` |
