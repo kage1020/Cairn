@@ -29,7 +29,11 @@ fn walk(
             sink.push(diagnose(member, has_a_theme));
         }
         if super::nesting::body_reaches_the_build(member, inside_level) {
-            walk(&member.children.members, body, true, has_a_theme, sink);
+            for child in &member.children.members {
+                if super::nesting::child_reaches_the_build(member, child) {
+                    walk(std::slice::from_ref(child), body, true, has_a_theme, sink);
+                }
+            }
         }
     }
 }
@@ -52,7 +56,7 @@ enum WithoutAMaterial {
 }
 
 /// Must agree with `block_array`'s `member_will_paint`; `MemberRole::unread_arguments` relies on
-/// the `level`, `circuit`, `place` and `connect` arms.
+/// the `level`, `raw_repeat`, `circuit`, `place` and `connect` arms.
 fn without_a_material(member: &Member) -> WithoutAMaterial {
     match &member.role {
         MemberRole::Fill if member.pours_fluid() => WithoutAMaterial::NamesItsMaterialElsewhere,
@@ -94,14 +98,16 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         | MemberRole::Trade
         | MemberRole::TextDisplay
         | MemberRole::ItemDisplay
-        | MemberRole::Spawn => WithoutAMaterial::PutsNothingDown,
+        | MemberRole::Spawn
+        | MemberRole::Level
+        | MemberRole::RawRepeat
+        | MemberRole::Circuit
+        | MemberRole::Place
+        | MemberRole::Other(_) => WithoutAMaterial::PutsNothingDown,
         // `path=@MAT`, whose absence is `E_MISSING_PATH_MATERIAL`, and `mat=`, whose absence is
         // `E_INVALID_MEMBER`.
         MemberRole::Connect | MemberRole::RawBlock | MemberRole::RawFill => {
             WithoutAMaterial::NamesItsMaterialElsewhere
-        }
-        MemberRole::Level | MemberRole::Circuit | MemberRole::Place | MemberRole::Other(_) => {
-            WithoutAMaterial::PutsNothingDown
         }
     }
 }

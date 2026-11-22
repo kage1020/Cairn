@@ -319,12 +319,14 @@ A window's rectangles are each one a `repeat=` series stamps and, with `sym=true
 mirror skipped for overlapping the window stays in the declared bbox, and its cells outside the
 window stay out of the actual one ([Syntax §5.4](/spec/syntax/#54-selectors)). A frame a theme binds
 on a door or window is that member's, so its cells are in the member's actual bbox and out of its
-declared one ([Materials and Themes](/spec/materials-themes/#selector-bindings)). A fixture by a
-wall stands against its outer face from outside the wall (`at=front.outside`) and its inner face
-from inside (`at=inside.front`). A `circuit` holds the cells it lays a block in, not the air it
-writes over the rest of the layers it reserves, and one that lays no block holds every layer it
-reserves, since a bbox holds at least one cell. A painting's cells run right from its anchor as seen
-from in front of it, so one inside the front wall runs toward `-x` and one outside it toward `+x`
+declared one ([Materials and Themes](/spec/materials-themes/#selector-bindings)). A raw member under
+a `raw_repeat` is anchored by its first copy and declares every copy the `raw_repeat` writes
+([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). A fixture by a wall stands
+against its outer face from outside the wall (`at=front.outside`) and its inner face from inside
+(`at=inside.front`). A `circuit` holds the cells it lays a block in, not the air it writes over the
+rest of the layers it reserves, and one that lays no block holds every layer it reserves, since a
+bbox holds at least one cell. A painting's cells run right from its anchor as seen from in front of
+it, so one inside the front wall runs toward `-x` and one outside it toward `+x`
 ([§8.1](#hanging-entities)). A `trade` places nothing, so it has none of the four.
 
 **`anchor=` on a window** names the cell of the window that `offset=` and `y=` place, seen from

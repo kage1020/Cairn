@@ -4,8 +4,10 @@
 //! `block_position_data`, keyed by its voxel's place in that order: each of the IR's, one for
 //! each block whose Java states Bedrock keeps in its block entity, as a chest's pairing, and one
 //! for each item frame, which Bedrock builds as a block. Every other entity is in `entities`.
+//! [`read_mcstructure`] reads such a file back, whichever tool saved it.
 
 mod entities;
+mod read;
 
 use std::collections::HashMap;
 
@@ -28,6 +30,10 @@ use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
 use crate::java_structure::{java_entity_id, sign_text_fix};
 use crate::nbt_text::{compound_of, first_unencodable};
 use crate::registry::VersionStates;
+
+pub use read::{
+    BedrockBlock, BedrockVolume, McStructureReadError, StoredMcStructure, read_mcstructure,
+};
 
 /// One intent a palette entry dropped to fit Bedrock, reported as `W_INTENT_DEGRADED`.
 #[derive(Debug, Clone, PartialEq, Eq)]

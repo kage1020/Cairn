@@ -6,8 +6,9 @@ use crate::edition::Edition;
 
 use super::{MemberRole, role_of};
 
-/// Whether a line of `role` writing `args` is of the escape-hatch layer: a raw member, a `spawn`,
-/// a Tier 0 part, or a line whose role reads the `nbt={...}` compound it writes.
+/// Whether a line of `role` writing `args` is of the escape-hatch layer: a raw member, a
+/// `raw_repeat`, a `spawn`, a Tier 0 part, or a line whose role reads the `nbt={...}` compound it
+/// writes.
 pub(crate) fn is_escape_hatch_line(role: &MemberRole, args: &[Arg]) -> bool {
     role.is_escape_hatch()
         || (role.reads_nbt()

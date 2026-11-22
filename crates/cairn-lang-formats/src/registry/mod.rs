@@ -46,9 +46,9 @@ pub use paintings::{
     PaintingsError, SUPPORTED_PAINTINGS_SCHEMA,
 };
 pub use states::{
-    BedrockForm, DroppedState, EntityStates, SUPPORTED_SENSITIVITY_SCHEMA, SUPPORTED_STATES_SCHEMA,
-    SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal, StatesCatalog, StatesError,
-    VersionStates,
+    BedrockForm, CanonicalSpelling, DroppedState, EntityStates, SUPPORTED_SENSITIVITY_SCHEMA,
+    SUPPORTED_STATES_SCHEMA, SensitivityCatalog, SensitivityKind, StateMapIndex, StateRefusal,
+    StatesCatalog, StatesError, VersionStates,
 };
 
 pub(crate) use respelled::{Respelled, respelled_at};

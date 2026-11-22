@@ -43,6 +43,7 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "circuit",
     "raw_block",
     "raw_fill",
+    "raw_repeat",
     "place",
     "connect",
 ];
@@ -248,6 +249,8 @@ pub enum MemberRole {
     RawBlock,
     /// `raw_fill` escape hatch: one block id in every cell of a box.
     RawFill,
+    /// `raw_repeat` escape hatch: the raw members indented under it, written again at each step.
+    RawRepeat,
     /// `place` site placement.
     Place,
     /// `connect` site topology edge.
@@ -393,17 +396,21 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Other(_) => None,
         }
     }
 
-    /// Whether this is a role of the escape-hatch layer, a raw member, a `spawn` or a Tier 0 part,
-    /// which an `@edition` guard holds whatever its line writes.
+    /// Whether this is a role of the escape-hatch layer, a raw member, a `raw_repeat`, a `spawn` or
+    /// a Tier 0 part, which an `@edition` guard holds whatever its line writes.
     #[must_use]
     pub fn is_escape_hatch(&self) -> bool {
-        matches!(self, Self::RawBlock | Self::RawFill | Self::Spawn) || self.is_tier0_part()
+        matches!(
+            self,
+            Self::RawBlock | Self::RawFill | Self::RawRepeat | Self::Spawn
+        ) || self.is_tier0_part()
     }
 
     /// Whether this role reads an `nbt={...}` compound, which puts the line that writes one in
@@ -438,6 +445,13 @@ impl MemberRole {
                 | Self::ItemDisplay
                 | Self::Spawn
         )
+    }
+
+    /// Whether a `raw_repeat` writes a line of this role again at each step: a `raw_block` or a
+    /// `raw_fill`.
+    #[must_use]
+    pub fn is_repeatable(&self) -> bool {
+        matches!(self, Self::RawBlock | Self::RawFill)
     }
 
     /// Whether this is a Tier 0 part, a redstone part placed by hand (`spec/redstone` "Tier 0
@@ -516,8 +530,9 @@ impl MemberRole {
             Self::Comparator => &["at", "offset", "y", "facing", "mode"],
             Self::RedstoneDust => &["at", "offset", "y", "connect"],
             Self::Circuit => &["region", "void"],
-            Self::RawBlock => &["mat", "at", "nbt"],
-            Self::RawFill => &["mat", "from", "to"],
+            Self::RawBlock => &["mat", "at", "nbt", "origin"],
+            Self::RawFill => &["mat", "from", "to", "origin"],
+            Self::RawRepeat => &["count", "step"],
             // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
             // fix this set.
             Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
@@ -571,6 +586,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Other(_) => &[],
@@ -620,6 +636,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Painting
@@ -661,6 +678,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Place
             | Self::Connect
             | Self::Painting
@@ -788,6 +806,7 @@ impl MemberRole {
             | Self::Circuit
             | Self::RawBlock
             | Self::RawFill
+            | Self::RawRepeat
             | Self::Connect
             | Self::Painting
             | Self::ItemFrame
@@ -862,6 +881,7 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "circuit" => MemberRole::Circuit,
         "raw_block" => MemberRole::RawBlock,
         "raw_fill" => MemberRole::RawFill,
+        "raw_repeat" => MemberRole::RawRepeat,
         "place" => MemberRole::Place,
         "connect" => MemberRole::Connect,
         other => MemberRole::Other(other.to_owned()),

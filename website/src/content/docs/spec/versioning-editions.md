@@ -1493,9 +1493,9 @@ A guard opens no scope. Its lines are read as if written where the guard stands,
 `level` takes the level's `y=`, and a line of the escape-hatch layer gets every check under a guard
 that it would get outside one. What the guard adds is the edition whose build keeps the line.
 
-What it may hold is the escape-hatch layer: `raw_block` and `raw_fill` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)), `spawn`, which places any entity by its id ([Entities
-§8.1](/spec/entities/#standing-entities)), and the Tier 0 parts of [Redstone
+What it may hold is the escape-hatch layer: `raw_block`, `raw_fill` and `raw_repeat` ([Materials and
+Themes §7.4](/spec/materials-themes/#74-raw-blocks)), `spawn`, which places any entity by its id
+([Entities §8.1](/spec/entities/#standing-entities)), and the Tier 0 parts of [Redstone
 §14.1](/spec/redstone/#tier-0-parts): `repeater`, `comparator`, `redstone_torch` and
 `redstone_dust`. An entity's line that writes an `nbt={...}` compound belongs to that layer too, and
 stands under the guard of the edition whose fields the compound spells ([Entities

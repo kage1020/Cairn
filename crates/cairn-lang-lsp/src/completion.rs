@@ -48,6 +48,8 @@ enum Context {
     /// First word of a line indented under an `@edition` guard: a keyword of the escape-hatch
     /// layer, or an entity's, whose line stands there when it writes `nbt=`.
     GuardedMemberKeyword { replace: Span },
+    /// First word of a line indented under a `raw_repeat`: a raw member it writes again.
+    RepeatedMemberKeyword { replace: Span },
 }
 
 /// A `slot NAME -> TARGET` declaration found by the document scan.
@@ -137,28 +139,39 @@ pub fn completions(
                 .into_iter()
                 .map(|edition| (edition.as_str(), "edition")),
         )),
-        Some(Context::GuardedMemberKeyword { replace }) => whole(keyword_items(
+        Some(Context::GuardedMemberKeyword { replace }) => {
+            whole(keyword_items(&index, source, &replace, guarded_keywords()))
+        }
+        Some(Context::RepeatedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
             &replace,
             cairn_lang_core::intent::known_keywords()
                 .iter()
-                .filter(|kw| role_of(kw).is_escape_hatch() || role_of(kw).reads_nbt())
-                .map(|kw| {
-                    let role = role_of(kw);
-                    let detail = if role.is_tier0_part() {
-                        "Tier 0 part"
-                    } else if role.is_escape_hatch() && role.places_an_entity() {
-                        "entity by id"
-                    } else if role.places_an_entity() {
-                        "entity with nbt="
-                    } else {
-                        "raw member"
-                    };
-                    (*kw, detail)
-                }),
+                .filter(|kw| role_of(kw).is_repeatable())
+                .map(|kw| (*kw, "repeated raw member")),
         )),
     })
+}
+
+/// Each keyword whose line an `@edition` guard may hold, with its completion detail.
+fn guarded_keywords() -> impl Iterator<Item = (&'static str, &'static str)> {
+    cairn_lang_core::intent::known_keywords()
+        .iter()
+        .filter(|kw| role_of(kw).is_escape_hatch() || role_of(kw).reads_nbt())
+        .map(|kw| {
+            let role = role_of(kw);
+            let detail = if role.is_tier0_part() {
+                "Tier 0 part"
+            } else if role.is_escape_hatch() && role.places_an_entity() {
+                "entity by id"
+            } else if role.places_an_entity() {
+                "entity with nbt="
+            } else {
+                "raw member"
+            };
+            (*kw, detail)
+        })
 }
 
 /// Characters a partial token may contain, the dot for abstract material tokens.
@@ -241,7 +254,13 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    if parent_line(&outside, indent).is_some_and(opens_a_guard) {
+    let parent = parent_line(&outside, indent);
+    if parent.is_some_and(|line| line_keyword(line) == "raw_repeat")
+        && matches!(enclosing_item_keyword(&outside), Some("struct" | "def"))
+    {
+        return Some(Context::RepeatedMemberKeyword { replace });
+    }
+    if parent.is_some_and(opens_a_guard) {
         // What a guard holds is misplaced in a `site` body, guarded or not.
         return (enclosing_item_keyword(&outside) != Some("site"))
             .then_some(Context::GuardedMemberKeyword { replace });

@@ -168,3 +168,15 @@ fn a_refused_line_is_lowered_by_no_edition() {
         assert_eq!(lowered_for(&source, edition).diagnostics, [], "{edition:?}");
     }
 }
+
+#[test]
+fn a_build_keeps_a_raw_repeat_of_its_editions_guard_with_every_copy() {
+    let source = bin("@edition java\n    raw_repeat count=2 step=2,0,0\n      \
+         raw_block mat=minecraft:light at=0,1,1");
+    let built = |edition| raw_blocks(&lowered_for(&source, edition));
+    assert_eq!(
+        built(Some(Edition::Java)),
+        [("minecraft:light".to_owned(), vec![(1, 1, 2), (3, 1, 2)])],
+    );
+    assert_eq!(built(Some(Edition::Bedrock)), []);
+}

@@ -1,7 +1,9 @@
 //! A [`BlockArray`] as a Java structure file: `size`, `palette`, `blocks`, each with its block
 //! entity's `nbt`, `entities`, each with its point, its cell and its `nbt`, and `DataVersion`.
+//! [`read_structure`] reads such a file back, whichever tool saved it.
 
 mod entities;
+mod read;
 
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -20,6 +22,8 @@ use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
 use crate::nbt_text::{compound_of, first_unencodable};
+
+pub use read::{StoredStructure, StructureReadError, read_structure};
 
 /// Why a [`BlockArray`] cannot be written as a Java structure.
 #[derive(Debug, Error)]

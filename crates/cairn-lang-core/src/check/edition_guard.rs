@@ -64,7 +64,11 @@ fn unguarded_nbt(
             });
         }
         if super::nesting::body_reaches_the_build(member, inside_level) {
-            unguarded_nbt(&member.children.members, body, true, sink);
+            for child in &member.children.members {
+                if super::nesting::child_reaches_the_build(member, child) {
+                    unguarded_nbt(std::slice::from_ref(child), body, true, sink);
+                }
+            }
         }
     }
 }
@@ -103,7 +107,7 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
             // `keyword_allowlist` reports an unknown keyword, offering the ones a guard holds.
             MemberRole::Other(_) => return,
             role if is_escape_hatch_line(&role, args) => {
-                // `nesting` refuses a member under one; a nested guard's lines answer to that guard.
+                // `nesting` judges a member under one; a nested guard's lines answer to that guard.
                 for child in children {
                     match child {
                         Statement::Generic { .. } => {}
@@ -146,9 +150,9 @@ fn check_guarded(line: &Statement, edition: Edition, guard: &Span, sink: &mut Di
                 span: None,
                 message: "dedent the line out of the guard so that every edition builds it, and \
                           bind what differs per edition from a `theme NAME_java` and a `theme \
-                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill`, `spawn`, the \
-                          Tier 0 parts `repeater`, `comparator`, `redstone_torch` and \
-                          `redstone_dust`, and an entity's line that writes `nbt={...}`"
+                          NAME_bedrock`; the guard is for `raw_block`, `raw_fill`, `raw_repeat`, \
+                          `spawn`, the Tier 0 parts `repeater`, `comparator`, `redstone_torch` \
+                          and `redstone_dust`, and an entity's line that writes `nbt={...}`"
                     .into(),
             },
         ],

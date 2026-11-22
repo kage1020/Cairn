@@ -765,6 +765,14 @@ fn is_ident_start(b: u8) -> bool {
     b.is_ascii_alphabetic() || b == b'_'
 }
 
+/// Whether `text` lexes as one [`TokenKind::Ident`].
+pub(crate) fn is_ident(text: &str) -> bool {
+    let mut bytes = text.bytes();
+    bytes.next().is_some_and(is_ident_start)
+        && bytes.all(is_ident_continue)
+        && !matches!(text, "true" | "false")
+}
+
 fn is_ident_continue(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }

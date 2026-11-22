@@ -3,7 +3,7 @@
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{Diagnostic, DiagnosticCode, Severity};
-use cairn_lang_core::intent::MemberRole;
+use cairn_lang_core::intent::{MemberRole, known_keywords, role_of};
 use cairn_lang_core::{lower, parse, resolve};
 
 use crate::common::{diagnose, of_code};
@@ -422,6 +422,7 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             // None of these lays a block of its own material; a trade adds to a villager.
             MemberRole::Trade
             | MemberRole::Level
+            | MemberRole::RawRepeat
             | MemberRole::Circuit
             | MemberRole::Place
             | MemberRole::Connect
@@ -429,57 +430,29 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
         }
     }
 
-    let roles = [
-        MemberRole::Floor,
-        MemberRole::Walls,
-        MemberRole::Fill,
-        MemberRole::Door,
-        MemberRole::Window,
-        MemberRole::Roof,
-        MemberRole::Stair,
-        MemberRole::Beam,
-        MemberRole::Level,
-        MemberRole::PressurePlate,
-        MemberRole::Lever,
-        MemberRole::Button,
-        MemberRole::Daylight,
-        MemberRole::Observer,
-        MemberRole::Lamp,
-        MemberRole::Piston,
-        MemberRole::Dispenser,
-        MemberRole::Chest,
-        MemberRole::Trapdoor,
-        MemberRole::NoteBlock,
-        MemberRole::Sign,
-        MemberRole::Bed,
-        MemberRole::Painting,
-        MemberRole::ItemFrame,
-        MemberRole::ArmorStand,
-        MemberRole::Villager,
-        MemberRole::Trade,
-        MemberRole::TextDisplay,
-        MemberRole::BlockDisplay,
-        MemberRole::ItemDisplay,
-        MemberRole::Hologram,
-        MemberRole::Spawn,
-        MemberRole::Repeater,
-        MemberRole::Comparator,
-        MemberRole::RedstoneTorch,
-        MemberRole::RedstoneDust,
-        MemberRole::Circuit,
-        MemberRole::RawBlock,
-        MemberRole::RawFill,
-        MemberRole::Place,
-        MemberRole::Connect,
-        MemberRole::Other("mystery".to_owned()),
-    ];
+    let roles = known_keywords()
+        .iter()
+        .map(|keyword| role_of(keyword))
+        .chain([MemberRole::Other("mystery".to_owned())]);
     let painters: Vec<&str> = PAINTERS.iter().map(|(keyword, _, _)| *keyword).collect();
-    for role in &roles {
+    for role in roles {
         let keyword = role.keyword();
         assert_eq!(
-            measured(role),
+            measured(&role),
             painters.contains(&keyword),
             "`{keyword}` must either have a row in PAINTERS or a reason above",
         );
     }
+}
+
+#[test]
+fn a_line_a_raw_repeat_does_not_write_again_needs_no_material() {
+    let theme = "theme plain:\n  slot wall -> @cobblestone\n\nstruct s size=5x3\n";
+    let held = format!(
+        "{theme}  raw_repeat count=2 step=1,0,0\n    raw_block mat=minecraft:stone at=0,0,0\n    \
+         walls height=1\n"
+    );
+    assert_eq!(codes(&diagnose(&held)), ["E_UNSUPPORTED_NESTING"]);
+    let own = format!("{theme}  walls height=1\n");
+    assert_eq!(codes(&diagnose(&own)), ["E_MISSING_MATERIAL"]);
 }

@@ -65,8 +65,9 @@ fn a_semantic_member_under_a_guard_is_refused_at_its_line() {
             "the guard opens here",
             "dedent the line out of the guard so that every edition builds it, and bind what \
              differs per edition from a `theme NAME_java` and a `theme NAME_bedrock`; the guard is \
-             for `raw_block`, `raw_fill`, `spawn`, the Tier 0 parts `repeater`, `comparator`, \
-             `redstone_torch` and `redstone_dust`, and an entity's line that writes `nbt={...}`",
+             for `raw_block`, `raw_fill`, `raw_repeat`, `spawn`, the Tier 0 parts `repeater`, \
+             `comparator`, `redstone_torch` and `redstone_dust`, and an entity's line that writes \
+             `nbt={...}`",
         ],
     );
     assert_eq!(
@@ -387,7 +388,7 @@ fn an_unknown_keyword_under_a_guard_is_offered_what_a_guard_body_holds() {
             "did you mean `raw_block`?",
             "expected one of: painting, item_frame, armor_stand, villager, text_display, \
              block_display, item_display, spawn, repeater, comparator, redstone_torch, \
-             redstone_dust, raw_block, raw_fill"
+             redstone_dust, raw_block, raw_fill, raw_repeat"
         ],
     );
 }
@@ -578,6 +579,25 @@ fn an_nbt_value_that_is_no_compound_is_semantic_inside_a_guard_and_unrefused_out
     assert_eq!(
         located(&source),
         [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3 nbt=5")],
+    );
+}
+
+#[test]
+fn a_compound_under_a_raw_repeat_is_judged_only_on_a_line_it_writes_again() {
+    let source = struct_with(
+        "  raw_repeat count=2 step=1,0,0\n    \
+         raw_block mat=minecraft:chest at=1,1,1 nbt={Lock:\"key\"}\n    \
+         painting at=2,1,1 facing=north variant=kebab nbt={Invisible:1b}\n",
+    );
+    assert_eq!(
+        located(&source),
+        [
+            ("E_NBT_OUTSIDE_EDITION_GUARD", "{Lock:\"key\"}"),
+            (
+                "E_UNSUPPORTED_NESTING",
+                "painting at=2,1,1 facing=north variant=kebab nbt={Invisible:1b}"
+            ),
+        ],
     );
 }
 

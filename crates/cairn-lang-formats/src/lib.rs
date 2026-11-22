@@ -3,9 +3,9 @@
 //! promise: any release may change it.
 //!
 //! Java `.nbt`, `.litematic` and `.schem` and Bedrock `.mcstructure` writers for the block-array
-//! IR, `.litematic` and `.schem` readers, the registry packs and portability reports the writers
-//! rely on, the build a front end runs over a source, the `cairn info` report built on it, and the
-//! Java world a structure file is installed into.
+//! IR, a reader of each, the import that writes what a reader read as raw members, the registry
+//! packs and portability reports they rely on, the build a front end runs over a source, the
+//! `cairn info` report built on it, and the Java world a structure file is installed into.
 
 pub mod bedrock_state;
 pub mod bedrock_structure;
@@ -13,6 +13,7 @@ mod block_id;
 pub mod build;
 pub mod data_version;
 mod dims;
+pub mod import;
 pub mod info;
 pub mod java_structure;
 pub mod litematic;
@@ -29,16 +30,22 @@ pub mod world;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{
-    BedrockStructureError, McStructure, ParityNote, build_mcstructure_tag, prepare_mcstructure,
+    BedrockBlock, BedrockStructureError, BedrockVolume, McStructure, McStructureReadError,
+    ParityNote, StoredMcStructure, build_mcstructure_tag, prepare_mcstructure, read_mcstructure,
     write_mcstructure,
 };
 pub use data_version::{
     BedrockTarget, JavaTarget, ResolvedTarget, UnsupportedTarget, resolve_bedrock_target,
     resolve_java_target, resolve_target,
 };
+pub use import::{
+    DecodedStructure, ImportError, ImportFormat, ImportStamp, LossKind, RawImport, SavedVersion,
+    SemanticLoss, StampFit, UnshippedVersion, decode_structure, import_raw,
+};
 pub use java_structure::{
-    Compound, JavaStructure, JavaStructureError, OutputExt, build_structure_tag, output_filename,
-    prepare_structure, write_compound_gzip, write_structure_gzip,
+    Compound, JavaStructure, JavaStructureError, OutputExt, StoredStructure, StructureReadError,
+    build_structure_tag, output_filename, prepare_structure, read_structure, write_compound_gzip,
+    write_structure_gzip,
 };
 pub use litematic::{
     Litematic, LitematicError, LitematicFile, LitematicMetadata, LitematicReadError,
