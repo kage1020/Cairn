@@ -697,14 +697,15 @@ There is no single "for-version". `cairn info` reports three axes:
 
 ```text
 $ cairn info build.crn --editions java,bedrock
-registry compatibility:  1.21.40 .. latest
-inferred range:          Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
-edition portability:     Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
-respelled:               Java: none   Bedrock: minecraft:oak_sign
-buildable targets:       Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
-intended targets:        1.21.40, 1.21.60
-semantic-sensitive:      Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
-verified target:         bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
+registry compatibility:    1.21.40 .. latest
+inferred range:            Java: 0.0 .. latest   Bedrock: 1.21.40 .. latest
+edition portability:       Java: portable: 42  degraded: 0  unsupported: 0   Bedrock: portable: 38  degraded: 3  unsupported: 1
+respelled:                 Java: none   Bedrock: minecraft:oak_sign
+buildable targets:         Java: none (1.20.4, 1.21, 1.21.4, 26.3 all refuse)   Bedrock: 1.21.40, 1.21.60, 1.26.60 (1.21.0 refuses)
+intended targets:          1.21.40, 1.21.60
+semantic-sensitive:        Java: yard_water(cauldron split @1.17), yard_wall(wall connections @1.16)   Bedrock: (none)
+recommended test targets:  Java: (none)   Bedrock: 1.21.40, 1.26.60
+verified target:           bedrock 1.21.60/block version 18168865, source unchanged, written by Cairn 2026.11.0
 ```
 
 Every version named, other than the open edge `0.0`, is one the built-in packs declare. The file
@@ -714,7 +715,8 @@ Bedrock build paints a block Bedrock's table first declares at 1.21.40, which is
 declared and where Bedrock's inferred range starts; nothing the Java build paints bounds Java's.
 Bedrock writes the `@oak_sign` it paints as `standing_sign`, which the `respelled` row names. The
 `semantic-sensitive` row names Java members alone, since the built-in catalog's boundaries are all
-Java's.
+Java's. The `recommended test targets` row names no Java version, since none builds, and the oldest
+and newest Bedrock versions that do, since no Bedrock boundary lies between them.
 
 `intended targets` is the file's own `@intended_targets` line, verbatim, and the one row that is a
 declaration rather than an answer. It sits beside `buildable targets` because that is the row it can
@@ -770,14 +772,15 @@ struct hut size=5x5
   walls mat_slot=wall height=3
 
 $ cairn info hut.crn --editions java
-registry compatibility:  1.20.4 .. latest
-inferred range:          Java: 1.21.4 .. latest
-edition portability:     Java: portable: 2  degraded: 0  unsupported: 0
-respelled:               Java: none
-buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
-intended targets:        (none declared)
-semantic-sensitive:      Java: (none)
-verified target:         (no lock)
+registry compatibility:    1.20.4 .. latest
+inferred range:            Java: 1.21.4 .. latest
+edition portability:       Java: portable: 2  degraded: 0  unsupported: 0
+respelled:                 Java: none
+buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)
+intended targets:          (none declared)
+semantic-sensitive:        Java: (none)
+recommended test targets:  Java: 1.21.4, 26.3
+verified target:           (no lock)
 ```
 
 `1.20.4 .. latest` reads as an answer, and the row below disproves it: Java's table first declares
@@ -810,7 +813,7 @@ hut above paints `@pale_moss_block`, which Java first declares at 1.21.4 and Bed
 with `--editions java,bedrock` the row reads:
 
 ```text
-inferred range:          Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
+inferred range:            Java: 1.21.4 .. latest   Bedrock: 1.21.60 .. latest
 ```
 
 It is read off two lowerings, pinned to the oldest and the newest version the pack carries, the same
@@ -981,7 +984,7 @@ token picks. Each ID is listed once, in source order, or the edition reads `none
 theme binds `@chain`, `@oak_sign` and `@cauldron[fluid=water]` reads:
 
 ```text
-respelled:               Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
+respelled:                 Java: minecraft:chain, minecraft:cauldron   Bedrock: minecraft:chain, minecraft:oak_sign
 ```
 
 Each token is named on stderr where a theme slot, a selector row or a `path=` binds it, once per ID
@@ -1087,9 +1090,6 @@ cannot carry prints a `note:` naming the entry, and a refused lowering prints th
 themselves under the version, each with its own position. Only the JSON lacks them, and `reason`
 fills that gap.
 
-A further row, `recommended test targets`, belongs to this axis and answers a different question
-again: which versions are worth testing against. No code path emits it yet.
-
 ### The `semantic-sensitive` row
 
 The row answers the second axis per requested edition, as `Java: <members>   Bedrock: <members>`:
@@ -1112,6 +1112,33 @@ A compile records its target's own answer in the lock's `member_version_sensitiv
 blocks as that version does, and warns on a recompile for another version of the edition whose
 boundary lies between the two ([§10.6](#106-provenance-and-lock)).
 
+### The `recommended test targets` row
+
+The row answers which versions are worth loading a build in to test it, per requested edition, as
+`Java: <versions>   Bedrock: <versions>`. It picks from the edition's [buildable
+targets](#the-buildable-targets-row), the supported versions whose pinned lowering raises no error:
+
+- the oldest and the newest of them;
+- for each boundary of the edition's [`semantic-sensitive`](#the-semantic-sensitive-row) entries,
+  the newest of them before the boundary and the oldest at or after it, where some lie on each side.
+
+Each version is listed once, oldest first, in the order of the edition's version table. A source
+with no semantic-sensitive member gets its oldest and newest buildable versions alone, and so does
+one whose buildable versions lie on one side of every boundary. An edition no version builds gets
+`(none)`. `--format json` carries the row as `recommended_test_targets`, one `{edition, versions}`
+per requested edition, in the order requested.
+
+The oldest and newest buildable versions are the ends of what the build claims. A boundary between
+them is where one source is read two ways, so the row adds the two buildable versions nearest it,
+one on each side: the closest pair that shows both readings. A boundary outside them changes nothing
+a build of this source meets, and the row leaves it out though the `semantic-sensitive` row lists
+the member. A source that builds at every supported version and holds a chest, whose item format
+changes at Java 1.20.5, gets `Java: 1.20.4, 1.21, 26.3   Bedrock: 1.21.0, 1.26.60`: 1.20.4 and 1.21
+lie either side of 1.20.5, and 1.21.4 shows nothing that 1.21 and 26.3 do not.
+
+Like the other rows, it reports and refuses nothing. A buildable version it leaves out builds all the
+same.
+
 ### The `verified target` row
 
 The row reads the lockfile `--lock` names, or `<source>.lock` beside the source when the flag is
@@ -1123,7 +1150,7 @@ A lock the schema accepts prints its target, whether the source still hashes to 
 and its `cairn_version`:
 
 ```text
-verified target:         java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
+verified target:           java 1.21.4/DataVersion 4189, source unchanged, written by Cairn 2026.11.0
 ```
 
 The target is spelled as `W_PREVIOUSLY_VERIFIED_TARGET` spells its verified side, always led by the

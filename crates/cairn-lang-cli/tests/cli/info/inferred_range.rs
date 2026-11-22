@@ -32,7 +32,7 @@ fn inferred_row(run: &Run) -> &str {
     let rows: Vec<&str> = run
         .stdout
         .lines()
-        .filter_map(|line| line.strip_prefix("inferred range:          "))
+        .filter_map(|line| line.strip_prefix("inferred range:            "))
         .collect();
     let [row] = rows.as_slice() else {
         panic!("one `inferred range` row expected, got: {}", run.stdout);
@@ -335,14 +335,15 @@ fn a_floor_below_the_range_is_no_conflict() {
     assert_eq!(run.code, Some(0), "{}", run.stderr);
     assert_eq!(
         run.stdout,
-        "registry compatibility:  1.20.4 .. latest\n\
-         inferred range:          Java: 1.21.4 .. latest\n\
-         edition portability:     Java: portable: 2  degraded: 0  unsupported: 0\n\
-         respelled:               Java: none\n\
-         buildable targets:       Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)\n\
-         intended targets:        (none declared)\n\
-         semantic-sensitive:      Java: (none)\n\
-         verified target:         (no lock)\n",
+        "registry compatibility:    1.20.4 .. latest\n\
+         inferred range:            Java: 1.21.4 .. latest\n\
+         edition portability:       Java: portable: 2  degraded: 0  unsupported: 0\n\
+         respelled:                 Java: none\n\
+         buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)\n\
+         intended targets:          (none declared)\n\
+         semantic-sensitive:        Java: (none)\n\
+         recommended test targets:  Java: 1.21.4, 26.3\n\
+         verified target:           (no lock)\n",
         "the declared row and the inferred row side by side",
     );
     assert_stream(
@@ -369,14 +370,15 @@ fn a_floor_above_the_range_is_reported_and_the_report_completes() {
     );
     assert_eq!(
         run.stdout,
-        "registry compatibility:  0.0 .. latest\n\
-         inferred range:          Bedrock: 0.0 .. 1.21.0\n\
-         edition portability:     Bedrock: portable: 2  degraded: 0  unsupported: 0\n\
-         respelled:               Bedrock: none\n\
-         buildable targets:       Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)\n\
-         intended targets:        (none declared)\n\
-         semantic-sensitive:      Bedrock: (none)\n\
-         verified target:         (no lock)\n",
+        "registry compatibility:    0.0 .. latest\n\
+         inferred range:            Bedrock: 0.0 .. 1.21.0\n\
+         edition portability:       Bedrock: portable: 2  degraded: 0  unsupported: 0\n\
+         respelled:                 Bedrock: none\n\
+         buildable targets:         Bedrock: none (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)\n\
+         intended targets:          (none declared)\n\
+         semantic-sensitive:        Bedrock: (none)\n\
+         recommended test targets:  Bedrock: (none)\n\
+         verified target:           (no lock)\n",
     );
     assert_eq!(
         stderr(&fixture, &run),

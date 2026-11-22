@@ -30,7 +30,7 @@ fn respelled_row(run: &Run) -> &str {
     let rows: Vec<&str> = run
         .stdout
         .lines()
-        .filter_map(|line| line.strip_prefix("respelled:               "))
+        .filter_map(|line| line.strip_prefix("respelled:                 "))
         .collect();
     let [row] = rows.as_slice() else {
         panic!("one `respelled` row expected, got: {}", run.stdout);

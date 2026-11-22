@@ -44,11 +44,11 @@ fn bedrock_builds_a_state_only_at_the_versions_whose_map_carries_it() {
     let row = |label: &str| stdout.lines().find(|line| line.starts_with(label));
     assert_eq!(
         row("edition portability:"),
-        Some("edition portability:     Bedrock: portable: 1  degraded: 0  unsupported: 0"),
+        Some("edition portability:       Bedrock: portable: 1  degraded: 0  unsupported: 0"),
     );
     assert_eq!(
         row("buildable targets:"),
-        Some("buildable targets:       Bedrock: 1.21.0, 1.21.60, 1.26.60 (1.21.40 refuses)"),
+        Some("buildable targets:         Bedrock: 1.21.0, 1.21.60, 1.26.60 (1.21.40 refuses)"),
     );
     let refusal = stderr_of(&info)
         .split_once("note: bedrock 1.21.40 refuses this source\n")
