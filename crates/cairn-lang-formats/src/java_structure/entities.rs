@@ -145,7 +145,7 @@ fn villager_xp(level: u8) -> i32 {
 }
 
 /// What a display's `nbt` holds beside what it shows: its yaw, its billboard and its scale.
-fn display(nbt: &mut Compound, facing: Face, billboard: &str, scale: f64) {
+fn display(nbt: &mut Compound, facing: Face, billboard: &str, scale: f32) {
     nbt.insert("Rotation", rotation(facing));
     nbt.insert("billboard", Tag::String(billboard.to_owned()));
     let floats = |values: &[f32]| {
@@ -154,11 +154,6 @@ fn display(nbt: &mut Compound, facing: Face, billboard: &str, scale: f64) {
             values.iter().copied().map(Tag::Float).collect(),
         ))
     };
-    #[expect(
-        clippy::cast_possible_truncation,
-        reason = "the game saves a display's scale as a float"
-    )]
-    let scale = scale as f32;
     let mut transformation = Compound::new();
     transformation.insert("left_rotation", floats(&[0.0, 0.0, 0.0, 1.0]));
     transformation.insert("right_rotation", floats(&[0.0, 0.0, 0.0, 1.0]));

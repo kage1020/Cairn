@@ -187,8 +187,9 @@ enchantment it has no number for, and names the ones it has.
 
 A `text_display`, a `block_display` and an `item_display` draw text, a block or an item where they
 stand, and stand as an armor stand does: on their cell's floor, looking the way their wall or their
-`facing=` says. Each takes a `scale=`, a number above 0 and 1 without one, which scales what it
-draws along each axis; any other value is `W_IGNORED_ARGUMENT`.
+`facing=` says. Each takes a `scale=`, a number that is above 0 as the float it is saved as, and 1
+without one, which scales what it draws along each axis; any other value is `W_IGNORED_ARGUMENT`,
+one too large for a float or too near 0 among them.
 
 - A `text_display` shows its `text=`, a string, one line, or a list of strings, its lines from the
   top, and turns to the viewer as its `billboard=` says: `fixed`, which it does without one, never;

@@ -74,7 +74,7 @@ Java は村人の `VillagerData` を、`type`、名前空間付きの `professio
 
 ### display
 
-`text_display`、`block_display`、`item_display` は、立つ場所に文字、ブロック、アイテムを描き、防具立てと同じように立ちます。つまりセルの床に、壁か `facing=` が示す方向を向いて立ちます。どれも `scale=` を取ります。0 より大きい数で、書かなければ 1 です。描くものをそれぞれの軸に沿って拡大し、ほかの値は `W_IGNORED_ARGUMENT` です。
+`text_display`、`block_display`、`item_display` は、立つ場所に文字、ブロック、アイテムを描き、防具立てと同じように立ちます。つまりセルの床に、壁か `facing=` が示す方向を向いて立ちます。どれも `scale=` を取ります。保存される float として 0 より大きい数で、書かなければ 1 です。描くものをそれぞれの軸に沿って拡大し、ほかの値は `W_IGNORED_ARGUMENT` です。float に収まらないほど大きい数や、0 に近すぎる数もこれに含みます。
 
 - `text_display` は `text=` を表示します。1 行を表す文字列か、上からの行を表す文字列のリストです。`billboard=` のとおりに見る人の方へ回ります。書かないときの `fixed` は回らず、`vertical` は縦の軸の周りに、`horizontal` は横の軸の周りに、`center` は両方の周りに回ります。`text=` の別の種類の値と、ほかの `billboard=` は `W_IGNORED_ARGUMENT` です。
 - `block_display` は、`floor` がスロットからブロックを取るように、`mat_slot=` が束縛するブロックを表示します。

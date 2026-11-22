@@ -63,22 +63,22 @@ pub enum EntityData {
         lines: Vec<String>,
         /// How it turns toward the viewer, as `fixed`.
         billboard: String,
-        /// Its scale on every axis.
-        scale: f64,
+        /// Its scale on every axis, as the float the game saves.
+        scale: f32,
     },
     /// A block display.
     BlockDisplay {
         /// The block it shows.
         block: BlockState,
-        /// Its scale on every axis.
-        scale: f64,
+        /// Its scale on every axis, as the float the game saves.
+        scale: f32,
     },
     /// An item display.
     ItemDisplay {
         /// The item it shows.
         item: Item,
-        /// Its scale on every axis.
-        scale: f64,
+        /// Its scale on every axis, as the float the game saves.
+        scale: f32,
     },
     /// An entity a `spawn` places, which holds only what its `nbt=` writes.
     Spawn,

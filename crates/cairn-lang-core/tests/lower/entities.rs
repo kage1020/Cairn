@@ -403,6 +403,50 @@ fn a_display_stands_on_its_cell_s_floor_showing_what_its_keys_name() {
 }
 
 #[test]
+fn a_scale_the_saved_float_does_not_hold_above_zero_is_ignored() {
+    let big = format!("{}.0", "9".repeat(42));
+    let tiny = format!("0.{}1", "0".repeat(47));
+    let lines = [
+        "block_display at=1,1,1 mat_slot=wall scale=0".to_owned(),
+        format!("block_display at=3,1,1 mat_slot=wall scale={big}"),
+        format!("block_display at=4,1,1 mat_slot=wall scale={tiny}"),
+    ];
+    let src = room(&lines.join("\n  "));
+    let out = lowered(&src);
+    let ignored = |value: &str, kind: &str| {
+        (
+            DiagnosticCode::IgnoredArgument,
+            value.to_owned(),
+            format!(
+                "`scale=` must be a number above 0 that a float holds, such as `1.5`, not {kind} \
+                 `{value}`; the value was ignored"
+            ),
+            vec!["the display is scale 1"],
+        )
+    };
+    let found: Vec<_> = findings(&src, &out)
+        .into_iter()
+        .map(|(code, at, message, notes)| (code, at.to_owned(), message.to_owned(), notes))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            ignored("0", "integer"),
+            ignored(&big, "decimal"),
+            ignored(&tiny, "decimal"),
+        ],
+    );
+    let scales: Vec<_> = placed(&out)
+        .into_iter()
+        .map(|entity| match entity.data {
+            EntityData::BlockDisplay { scale, .. } => scale,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    assert_eq!(scales, [1.0; 3]);
+}
+
+#[test]
 fn a_display_the_target_s_edition_lacks_is_refused_with_what_to_write() {
     let src = room("text_display at=3,2,2 text=\"Inn\"");
     let out = lowered_with(&src, &Paintings { bedrock: true });

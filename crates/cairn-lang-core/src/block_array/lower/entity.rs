@@ -260,21 +260,21 @@ pub(super) fn item_of(
         })
 }
 
-/// The scale `scale=` writes, above 0, or 1 when the line writes none; another value joins
-/// `unread`.
-pub(super) fn scale_of(member: &Member, unread: &mut Vec<UnreadArgument>) -> f64 {
+/// The scale `scale=` writes, as a float above 0, or 1 when the line writes none; another value
+/// joins `unread`.
+pub(super) fn scale_of(member: &Member, unread: &mut Vec<UnreadArgument>) -> f32 {
     read_or_ignore(
         member,
         "scale",
         |kind| {
             let scale = match kind {
-                ValueKind::Decimal(text) => text.parse::<f64>().ok()?,
-                ValueKind::Int(whole) => i32::try_from(*whole).ok().map(f64::from)?,
+                ValueKind::Decimal(text) => text.parse::<f32>().ok()?,
+                ValueKind::Int(whole) => whole.to_string().parse::<f32>().ok()?,
                 _ => return None,
             };
             (scale > 0.0 && scale.is_finite()).then_some(scale)
         },
-        "a number above 0, such as `1.5`",
+        "a number above 0 that a float holds, such as `1.5`",
     )
     .unwrap_or_else(|argument| {
         unread.push(argument);
