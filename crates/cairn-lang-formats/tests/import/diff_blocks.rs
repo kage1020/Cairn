@@ -126,6 +126,38 @@ fn a_lift_is_compared_with_its_structure_at_the_stamp() {
     );
 }
 
+/// A stone box of 40 blocks with an item frame and a glow item frame lying on its floor.
+const FRAMED: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=4x4\n  floor mat_slot=wall\n  \
+     walls height=2 mat_slot=wall\n  item_frame id=plain at=1,1,1 facing=up\n  item_frame id=lit \
+     at=2,1,2 facing=up glowing=true\n";
+
+#[test]
+fn a_bedrock_item_frame_is_compared_as_the_block_it_is_saved_as() {
+    let run = diff_blocks(FRAMED, &written(FRAMED, Edition::Bedrock, "1.21.60"));
+    let document = json(&run, FRAMED);
+    assert_eq!(
+        (
+            found(&run, FRAMED),
+            &document["converged"],
+            &document["counts"],
+            &document["regions"],
+        ),
+        (
+            Vec::new(),
+            &serde_json::json!(true),
+            &serde_json::json!({
+                "structure_blocks": 42,
+                "built_blocks": 42,
+                "both_blocks": 42,
+                "matched": 42,
+                "states_matched": 42,
+                "residual": 0,
+            }),
+            &serde_json::json!([]),
+        ),
+    );
+}
+
 #[test]
 fn a_source_a_pass_refuses_lists_every_finding_in_the_document() {
     let source = "struct s size=2x2 size=3x3\n  floor\n";
