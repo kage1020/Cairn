@@ -17,8 +17,8 @@ Language support for [Cairn](https://github.com/kage1020/Cairn) (`.crn`) inside 
 
 | Command | Purpose |
 | ------- | ------- |
-| **Cairn: Show Info** (`cairn.showInfo`) | Asks `cairn-lsp` for the active `.crn` file's `cairn info` report and opens it beside the editor, as the JSON `cairn info --format json` prints. It reads the text in the editor, unsaved changes included, of a document saved to a file, and the `<source>.lock` beside that file. |
-| **Cairn: Diff Blocks** (`cairn.showDiffBlocks`) | Asks for a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file, then asks `cairn-lsp` to compare it with what the active `.crn` file builds at the file's stamp, and opens the report beside the editor, as the JSON `cairn diff-blocks --format json` prints. It compares the text in the editor, saved or not. |
+| **Cairn: Show Info** (`cairn.showInfo`) | Asks `cairn-lsp` for the active `.crn` file's `cairn info` report and opens it beside the editor, as the JSON `cairn info --format json` prints. It reads the text in the editor, unsaved changes included, of a document saved to a file, and the `<source>.lock` beside that file. A run `cairn-lsp` refuses as a whole has no report, and the warning it shows says why. |
+| **Cairn: Diff Blocks** (`cairn.showDiffBlocks`) | Asks for a `.nbt`, `.litematic`, `.schem` or `.mcstructure` file, then asks `cairn-lsp` to compare it with what the active `.crn` file builds at the file's stamp, and opens the report beside the editor, as the JSON `cairn diff-blocks --format json` prints. It compares the text in the editor, unsaved changes included, of a document saved to a file. A run `cairn-lsp` refuses as a whole has no report, and the warning it shows carries the lines `cairn diff-blocks` writes about the refusal. |
 
 ## Settings
 

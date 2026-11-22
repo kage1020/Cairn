@@ -518,20 +518,25 @@ test(
 );
 
 test(
-  "Cairn: Show Info shows the error cairn.info answers",
+  "Cairn: Show Info shows why cairn.info has no report, and any other error it answers",
   POSIX_ONLY,
   async (t) => {
-    const fixture = new Fixture(t);
-    const server = fixture.pathServer;
-    const to = join(fixture.root, "shown.json");
-    const error = { code: -32803, message: "no report" };
-    await fixture.expectLaunches(
-      { user: {}, showInfo: { to }, commandAnswer: { error } },
-      [probe(server), probe(server), commandSession(server)],
-    );
-    assert.deepEqual(shownAt(to), {
-      message: "cairn-lsp answered cairn.info with an error: no report",
-    });
+    for (const [error, message] of [
+      [{ code: -32803, message: "no report" }, "no report"],
+      [
+        { code: -32602, message: "bad arguments" },
+        "cairn-lsp answered cairn.info with an error: bad arguments",
+      ],
+    ] as const) {
+      const fixture = new Fixture(t);
+      const server = fixture.pathServer;
+      const to = join(fixture.root, "shown.json");
+      await fixture.expectLaunches(
+        { user: {}, showInfo: { to }, commandAnswer: { error } },
+        [probe(server), probe(server), commandSession(server)],
+      );
+      assert.deepEqual(shownAt(to), { message }, error.message);
+    }
   },
 );
 
@@ -610,7 +615,7 @@ test(
 );
 
 test(
-  "Cairn: Diff Blocks says a run refused as a whole has no report",
+  "Cairn: Diff Blocks shows the lines that refuse a run as a whole",
   POSIX_ONLY,
   async (t) => {
     const fixture = new Fixture(t);
@@ -618,20 +623,60 @@ test(
     const to = join(fixture.root, "shown.json");
     const structure = join(fixture.root, "main.nbt");
     writeFileSync(structure, "");
-    const refused = { diagnostics: [] };
+    const message =
+      "`cairn.diffBlocks` has no report for file:///main.crn, and no finding refused it:\n" +
+      "error[E_PARTIAL_BUILD]: /main.crn: 1 of 2 requested scopes did not lower; refusing to " +
+      "compare a partial build\n  note: `site::s::b` produced no voxels";
     await fixture.expectLaunches(
       {
         user: {},
         diffBlocks: { to, structure },
-        commandAnswer: { result: refused },
+        commandAnswer: { error: { code: -32803, message } },
       },
       [probe(server), probe(server), commandSession(server)],
     );
-    assert.deepEqual(shownAt(to), {
-      opened: `${JSON.stringify(refused, null, 2)}\n`,
-      message:
-        "cairn diff-blocks refused the run as a whole, so there is no report. " +
-        "Run cairn diff-blocks in a terminal to see why.",
-    });
+    assert.deepEqual(shownAt(to), { message });
+  },
+);
+
+test(
+  "Cairn: Diff Blocks asks for a structure file, and does nothing when none is picked",
+  POSIX_ONLY,
+  async (t) => {
+    const filters = {
+      "Structure files": ["nbt", "litematic", "schem", "mcstructure"],
+    };
+    for (const dialog of ["pick", "cancel"] as const) {
+      const fixture = new Fixture(t);
+      const server = fixture.pathServer;
+      const to = join(fixture.root, "shown.json");
+      const structure = join(fixture.root, "picked.schem");
+      writeFileSync(structure, "");
+      const picked = dialog === "pick";
+      await fixture.expectLaunches(
+        { user: {}, diffBlocks: { to, structure, dialog } },
+        [
+          probe(server),
+          probe(server),
+          picked ? commandSession(server) : session(server, [UNPINNED]),
+        ],
+      );
+      const request = {
+        command: "cairn.diffBlocks",
+        arguments: [
+          {
+            uri: pathToFileURL(fixture.document).href,
+            structure: pathToFileURL(structure).href,
+          },
+        ],
+      };
+      assert.deepEqual(
+        shownAt(to),
+        picked
+          ? { opened: `${JSON.stringify(request, null, 2)}\n`, filters }
+          : { filters },
+        dialog,
+      );
+    }
   },
 );

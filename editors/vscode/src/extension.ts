@@ -19,8 +19,10 @@ import {
   ExecuteCommandParams,
   ExecuteCommandRequest,
   FeatureState,
+  LSPErrorCodes,
   LanguageClient,
   LanguageClientOptions,
+  ResponseError,
   ServerOptions,
   StaticFeature,
 } from "vscode-languageclient/node";
@@ -28,11 +30,13 @@ import {
 const execFileAsync = promisify(execFile);
 const RELEASE_URL = "https://github.com/kage1020/Cairn/releases";
 const PROBE_TIMEOUT_MS = 5_000;
-// Not `cairn.info`: the client registers that one itself, from the server's capabilities.
+// Not the server's `cairn.*` commands: the client registers those itself, from the server's
+// capabilities.
 const SHOW_INFO = "cairn.showInfo";
 const INFO = "cairn.info";
 const SHOW_DIFF_BLOCKS = "cairn.showDiffBlocks";
 const DIFF_BLOCKS = "cairn.diffBlocks";
+// A copy of `ImportFormat::ALL` in cairn-lang-formats, which a new format joins here too.
 const STRUCTURE_EXTENSIONS = ["nbt", "litematic", "schem", "mcstructure"];
 /**
  * The command a quick-fix runs to pin another target; its arguments are the
@@ -210,7 +214,8 @@ async function activeSource(
 
 /**
  * Sends `request` to `cairn-lsp` and opens its answer beside the editor as
- * JSON, saying when the answer is the failure document `cli` prints.
+ * JSON, saying when the answer is the failure document `cli` prints, or shows
+ * why the server has no report.
  */
 async function showReport(
   current: LanguageClient,
@@ -222,6 +227,10 @@ async function showReport(
   try {
     report = await current.sendRequest(ExecuteCommandRequest.type, request);
   } catch (err) {
+    if (err instanceof ResponseError && err.code === LSPErrorCodes.RequestFailed) {
+      void window.showWarningMessage(err.message);
+      return { message: err.message };
+    }
     return refuse(
       `cairn-lsp answered ${request.command} with an error: ${describeError(err)}`,
     );
@@ -239,16 +248,12 @@ async function showReport(
   } catch (err) {
     return refuse(`${title} could not open the report: ${describeError(err)}`);
   }
-  const findings = failureFindings(report);
-  if (findings === undefined) {
+  if (!isFailureDocument(report)) {
     return { opened };
   }
   const message =
-    findings > 0
-      ? `${cli} refused the source, so there is no report. ` +
-        "The document beside it lists the findings that refused it."
-      : `${cli} refused the run as a whole, so there is no report. ` +
-        `Run ${cli} in a terminal to see why.`;
+    `${cli} refused the source, so there is no report. ` +
+    "The document beside it lists the findings that refused it.";
   void window.showWarningMessage(message);
   return { opened, message };
 }
@@ -259,20 +264,17 @@ function refuse(message: string): ReportShown {
   return { message };
 }
 
-/**
- * How many findings `report` lists when it is the `{"diagnostics": [...]}`
- * document of a refused run, else `undefined`.
- */
-function failureFindings(report: unknown): number | undefined {
+/** Whether `report` is the `{"diagnostics": [...]}` document of a refused source. */
+function isFailureDocument(report: unknown): boolean {
   if (
     typeof report !== "object" ||
     report === null ||
     Object.keys(report).length !== 1
   ) {
-    return undefined;
+    return false;
   }
   const { diagnostics } = report as { diagnostics?: unknown };
-  return Array.isArray(diagnostics) ? diagnostics.length : undefined;
+  return Array.isArray(diagnostics);
 }
 
 /**

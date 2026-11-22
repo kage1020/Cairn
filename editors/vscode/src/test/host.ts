@@ -1,7 +1,14 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { Uri, commands, extensions, window, workspace } from "vscode";
+import {
+  OpenDialogOptions,
+  Uri,
+  commands,
+  extensions,
+  window,
+  workspace,
+} from "vscode";
 import type { ReportShown } from "../extension";
 import type { DiffBlocks, ServerEvent, ShowInfo } from "./server-event";
 
@@ -53,14 +60,22 @@ export async function run(): Promise<void> {
   }
   const diffBlocks = process.env.CAIRN_TEST_DIFF_BLOCKS;
   if (diffBlocks) {
-    const { to, structure } = JSON.parse(diffBlocks) as DiffBlocks;
-    writeShown(
-      to,
-      await commands.executeCommand<ReportShown>(
-        "cairn.showDiffBlocks",
-        Uri.file(structure),
-      ),
-    );
+    const { to, structure, dialog } = JSON.parse(diffBlocks) as DiffBlocks;
+    if (dialog) {
+      const { shown, filters } = await withOpenDialog(
+        dialog === "pick" ? [Uri.file(structure)] : undefined,
+        () => commands.executeCommand<ReportShown>("cairn.showDiffBlocks"),
+      );
+      writeShown(to, shown, filters);
+    } else {
+      writeShown(
+        to,
+        await commands.executeCommand<ReportShown>(
+          "cairn.showDiffBlocks",
+          Uri.file(structure),
+        ),
+      );
+    }
   }
   const main = join(extension.extensionPath, extension.packageJSON.main);
   const loaded = require.cache[require.resolve(main)];
@@ -73,12 +88,45 @@ export async function run(): Promise<void> {
   await deactivate();
 }
 
-/** Writes what a report command did to `to`, as `{ opened?, message? }` JSON. */
-function writeShown(to: string, shown: ReportShown): void {
+/**
+ * Writes what a report command did to `to`, as `{ opened?, message?, filters? }`
+ * JSON, with the filters its open dialog offered.
+ */
+function writeShown(
+  to: string,
+  shown: ReportShown,
+  filters?: OpenDialogOptions["filters"],
+): void {
   writeFileSync(
     to,
-    JSON.stringify({ opened: shown.opened?.getText(), message: shown.message }),
+    JSON.stringify({
+      opened: shown.opened?.getText(),
+      message: shown.message,
+      filters,
+    }),
   );
+}
+
+/**
+ * Runs `command` with `window.showOpenDialog` answering `picked`, and returns
+ * what it did and the filters the dialog was asked to offer.
+ */
+async function withOpenDialog(
+  picked: Uri[] | undefined,
+  command: () => Thenable<ReportShown>,
+): Promise<{ shown: ReportShown; filters?: OpenDialogOptions["filters"] }> {
+  const stubbed = window as { showOpenDialog: typeof window.showOpenDialog };
+  const showOpenDialog = stubbed.showOpenDialog;
+  let filters: OpenDialogOptions["filters"];
+  stubbed.showOpenDialog = async (options) => {
+    filters = options?.filters;
+    return picked;
+  };
+  try {
+    return { shown: await command(), filters };
+  } finally {
+    stubbed.showOpenDialog = showOpenDialog;
+  }
 }
 
 /**

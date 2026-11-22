@@ -17,12 +17,15 @@ export interface ShowInfo {
 
 /**
  * How a test runs `Cairn: Diff Blocks`: the file it writes what the command
- * did to, as `{ opened?, message? }` JSON, and the structure file it compares
- * the `.crn` file the window opened with.
+ * did to, as `{ opened?, message?, filters? }` JSON, and the structure file it
+ * compares the `.crn` file the window opened with. With `dialog`, the command
+ * asks for the file, and the open dialog, whose `filters` it writes, picks
+ * `structure` or is cancelled.
  */
 export interface DiffBlocks {
   readonly to: string;
   readonly structure: string;
+  readonly dialog?: "pick" | "cancel";
 }
 
 /**
