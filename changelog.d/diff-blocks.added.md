@@ -13,5 +13,7 @@
   side holds a block at, the matched ones and the residual ones, `Counts` turns them into
   `block_iou`, `state_accuracy` and `residual_ratio`, and `diff` clusters what differs into regions
   with a likely cause and searches for the `edit` lines that close them. A site is compared as one
-  body laid from its arrays, however far apart its placements stand. A Bedrock property either side
-  leaves out reads as its state map's default, and `waterlogged` as `false`.
+  body laid from its arrays, however far apart its placements stand, and a source of one body is
+  compared with a `.litematic`'s regions laid at their corners, so the file a site compiles to
+  compares with that site. A Bedrock property either side leaves out reads as its state map's
+  default, and `waterlogged` as `false`.

@@ -194,6 +194,9 @@ pub struct GridUnit {
     pub name: String,
     /// The blocks.
     pub grid: BlockGrid,
+    /// Where the grid's `(0, 0, 0)` cell stands in its file: a Litematica region's minimum corner,
+    /// else `(0, 0, 0)`.
+    pub corner: (i32, i32, i32),
     /// Comment lines written above the body, each without its `#`.
     pub comment: Vec<String>,
 }

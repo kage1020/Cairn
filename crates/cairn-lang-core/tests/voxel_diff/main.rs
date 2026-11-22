@@ -11,7 +11,7 @@ mod regions;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::transliterate::{BlockGrid, GridEntry, GridUnit};
-use cairn_lang_core::voxel_diff::{DiffInput, DiffReport, diff};
+use cairn_lang_core::voxel_diff::{DiffInput, DiffReport, StructureBodies, diff};
 use cairn_lang_core::{Severity, lower, parse, resolve};
 
 /// What `source` builds with no registry pack, `None` when it does not parse or raises an error.
@@ -47,6 +47,7 @@ fn unit_edited(name: &str, array: &BlockArray, edit: impl FnMut(&mut GridEntry))
         name: name.to_owned(),
         grid: BlockGrid::new(array.dims, palette, array.voxels.clone())
             .expect("a block array's voxels fill its extents and index its palette"),
+        corner: (0, 0, 0),
         comment: Vec::new(),
     }
 }
@@ -65,6 +66,14 @@ pub fn units(source: &str) -> Vec<GridUnit> {
         .collect()
 }
 
+/// The stem of the structure file the fixtures' units are read from.
+pub const STEM: &str = "imported";
+
+/// `units` as the bodies of a structure file named [`STEM`].
+pub fn in_file(units: &[GridUnit]) -> StructureBodies<'_> {
+    StructureBodies { stem: STEM, units }
+}
+
 /// `lift` diffed against `units`.
 ///
 /// # Panics
@@ -75,7 +84,7 @@ pub fn report(units: &[GridUnit], lift: &str) -> DiffReport {
     let ir = lower(&module);
     let built = build(lift).unwrap_or_else(|| panic!("the lift builds:\n{lift}"));
     diff(&DiffInput {
-        units,
+        structure: in_file(units),
         source: lift,
         module: &ir,
         built: &built,

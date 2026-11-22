@@ -14,14 +14,16 @@ use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_formats::schem::{prepare_schem, read_schem, schem_files};
 
 use crate::common::{
-    admitted_versions, bedrock_cells, compile_source, examples, latest, states_for,
+    admitted_versions, bedrock_cells, compile_source, examples, examples_dir, latest, states_for,
 };
 
-/// One structure file an example writes: its name, its bytes, and the arrays it holds in order.
+/// One structure file an example writes: its name, its bytes, and the arrays it holds in order
+/// with the `structures` key of each.
 struct Written<'a> {
     name: String,
     bytes: Vec<u8>,
     arrays: Vec<&'a BlockArray>,
+    scopes: Vec<&'a str>,
 }
 
 /// The version an example is built at for `edition`: `latest` when its floors admit it, else the
@@ -71,6 +73,7 @@ fn written<'a>(
                         name: format!("{}.nbt", ir.artifact_stem(scope)),
                         bytes,
                         arrays: vec![array],
+                        scopes: vec![scope],
                     }
                 })
                 .collect()
@@ -82,6 +85,7 @@ fn written<'a>(
                 .map(|file| {
                     let name = format!("{}.litematic", file.stem);
                     let arrays = file.regions.iter().map(|r| r.block_array).collect();
+                    let scopes = file.regions.iter().map(|r| r.scope).collect();
                     let mut bytes = Vec::new();
                     prepare_litematic(file, &target)
                         .expect("the file prepares")
@@ -91,6 +95,7 @@ fn written<'a>(
                         name,
                         bytes,
                         arrays,
+                        scopes,
                     }
                 })
                 .collect()
@@ -102,6 +107,7 @@ fn written<'a>(
                 .map(|file| {
                     let name = format!("{}.schem", file.stem);
                     let arrays = vec![file.block_array];
+                    let scopes = vec![file.scope];
                     let mut bytes = Vec::new();
                     prepare_schem(file, &target)
                         .expect("the file prepares")
@@ -111,6 +117,7 @@ fn written<'a>(
                         name,
                         bytes,
                         arrays,
+                        scopes,
                     }
                 })
                 .collect()
@@ -122,6 +129,7 @@ fn written<'a>(
                 name: format!("{}.mcstructure", ir.artifact_stem(scope)),
                 bytes: mcstructure_bytes(array, version),
                 arrays: vec![array],
+                scopes: vec![scope],
             })
             .collect(),
     }
@@ -351,10 +359,9 @@ fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_a
                 for file in written(&ir, format, &version) {
                     let import = imported(&file, format);
                     let label = format!("{name} as {} at {edition} {version}", file.name);
-                    let units = &import.decoded.units;
                     let lifted = compile_source(&import.transliteration.source, edition, &version)
                         .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
-                    let counts = compare(units, &lifted).counts;
+                    let counts = compare(import.decoded.bodies(), &lifted).counts;
                     assert_eq!(
                         counts.metrics(),
                         Metrics {
@@ -364,16 +371,55 @@ fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_a
                         },
                         "{label}: the import"
                     );
-                    if ir.structures.len() == 1 {
-                        let metrics = compare(units, &ir).counts.metrics();
-                        assert_eq!(
-                            (metrics.block_iou, metrics.state_accuracy),
-                            (1.0, 1.0),
-                            "{label}: the source"
-                        );
-                    }
+                    // A file holds one struct, one site or one of a site's arrays: one body.
+                    let mut held = ir.clone();
+                    held.structures
+                        .retain(|scope, _| file.scopes.contains(&scope.as_str()));
+                    let comparison = compare(import.decoded.bodies(), &held);
+                    let metrics = comparison.counts.metrics();
+                    assert_eq!(
+                        (
+                            comparison.bodies.len(),
+                            metrics.block_iou,
+                            metrics.state_accuracy
+                        ),
+                        (1, 1.0, 1.0),
+                        "{label}: the source"
+                    );
                 }
             }
         }
     }
+}
+
+#[test]
+fn a_site_written_as_one_litematic_compares_with_the_site_as_one_body_named_after_the_file() {
+    let path = examples_dir().join("l-walkway.crn");
+    let source = std::fs::read_to_string(&path).expect("the example reads");
+    let version = latest(Edition::Java);
+    let ir = compile_source(&source, Edition::Java, version).expect("the example compiles");
+    let [file] = written(&ir, ImportFormat::Litematic, version)
+        .try_into()
+        .unwrap_or_else(|files: Vec<Written<'_>>| panic!("{} files", files.len()));
+    let import = imported(&file, ImportFormat::Litematic);
+    assert_eq!(
+        import.decoded.units.len(),
+        4,
+        "three placements and a walkway"
+    );
+    let comparison = compare(import.decoded.bodies(), &ir);
+    let pairs: Vec<_> = comparison
+        .bodies
+        .iter()
+        .map(|body| (body.structure.as_deref(), body.source.as_deref()))
+        .collect();
+    assert_eq!(pairs, [(Some("duo"), Some("duo"))]);
+    assert_eq!(
+        comparison.counts.metrics(),
+        Metrics {
+            block_iou: 1.0,
+            state_accuracy: 1.0,
+            residual_ratio: 0.0,
+        }
+    );
 }

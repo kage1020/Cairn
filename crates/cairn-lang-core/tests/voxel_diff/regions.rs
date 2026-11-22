@@ -182,16 +182,24 @@ fn a_state_region_names_each_property_that_differs() {
 }
 
 #[test]
-fn a_body_the_build_lacks_is_one_unpaired_region() {
-    let two = format!(
+fn a_body_with_no_namesake_on_the_other_side_is_one_unpaired_region() {
+    let structure = format!(
         "{THEME}struct a size=3x3\n  floor mat_slot=floor\n\n\
          struct b size=3x3\n  floor mat_slot=wall\n"
     );
-    let one = format!("{THEME}struct a size=3x3\n  floor mat_slot=floor\n");
-    let report = report(&units(&two), &one);
+    let lift = format!(
+        "{THEME}struct a size=3x3\n  floor mat_slot=floor\n\n\
+         struct c size=3x3\n  floor mat_slot=floor\n"
+    );
+    let report = report(&units(&structure), &lift);
     assert_eq!(
         region_lines(&report),
-        ["missing b (0,0,0)..(2,0,2): 9 cells of minecraft:cobblestone → the source builds no `b`"]
+        [
+            "missing b (0,0,0)..(2,0,2): 9 cells of minecraft:cobblestone → the source builds no \
+             `b`",
+            "extra c (0,0,0)..(2,0,2): 9 cells of minecraft:oak_planks → the structure holds no \
+             `c`",
+        ]
     );
 }
 
@@ -228,6 +236,7 @@ fn a_site_is_laid_as_one_body_moved_to_its_lowest_corner() {
             vec![PaletteIndex(0)],
         )
         .expect("one cell of air"),
+        corner: (0, 0, 0),
         comment: Vec::new(),
     };
     let report = report(&[air], &read_example("l-walkway.crn"));

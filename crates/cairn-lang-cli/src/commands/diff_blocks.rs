@@ -77,7 +77,7 @@ pub(crate) fn run_diff_blocks(structure: &Path, file: &Path, format: DiffFormat)
     }
     let build = |text: &str| build_candidate(text, edition, target);
     let verdict = diff(&DiffInput {
-        units: &decoded.units,
+        structure: decoded.bodies(),
         source: &source,
         module: &lowered.ir,
         built: &lowered.block_ir,

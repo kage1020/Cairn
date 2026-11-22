@@ -8,9 +8,11 @@ use indexmap::IndexMap;
 use crate::block_array::{BlockArray, BlockArrayIr, BlockState, Dims, ResolvedMember};
 use crate::error::Span;
 use crate::intent::MemberAddress;
-use crate::transliterate::{GridEntry, GridUnit, spelled};
+use crate::transliterate::{GridEntry, GridUnit, spelled, unit_names};
 
-use super::{BodyComparison, Counts, Difference, RegionKind, StateDifference, is_air};
+use super::{
+    BodyComparison, Counts, Difference, RegionKind, StateDifference, StructureBodies, is_air,
+};
 
 /// The state lowering leaves out where no water overlaps a block, which the game then places dry.
 const WATERLOGGED: &str = "waterlogged";
@@ -83,16 +85,7 @@ impl LaidPart {
 
     /// The box the part fills in the body.
     fn extent(&self) -> Extent {
-        let (sx, sy, sz) = self.shift;
-        let Dims { x, y, z } = self.dims;
-        (
-            self.shift,
-            (
-                sx.saturating_add(x),
-                sy.saturating_add(y),
-                sz.saturating_add(z),
-            ),
-        )
+        extent(self.shift, self.dims)
     }
 }
 
@@ -291,14 +284,107 @@ fn shifted((x, y, z): Cell, (dx, dy, dz): Cell) -> Cell {
     )
 }
 
-/// Each unit with the body it is compared with: the one with the one when each side holds one,
-/// else by name, each unpaired unit and body on its own.
+/// One body of the structure: a grid, or several laid where they stand in the file.
+pub(super) struct StructureBody<'a> {
+    name: String,
+    /// Each grid with where its `(0, 0, 0)` cell stands in the body, in the order they are laid.
+    parts: Vec<(Cell, &'a GridUnit)>,
+}
+
+impl<'a> StructureBody<'a> {
+    fn one(unit: &'a GridUnit) -> Self {
+        Self {
+            name: unit.name.clone(),
+            parts: vec![((0, 0, 0), unit)],
+        }
+    }
+
+    /// `units` at their corners, shifted so the lowest is `(0, 0, 0)`, named after `stem` as an
+    /// import names the body of a file of one structure.
+    fn laid(stem: &str, units: &'a [GridUnit]) -> Self {
+        let low = |axis: fn(&GridUnit) -> i32| units.iter().map(axis).min().unwrap_or(0);
+        let low = (
+            low(|unit| unit.corner.0),
+            low(|unit| unit.corner.1),
+            low(|unit| unit.corner.2),
+        );
+        // Corners are `i32`, so one less the lowest fits a `u32`.
+        let offset = |v: i32, low: i32| {
+            u32::try_from(i64::from(v) - i64::from(low))
+                .expect("a corner less the lowest fits a u32")
+        };
+        let parts: Vec<(Cell, &GridUnit)> = units
+            .iter()
+            .map(|unit| {
+                let (x, y, z) = unit.corner;
+                ((offset(x, low.0), offset(y, low.1), offset(z, low.2)), unit)
+            })
+            .collect();
+        let high = |axis: fn(&Extent) -> u32| {
+            parts
+                .iter()
+                .map(|&(shift, unit)| axis(&extent(shift, unit.grid.dims())))
+                .max()
+        };
+        let dims = Dims {
+            x: high(|(_, high)| high.0).unwrap_or(0),
+            y: high(|(_, high)| high.1).unwrap_or(0),
+            z: high(|(_, high)| high.2).unwrap_or(0),
+        };
+        Self {
+            name: unit_names([(stem, dims)]).remove(0),
+            parts,
+        }
+    }
+
+    /// The block at `cell`, with the part and palette slot it is read from: the last part laid
+    /// with one there.
+    fn at(&self, (x, y, z): Cell) -> Option<((usize, u16), &'a GridEntry)> {
+        self.parts
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, &((sx, sy, sz), unit))| {
+                let grid = &unit.grid;
+                let index = grid.dims().index(
+                    x.checked_sub(sx)?,
+                    y.checked_sub(sy)?,
+                    z.checked_sub(sz)?,
+                )?;
+                let slot = *grid.voxels().get(index)?;
+                let entry = grid.palette().get(usize::from(slot.0))?;
+                (!is_air(&entry.state.id)).then_some(((i, slot.0), entry))
+            })
+    }
+}
+
+/// The box an array of `dims` fills from `shift`.
+fn extent(shift: Cell, Dims { x, y, z }: Dims) -> Extent {
+    let (sx, sy, sz) = shift;
+    (
+        shift,
+        (
+            sx.saturating_add(x),
+            sy.saturating_add(y),
+            sz.saturating_add(z),
+        ),
+    )
+}
+
+/// Each body of `structure` with the body of the build it is compared with: the whole structure
+/// with the build's one body, its regions laid as one, else by name, each unpaired body on its
+/// own.
 pub(super) fn pair(
-    units: &[GridUnit],
+    structure: StructureBodies<'_>,
     bodies: Vec<BuiltBody>,
-) -> Vec<(Option<&GridUnit>, Option<BuiltBody>)> {
-    if units.len() == 1 && bodies.len() == 1 {
-        return vec![(units.first(), bodies.into_iter().next())];
+) -> Vec<(Option<StructureBody<'_>>, Option<BuiltBody>)> {
+    let units = structure.units;
+    if bodies.len() == 1 && !units.is_empty() {
+        let whole = match units {
+            [unit] => StructureBody::one(unit),
+            _ => StructureBody::laid(structure.stem, units),
+        };
+        return vec![(Some(whole), bodies.into_iter().next())];
     }
     let mut left: Vec<Option<BuiltBody>> = bodies.into_iter().map(Some).collect();
     let mut out = Vec::new();
@@ -307,7 +393,7 @@ pub(super) fn pair(
             .iter_mut()
             .find(|body| body.as_ref().is_some_and(|body| body.name == unit.name))
             .and_then(Option::take);
-        out.push((Some(unit), named));
+        out.push((Some(StructureBody::one(unit)), named));
     }
     out.extend(left.into_iter().flatten().map(|body| (None, Some(body))));
     out
@@ -316,7 +402,7 @@ pub(super) fn pair(
 /// The cells of `unit` and `body` compared over the boxes their arrays fill, from `(0, 0, 0)`,
 /// keeping what `detail` asks for.
 pub(super) fn compare_pair(
-    unit: Option<&GridUnit>,
+    unit: Option<&StructureBody<'_>>,
     body: Option<BuiltBody>,
     detail: Detail,
 ) -> BodyComparison {
@@ -325,18 +411,16 @@ pub(super) fn compare_pair(
     let built = body.unwrap_or_else(|| BuiltBody::empty(String::new()));
     let mut boxes: Vec<Extent> = built.parts.iter().map(LaidPart::extent).collect();
     if let Some(unit) = unit {
-        let Dims { x, y, z } = unit.grid.dims();
-        boxes.push(((0, 0, 0), (x, y, z)));
+        boxes.extend(
+            unit.parts
+                .iter()
+                .map(|&(shift, unit)| extent(shift, unit.grid.dims())),
+        );
     }
-    let expected_at = |(x, y, z): Cell| -> Option<(u16, &GridEntry)> {
-        let grid = &unit?.grid;
-        let slot = *grid.voxels().get(grid.dims().index(x, y, z)?)?;
-        let entry = grid.palette().get(usize::from(slot.0))?;
-        (!is_air(&entry.state.id)).then_some((slot.0, entry))
-    };
+    let expected_at = |cell: Cell| unit?.at(cell);
     let mut counts = Counts::default();
     let mut differences = Vec::new();
-    let mut states: HashMap<(u16, u32), Vec<StateDifference>> = HashMap::new();
+    let mut states: HashMap<((usize, u16), u32), Vec<StateDifference>> = HashMap::new();
     each_cell(&boxes, |cell| {
         let expected = expected_at(cell);
         let (slot, by) = built.at(cell);

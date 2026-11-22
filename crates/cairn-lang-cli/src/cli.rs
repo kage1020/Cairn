@@ -343,8 +343,10 @@ pub(crate) enum Command {
             lines, each found by building FILE with it appended, that bring the build nearer \
             STRUCTURE (\"The suggested patch\"). The stamp is read the way `cairn import` reads \
             it (\"Import stamping and pitfalls\"), so FILE is built at the target the structure \
-            was saved at, or the nearest shipped one after it. Only blocks are compared, not \
-            block entity data or entities.\n\n\
+            was saved at, or the nearest shipped one after it. When FILE builds one struct or \
+            site, STRUCTURE is compared with it whole, a `.litematic`'s regions laid at their \
+            corners; otherwise each body is compared with the one of its name. Only blocks are \
+            compared, not block entity data or entities.\n\n\
             A lift converges at block IoU >= 0.985, state_accuracy >= 0.995 and residual raw <= \
             5%. Short of that, the run fails with `E_DECOMPILE_DIFF`: on stderr, naming each \
             metric that falls short, or under `--format json` as the report's `code`. The text \

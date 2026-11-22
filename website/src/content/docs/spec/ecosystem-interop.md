@@ -180,13 +180,16 @@ its extension names its format and edition, and it is stamped by the rules of
 Building at the stamp keeps the comparison within one edition and one version.
 
 Each side is a set of bodies. STRUCTURE's are the bodies an import writes: one for each Litematica
-region, else one for the file, its structure voids read as air. FILE's are its structs and its sites,
-each site laid as one body: its placements and walkways at their positions in the site, a later
-array's block over an earlier one's and its air over nothing, moved so its lowest corner is
-`(0, 0, 0)`. When each side holds one body, the two are compared whatever their names. Otherwise a
-body pairs with the body of the other side that has its name, and a body with none is compared with
-nothing. Two paired bodies are compared cell by cell from their `(0, 0, 0)` cells, over the box that
-holds both.
+region, at the minimum corner the schematic gives it, else one for the file, its structure voids
+read as air. FILE's are its structs and its sites, each site laid as one body: its placements and
+walkways at their positions in the site, a later array's block over an earlier one's and its air
+over nothing, moved so its lowest corner is `(0, 0, 0)`. When FILE builds one body, it is compared
+with the whole of STRUCTURE, whatever either is named: with STRUCTURE's one body, or with its
+regions laid as one body by the same rule, each at its corner, in the order the file stores them.
+So the `.litematic` a site compiles to compares with that site cell for cell. Laid regions are named
+after STRUCTURE's stem, as the body of a `.nbt` is. Otherwise a body pairs with the body of the
+other side that has its name, and a body with none is compared with nothing. Two paired bodies are
+compared cell by cell from their `(0, 0, 0)` cells, over the box that holds both.
 
 A cell holds a block unless it lies outside its body or holds `minecraft:air`, `minecraft:cave_air`
 or `minecraft:void_air`. Only blocks are compared: the block entity data and entities STRUCTURE
@@ -222,10 +225,11 @@ the diff reports `E_DECOMPILE_DIFF` ([Lint §11.1](/spec/lint/#import)).
 
 The metrics are defined on any two sets of bodies, and the library computes them for any caller,
 such as an evaluation harness
-([Evaluation §13.2](/spec/evaluation/#132-reverse-conversion-auxiliary-metrics)). Between two editions or two versions nothing is respelled: ids are compared as each side writes
-them, so a block one version renamed, or one the other edition spells otherwise, is replaced, and a
-property one side leaves out is read at the defaults of STRUCTURE's target. `cairn diff-blocks` does
-not meet that case, since it builds FILE at STRUCTURE's stamp.
+([Evaluation §13.2](/spec/evaluation/#132-reverse-conversion-auxiliary-metrics)). Between two
+editions or two versions nothing is respelled: ids are compared as each side writes them, so a
+block one version renamed, or one the other edition spells otherwise, is replaced, and a property
+one side leaves out is read at the defaults of STRUCTURE's target. `cairn diff-blocks` does not
+meet that case, since it builds FILE at STRUCTURE's stamp.
 
 ### 12.2.2 Regions and their causes
 
@@ -472,6 +476,8 @@ Other rules:
   it. A region does not read back as a `site` placement: a `place` row sets a body beside another,
   not at a corner a schematic gives it ([Components, Editing, and Multi-building
   §9.3.2](/spec/components-editing-sites/#932-origin-selectors)), and two regions may overlap.
+  `cairn diff-blocks` lays them at those corners to compare them with a lift that builds one body
+  ([§12.2.1](#1221-diffing-a-lift)).
 - For entity-bearing schematics, do not mark success on block IoU alone. Keep a separate entity
   metric and extract only first-class entities ([Entities](/spec/entities/)).
 - Huge schematics, wider or deeper than 48 blocks or whole villages, do not fit in an LLM's context
