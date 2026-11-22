@@ -45,7 +45,8 @@ Stable surfaces:
 - The tier-1 material vocabulary: the abstract tokens the built-in `materials` catalogs declare,
   listed in [§7.2](/spec/materials-themes/#tier-1-tokens). Adding one is not a break.
 - The error and warning codes (`E_*`, `W_*`) [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists,
-  and the meaning the spec states for a reserved code ([§C.3](#c3-how-a-break-is-communicated)).
+  but for the ones only an Evolving subcommand raises, and the meaning the spec states for a
+  reserved code ([§C.3](#c3-how-a-break-is-communicated)).
 
 ### Evolving
 
@@ -65,7 +66,9 @@ Evolving surfaces:
   `cairn info`, and new language server commands such as `cairn.info`
   ([§10.5](/spec/versioning-editions/#the-report-in-an-editor)) and `cairn.diffBlocks`
   ([§12.2.5](/spec/ecosystem-interop/#1225-the-report-in-an-editor)), during their first three
-  monthly minors after introduction. What such a command returns is the JSON document of the
+  monthly minors after introduction. A new subcommand's flags, output and exit codes are Evolving
+  with it, and so are the codes [Lint §11.1](/spec/lint/#111-diagnostic-codes) lists that only such
+  a subcommand raises. What a language server command returns is the JSON document of the
   subcommand it runs, at that document's tier.
 - The registry pack and constraint catalog file layout (their *hashes* feed Stable lock semantics,
   but the *internal structure* is Evolving). No constraint catalog ships yet, and a lock records

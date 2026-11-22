@@ -12,6 +12,7 @@ pub enum Kind {
     Artifact,
     Lockfile,
     Source,
+    Structure,
 }
 
 impl fmt::Display for Kind {
@@ -20,6 +21,7 @@ impl fmt::Display for Kind {
             Self::Artifact => f.write_str("artifact"),
             Self::Lockfile => f.write_str("lockfile"),
             Self::Source => f.write_str("source"),
+            Self::Structure => f.write_str("structure file"),
         }
     }
 }
@@ -245,7 +247,7 @@ fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
     for path in committed {
         if let Err(err) = fs::remove_file(path) {
             eprintln!(
-                "error: `{}` was written by a build that then failed, and could not be \
+                "error: `{}` was written before a later file failed, and could not be \
                  removed: {err}",
                 path.display(),
             );

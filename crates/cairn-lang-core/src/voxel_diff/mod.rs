@@ -238,7 +238,8 @@ pub struct Comparison {
 /// One body of the structure and the body of the build it is compared with.
 #[derive(Debug, Clone)]
 pub struct BodyComparison {
-    /// The structure's body, `None` for a body of the build the structure holds none for.
+    /// The structure's body, or its regions laid as one under the file's stem; `None` for a body
+    /// of the build the structure holds none for.
     pub structure: Option<String>,
     /// The build's body, a `struct` or a `site`; `None` for a body of the structure the build
     /// holds none for.
@@ -276,20 +277,33 @@ struct Difference {
     by: bodies::By,
 }
 
-/// Compare the blocks of `units`, the bodies a structure file holds, with the blocks `built`
-/// holds, as `spec/ecosystem-interop` "Diffing a lift" pairs and counts them.
+/// The bodies a structure file holds, as an import decodes them.
+#[derive(Debug, Clone, Copy)]
+pub struct StructureBodies<'a> {
+    /// The file's stem, which the bodies are named after when they are laid as one.
+    pub stem: &'a str,
+    /// Each body, with the corner it stands at in the file.
+    pub units: &'a [GridUnit],
+}
+
+/// Compare the blocks of `structure` with the blocks `built` holds, as
+/// `spec/ecosystem-interop` "Diffing a lift" pairs and counts them.
 #[must_use]
-pub fn compare(units: &[GridUnit], built: &BlockArrayIr) -> Comparison {
-    compare_keeping(units, built, Detail::Cells)
+pub fn compare(structure: StructureBodies<'_>, built: &BlockArrayIr) -> Comparison {
+    compare_keeping(structure, built, Detail::Cells)
 }
 
 /// [`compare`], keeping what `detail` asks for of each pair.
-fn compare_keeping(units: &[GridUnit], built: &BlockArrayIr, detail: Detail) -> Comparison {
+fn compare_keeping(
+    structure: StructureBodies<'_>,
+    built: &BlockArrayIr,
+    detail: Detail,
+) -> Comparison {
     let built_bodies = bodies::built_bodies(built, detail);
     let mut out = Vec::new();
     let mut counts = Counts::default();
-    for (unit, body) in bodies::pair(units, built_bodies) {
-        let compared = bodies::compare_pair(unit, body, detail);
+    for (unit, body) in bodies::pair(structure, built_bodies) {
+        let compared = bodies::compare_pair(unit.as_ref(), body, detail);
         counts.add(&compared.counts);
         out.push(compared);
     }
@@ -342,8 +356,8 @@ pub struct BodyReport {
 
 /// What [`diff`] reads: the structure's bodies, and a source with what it builds.
 pub struct DiffInput<'a> {
-    /// The structure file's bodies, as an import decodes them.
-    pub units: &'a [GridUnit],
+    /// The structure file's bodies.
+    pub structure: StructureBodies<'a>,
     /// The source text.
     pub source: &'a str,
     /// The source's Intent IR, its edits applied.
@@ -358,7 +372,7 @@ pub struct DiffInput<'a> {
 /// Compare, cluster and patch: the report `cairn diff-blocks` prints.
 #[must_use]
 pub fn diff(input: &DiffInput<'_>) -> DiffReport {
-    let comparison = compare(input.units, input.built);
+    let comparison = compare(input.structure, input.built);
     let mut found = regions(&comparison, input.source);
     let patch = suggest_patch(input, &comparison, &mut found);
     let metrics = comparison.counts.metrics();

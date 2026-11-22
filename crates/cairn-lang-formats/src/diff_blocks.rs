@@ -126,7 +126,7 @@ pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun 
     };
     let build = |text: &str| build_candidate(text, edition, target);
     let report = diff(&DiffInput {
-        units: &structure.units,
+        structure: structure.bodies(),
         source,
         module: &lowered.ir,
         built: &lowered.block_ir,

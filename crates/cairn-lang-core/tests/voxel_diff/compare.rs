@@ -1,8 +1,11 @@
-use cairn_lang_core::block_array::BlockState;
+use std::collections::HashSet;
+
+use cairn_lang_core::block_array::{BlockState, Dims, PaletteIndex};
+use cairn_lang_core::transliterate::{BlockGrid, GridEntry, GridUnit};
 use cairn_lang_core::voxel_diff::{Counts, compare};
 
 use crate::common::{only_structure, read_example, solid_cells};
-use crate::{THEME, build, hut, region_lines, report, unit_edited, unit_of, units};
+use crate::{STEM, THEME, build, hut, in_file, region_lines, report, unit_edited, unit_of, units};
 
 /// Counts of `blocks` cells that agree in every way, `residual` of them built by raw members.
 fn agreeing(blocks: u64, residual: u64) -> Counts {
@@ -186,7 +189,7 @@ fn bodies_pair_by_name_and_an_unpaired_body_counts_every_cell() {
         ]
     );
     assert_eq!(
-        compare(&units, &build(&two).expect("it builds")).counts,
+        compare(in_file(&units), &build(&two).expect("it builds")).counts,
         Counts {
             structure_blocks: 18,
             built_blocks: 18,
@@ -228,4 +231,96 @@ fn a_site_spread_far_apart_is_compared_without_filling_the_space_between() {
              built by `raw_block[0]` (line 8)",
         ]
     );
+}
+
+/// A row of `blocks` along `x`, `None` for air, as a region whose minimum corner is `corner`.
+fn row_at(name: &str, blocks: &[Option<&str>], corner: (i32, i32, i32)) -> GridUnit {
+    let mut palette = vec![GridEntry::exact(BlockState::air())];
+    let voxels = blocks
+        .iter()
+        .map(|block| {
+            let Some(id) = block else {
+                return PaletteIndex(0);
+            };
+            let slot = palette
+                .iter()
+                .position(|entry| entry.state.id == *id)
+                .unwrap_or_else(|| {
+                    palette.push(GridEntry::exact(BlockState::bare(*id)));
+                    palette.len() - 1
+                });
+            PaletteIndex(u16::try_from(slot).expect("a short row"))
+        })
+        .collect();
+    let x = u32::try_from(blocks.len()).expect("a short row");
+    GridUnit {
+        name: name.to_owned(),
+        grid: BlockGrid::new(Dims { x, y: 1, z: 1 }, palette, voxels).expect("a row of cells"),
+        corner,
+        comment: Vec::new(),
+    }
+}
+
+#[test]
+fn regions_compared_with_one_body_are_laid_at_their_corners_a_later_block_over_an_earlier() {
+    let stone = Some("minecraft:stone");
+    let regions = [
+        row_at("a", &[stone; 3], (-5, 3, 2)),
+        row_at("b", &[Some("minecraft:granite"), None], (-4, 3, 2)),
+    ];
+    let lift = format!(
+        "{THEME}struct s size=3x1\n  raw_block mat=minecraft:stone at=0,0,0\n  \
+         raw_block mat=minecraft:granite at=1,0,0\n  raw_block mat=minecraft:stone at=2,0,0\n"
+    );
+    let report = report(&regions, &lift);
+    // `b`'s granite lies over `a`'s stone, and its air leaves the stone beside it.
+    assert_eq!(report.counts, agreeing(3, 3));
+    let pairs: Vec<_> = report
+        .bodies
+        .iter()
+        .map(|b| (b.structure.as_deref(), b.source.as_deref()))
+        .collect();
+    assert_eq!(pairs, [(Some(STEM), Some("s"))]);
+}
+
+#[test]
+fn a_site_written_as_a_region_per_array_compares_with_the_site_cell_for_cell() {
+    let source = read_example("l-walkway.crn");
+    let built = build(&source).expect("the site builds");
+    let mut cells = HashSet::new();
+    let regions: Vec<GridUnit> = built
+        .structures
+        .iter()
+        .map(|(key, array)| {
+            let corner = built.placements.get(key).map_or_else(
+                || built.walkways.get(key.as_str()).expect("a walkway").origin,
+                |placement| placement.origin,
+            );
+            for (i, slot) in array.voxels.iter().enumerate() {
+                let (x, y, z) = array.dims.position(i).expect("a cell of the array");
+                if slot.0 != 0 {
+                    cells.insert((
+                        i64::from(corner.0) + i64::from(x),
+                        i64::from(corner.1) + i64::from(y),
+                        i64::from(corner.2) + i64::from(z),
+                    ));
+                }
+            }
+            GridUnit {
+                corner,
+                ..unit_of(key, array)
+            }
+        })
+        .collect();
+    assert_eq!(regions.len(), 4, "three placements and a walkway");
+    let report = report(&regions, &source);
+    assert_eq!(report.counts, agreeing(cells.len() as u64, 0));
+    assert!(report.converged);
+    let pairs: Vec<_> = report
+        .bodies
+        .iter()
+        .map(|b| (b.structure.as_deref(), b.source.as_deref()))
+        .collect();
+    assert_eq!(pairs, [(Some(STEM), Some("duo"))]);
+    assert_eq!(report.regions, []);
 }

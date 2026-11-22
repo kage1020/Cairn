@@ -81,7 +81,7 @@ pub(super) fn suggest_patch(
             let Some(built) = (input.build)(&text) else {
                 continue;
             };
-            let counts = compare_keeping(input.units, &built, Detail::Counts).counts;
+            let counts = compare_keeping(input.structure, &built, Detail::Counts).counts;
             let bar = best.as_ref().map_or(reached, |(_, counts)| *counts);
             if counts.differing() < bar.differing() {
                 best = Some((candidate, counts));

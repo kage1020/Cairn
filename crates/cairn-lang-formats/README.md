@@ -2,7 +2,7 @@
 
 This crate's Rust API is in the [Internal tier](https://cairn.kage1020.com/spec/compatibility/#internal) and carries no promise: any release may change it.
 
-Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has, and the build every front end runs over a source to reach them.
+Readers and writers around the Cairn block-array IR for existing schematic / structure formats, plus the registry packs that say which block ids, and which states of each, a given `(edition, version)` actually has, and the build every front end runs over a source to reach them, and the Java world a structure file is installed into.
 
 Each format is a serializer or deserializer around the **block-array IR**, which the specification names as the universal pivot ([architecture "The block-array IR is the universal pivot"](https://cairn.kage1020.com/spec/architecture/)). Adding a format means adding a backend here — the parser, lint, and theme machinery in [`cairn-lang-core`](../cairn-lang-core/README.md) are untouched.
 
@@ -15,6 +15,8 @@ The [`info`](src/info.rs) module builds the `cairn info` report, its JSON docume
 The `.litematic` writer puts each struct in a file of its own and each site in one file, a region per placement and walkway at its site origin ([ecosystem-interop "Litematica"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams each region's packed `BlockStates` from the grid. The `.schem` writer writes version 3, one file per struct, placement and walkway like `.nbt`, each with its site origin as its `Offset` ([ecosystem-interop "Sponge Schematic"](https://cairn.kage1020.com/spec/ecosystem-interop/)), and streams the varint `Blocks.Data` from the grid. Every Java writer takes its block entities from the same encoding and placement as `.nbt`'s, so a block entity the IR carries is written by all three, but for a bed's, whose colour Java keeps in its block. A reader of each format ships too. The `.nbt`, `.litematic` and `.schem` readers return a `BlockVolume`, the `.litematic` reader one region at a time and the `.schem` reader versions 2 and 3; the `.mcstructure` reader returns a `BedrockVolume`, both of its layers as the file stores them, in the Bedrock vocabulary.
 
 [`import`](src/import.rs) is the library half of `cairn import --mode raw` ([ecosystem-interop "Reverse direction: the compiler transliterates, an LLM lifts"](https://cairn.kage1020.com/spec/ecosystem-interop/)). It decodes a file into one block grid per structure it holds, a `.litematic` a grid per region, and stamps it with the shipped target the file's saved version maps onto ([ecosystem-interop "Import stamping and pitfalls"](https://cairn.kage1020.com/spec/ecosystem-interop/)). A Bedrock block is read back into the canonical vocabulary through the target's state map, the inverse of what the writer does. Core's [`transliterate`](../cairn-lang-core/src/transliterate/mod.rs) then writes the grids as raw members and compiles them back against the stamp to check every cell. Each thing the raw members do not carry, block entity data among them, is returned as a `SemanticLoss`, which the CLI prints as `W_SEMANTIC_LOSS`.
+
+The [`world`](src/world/mod.rs) module reads what placing a structure file in a Java world save needs: the version its `level.dat` records, the `DataVersion` a structure file is stamped with, and the file a structure id names in the world's `generated` folder. It walks NBT through [`cairn-lang-nbt`](../cairn-lang-nbt/README.md)'s pull reader, holding only the entries it reads, and tells a Bedrock `level.dat` or `.mcstructure` apart so the command can refuse it by name.
 
 ## Public API
 
@@ -86,6 +88,16 @@ Every item the crate root re-exports, and nothing else. An item reachable only t
 | `registry::PackSource` | `Builtin` or `Path`. Carried into diagnostics so a reader can tell which directory was read. |
 | `registry::PackManifest` | The `pack.json` body: schema version, edition, and the component file references. An unknown edition, such as `"BEDROCK"`, is refused. |
 | `registry::PackFiles` | The component references inside a manifest. New components arrive as `Option` fields, so an older pack stays loadable. |
+| `world::read_level_dat` / `world::WorldVersion` | A Java world folder's `level.dat` → its `Data.DataVersion` and the `Data.Version.Name` that names its release, decoding the `Data` compound alone. |
+| `world::LevelDatError` | `Missing`, `Io` (a read that failed), `Bedrock` (with the release that last opened the world, read from its little-endian NBT where it decodes), `NotGzip`, `Nbt` (bytes that do not decode, a gzip checksum that does not match among them), `NoDataVersion`. `#[non_exhaustive]`. |
+| `world::LEVEL_DAT` | `level.dat`, the file that makes a folder a world's. |
+| `world::worlds_in` | The folders inside a folder that hold a `level.dat`, sorted, for a diagnostic that names the worlds a `saves` folder holds. |
+| `world::read_structure_data_version` | The root `DataVersion` a Java structure file is stamped with, read without building its blocks, after checking its root holds `size`, `blocks` and a `palette` or `palettes` list, and its gzip checksum. |
+| `world::StructureFileError` / `world::MissingLists` / `world::StructureList` | `Bedrock` (a `.mcstructure`), `NotGzip`, `Nbt`, `NotAStructure` (the root lists missing, never none), `NoDataVersion`; `StructureFileError` is `#[non_exhaustive]`. A `StructureList` is `Size`, `Blocks` or `Palette`, displayed as the key a reader looks for. |
+| `world::StructureId` / `world::Namespace` / `world::DEFAULT_NAMESPACE` | `namespace:name`, held to the rules the game reads a generated structure's path under, with the namespace checked once on its own; `file_in` is the file the game loads it from in a world saved at a given version, `generated/<namespace>/structure/<name>.nbt`, or `structures/` before 26.1 Snapshot 6. `minecraft` is the namespace an id without one is read in. |
+| `world::IdPart` / `world::StructureIdError` | Which side of the `:` breaks a rule, with `check` holding a value to that side's rules and `allows` saying whether a character is one of them; and the rules: `Empty`, `Character`, `EmptySegment`, `TrailingDot` (a folder's name only, since the game adds `.nbt` to the last), `DeviceName`. `StructureIdError` is `#[non_exhaustive]`. |
+| `world::CrossVersion` | `Same`, `Upgrade` or `Downgrade`: how a structure's `DataVersion` stands to its world's, as `WorldVersion::cross_version` gives it ([versioning-editions "Cross-version application"](https://cairn.kage1020.com/spec/versioning-editions/#cross-version-application)). |
+| `world::recompile_target` | The newest targetable row at or below a world's `DataVersion`, the `--target` a structure refused for that world is recompiled at. |
 
 ## Registry packs
 

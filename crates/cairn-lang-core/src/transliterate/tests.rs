@@ -126,6 +126,7 @@ fn unit(name: &str, grid: BlockGrid) -> GridUnit {
     GridUnit {
         name: name.to_owned(),
         grid,
+        corner: (0, 0, 0),
         comment: Vec::new(),
     }
 }

@@ -1486,8 +1486,62 @@ Asymmetric by design:
 - **Upgrade** (old-version NBT → new-version world) is a loud warning plus a DataVersion stamp, and
   depends on DFU. It requires an explicit `--allow-cross-version`.
 
-No command applies a structure file to a world yet, so neither rule is enforced and no command
-takes `--allow-cross-version`.
+`cairn install` is the command that applies a structure file to a world, and it enforces both
+rules. It compares the `DataVersion` a Java structure file is stamped with against
+`Data.DataVersion` in the world's `level.dat`, and names the world's release by
+`Data.Version.Name`. A structure newer than the world is `E_CROSS_VERSION_DOWNGRADE`, and
+`--allow-cross-version` does not change that. One older than the world is `E_CROSS_VERSION_UPGRADE`
+unless `--allow-cross-version` is given; with it the file is installed, and
+`W_CROSS_VERSION_UPGRADE` says that the game will upgrade it. The fix either refusal names is the
+one [§10.2](#102-language-contract-recompile-dont-transcode) gives: recompile the source at the
+newest target no newer than the world, and install what that builds with `--allow-cross-version`
+when the target is still older than the world. Where no target fits, the fix says what does. For a
+world older than every target Cairn builds for, it is to open the world in the oldest target's
+release, which upgrades the world, and install again. For an older structure with no target after
+its version and no newer than the world, recompiling gains nothing, so the fix is
+`--allow-cross-version` alone, and with the flag given the warning names no fix.
+
+The stamp is the file's own `DataVersion`, the one its build wrote, and the file is installed byte
+for byte. The game reads the stamp to learn which version the blocks were written for, and
+DataFixerUpper upgrades them from there as the game loads them. Stamping the world's version
+instead would tell the game that nothing needs upgrading, and a block renamed in between would load
+as air. A file with no integer `DataVersion` is refused as `E_STRUCTURE_UNREADABLE`, since the game
+would read it as older than any release Cairn targets.
+
+`cairn install STRUCTURE... --world WORLD` copies each file into the folder the world's version
+loads generated structures from, where `/place template <namespace>:<name>` and a structure block
+load it: `generated/<namespace>/structure/<name>.nbt` in a world saved at `DataVersion` 4774
+(26.1 Snapshot 6) or later, and `generated/<namespace>/structures/<name>.nbt` in one saved before.
+The name is the file's name without `.nbt`, or `--name` for a single file, and may hold `/` between
+folders. The namespace is `--namespace`, by default `minecraft`, the one the game reads an id
+without a namespace in. The game loads an id only when neither part is empty and both hold only
+`a`–`z`, `0`–`9`, `_`, `-` and `.`, with `/` in the name, and it refuses an empty folder name, a
+folder name that ends in `.`, and a folder or file name that Windows reserves for a device, so any
+other id is `E_INVALID_STRUCTURE_ID`: `Cottage.nbt` installs with `--name cottage`. A name that
+ends in `.nbt` is `E_INVALID_STRUCTURE_ID` too: the game adds `.nbt` to a name itself, so
+`--name cottage.nbt` would be loaded as `minecraft:cottage.nbt`. A world open in the game keeps
+each structure it has looked up until `/reload`, so a file installed under an id it has already
+looked up is read after that.
+
+A file already at the path is `E_STRUCTURE_EXISTS` unless `--replace` is given, and a folder there
+is `E_STRUCTURE_EXISTS` even with it. The file is written beside the path with `.tmp` added, and a
+file it replaces is moved aside with `.bak` added until the new one is in place, so a file at
+either of those paths is `E_STRUCTURE_EXISTS` too, with or without `--replace`. A path the world
+cannot take, because a file stands where one of its folders goes or a folder on it cannot be read
+or written, is `E_WORLD_UNWRITABLE`, whether the checks find it or the write does. A world folder
+with no `level.dat`, or one whose `level.dat` cannot be read, does not decode or records no
+`DataVersion`, is `E_WORLD_UNREADABLE`, and a file that is no Java structure is
+`E_STRUCTURE_UNREADABLE`. Every file is checked before any is written, and the run reports each
+refusal it finds. The files are written together, so a run that refuses one installs none, and
+`--dry-run` checks the same and writes nothing.
+
+`cairn install` installs into Java worlds only: a Bedrock world, which its `level.dat` header marks,
+and a `.mcstructure` file are `E_INSTALL_EDITION_UNSUPPORTED`. A Bedrock world keeps the structures
+it saves in its database, not as files in its folder, so there is no file to place, and there is
+no `DataVersion` to compare. The block-state version a `.mcstructure` carries is shared by several
+releases ([§10.1](#101-the-target-is-a-compile-time-parameter)), so it cannot say whether a
+structure is newer than a world. A `.mcstructure` reaches a Bedrock world through a behavior pack's
+`structures` folder, which `/structure load` reads.
 
 Not every build needs to be edition-portable. The compiler's job is to state what breaks
 portability.
