@@ -10,7 +10,9 @@ use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_igno
 use crate::block_array::{Enchantment, EntityData, Item, Trade};
 
 use super::canvas::MemberCanvas;
-use super::entity::{AN_ID, Hold, id_value, place, place_one, report_unread, standing_point};
+use super::entity::{
+    AN_ID, Hold, facing_left, id_value, place, place_one, report_unread, standing_point,
+};
 use super::fixture::{Fixture, Refusal};
 use super::members::StructCtx;
 
@@ -168,17 +170,17 @@ fn stand(
         Ok((id, data, placed)) => {
             let pos = standing_point(placed.cell);
             place_one(member, canvas, placed, &id, pos, data, &mut unread);
-            true
+            Some(placed)
         }
         Err(refusal) => {
             diagnostics.push(*refusal);
-            false
+            None
         }
     };
     report_unread(unread, diagnostics, |key| match (built, key) {
-        (false, _) => NOT_BUILT,
-        (true, "facing") => "it faces south",
-        (true, _) => "it is placed without it",
+        (None, _) => NOT_BUILT,
+        (Some(placed), "facing") => facing_left(&placed),
+        (Some(_), _) => "it is placed without it",
     });
 }
 

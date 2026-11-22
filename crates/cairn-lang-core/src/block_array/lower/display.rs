@@ -10,8 +10,8 @@ use crate::block_array::{EntityData, Item};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::entity::{
-    AN_ID, Hold, diag_absent_entity, id_value, place, place_one, report_unread, scale_of,
-    standing_point,
+    AN_ID, Hold, diag_absent_entity, facing_left, id_value, place, place_one, report_unread,
+    scale_of, standing_point,
 };
 use super::fixture::{Fixture, Refusal};
 use super::members::{MemberState, StructCtx, resolve_member_state};
@@ -122,20 +122,20 @@ fn show_text(
                 },
                 &mut unread,
             );
-            true
+            Some(placed)
         }
         Err(refusal) => {
             diagnostics.push(*refusal);
-            false
+            None
         }
     };
     report_unread(unread, diagnostics, |key| match (built, key) {
-        (false, _) => NOT_BUILT,
-        (true, "text") => "the display shows no text",
-        (true, "billboard") => "the display is fixed",
-        (true, "scale") => "the display is scale 1",
-        (true, "facing") => "it faces south",
-        (true, _) => "it is placed without it",
+        (None, _) => NOT_BUILT,
+        (Some(_), "text") => "the display shows no text",
+        (Some(_), "billboard") => "the display is fixed",
+        (Some(_), "scale") => "the display is scale 1",
+        (Some(placed), "facing") => facing_left(&placed),
+        (Some(_), _) => "it is placed without it",
     });
 }
 
@@ -188,19 +188,19 @@ pub(super) fn fill_block_display(
                 EntityData::BlockDisplay { block, scale },
                 &mut unread,
             );
-            true
+            Some(placed)
         }
-        (Ok(_), None) => false,
+        (Ok(_), None) => None,
         (Err(refusal), _) => {
             diagnostics.push(*refusal);
-            false
+            None
         }
     };
     report_unread(unread, diagnostics, |key| match (built, key) {
-        (false, _) => NOT_BUILT,
-        (true, "scale") => "the display is scale 1",
-        (true, "facing") => "it faces south",
-        (true, _) => "it is placed without it",
+        (None, _) => NOT_BUILT,
+        (Some(_), "scale") => "the display is scale 1",
+        (Some(placed), "facing") => facing_left(&placed),
+        (Some(_), _) => "it is placed without it",
     });
 }
 
@@ -245,18 +245,18 @@ pub(super) fn fill_item_display(
                 EntityData::ItemDisplay { item, scale },
                 &mut unread,
             );
-            true
+            Some(placed)
         }
         Err(refusal) => {
             diagnostics.push(*refusal);
-            false
+            None
         }
     };
     report_unread(unread, diagnostics, |key| match (built, key) {
-        (false, _) => NOT_BUILT,
-        (true, "scale") => "the display is scale 1",
-        (true, "facing") => "it faces south",
-        (true, _) => "it is placed without it",
+        (None, _) => NOT_BUILT,
+        (Some(_), "scale") => "the display is scale 1",
+        (Some(placed), "facing") => facing_left(&placed),
+        (Some(_), _) => "it is placed without it",
     });
 }
 

@@ -515,7 +515,7 @@ fn entity_aabb(entity: &Entity, shape: EntityBox) -> Aabb {
         _ => (1, 1),
     };
     let facing = entity.facing;
-    // A wall's face runs to the right of the way the entity faces and up; a floor's or a
+    // A wall's face runs up and to the right as seen from in front of the entity; a floor's or a
     // ceiling's along x and z.
     let (right, upward) = match facing.counter_clockwise() {
         Some(right) => (right, Face::Up),

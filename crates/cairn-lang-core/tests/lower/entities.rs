@@ -276,6 +276,32 @@ fn a_standing_entity_stands_on_its_cell_s_floor_facing_south_unless_told() {
 }
 
 #[test]
+fn an_ignored_facing_says_a_standing_entity_faces_away_from_its_wall_or_south() {
+    let src = room(
+        "armor_stand at=inside.front offset=2 y=1 facing=5\n  armor_stand at=4,1,2 facing=5",
+    );
+    let out = lowered(&src);
+    let ignored = |note| {
+        (
+            DiagnosticCode::IgnoredArgument,
+            "5",
+            "`facing=` must be a face such as `north`, at a coordinate triple (by a wall the \
+             entity takes none), not integer `5`; the value was ignored",
+            vec![note],
+        )
+    };
+    assert_eq!(
+        findings(&src, &out),
+        [
+            ignored("it faces away from the wall it stands by"),
+            ignored("it faces south"),
+        ],
+    );
+    let facings: Vec<Face> = placed(&out).iter().map(|entity| entity.facing).collect();
+    assert_eq!(facings, [Face::South, Face::North]);
+}
+
+#[test]
 fn a_villager_offers_the_trades_that_name_it_in_the_order_written() {
     assert_eq!(
         place(

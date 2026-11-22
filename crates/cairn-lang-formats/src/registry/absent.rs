@@ -12,6 +12,9 @@ use super::namespaced;
 /// The highest `absent.schema_version` this build reads; version 2 adds `entities`.
 pub const SUPPORTED_ABSENT_SCHEMA: u32 = 2;
 
+/// The first `absent.schema_version` that holds `entities`.
+const ENTITIES_SCHEMA: u32 = 2;
+
 /// The body of `absent.json`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AbsentCatalog {
@@ -27,7 +30,7 @@ pub struct AbsentCatalog {
     pub entities: Vec<AbsentEntry>,
 }
 
-/// One `entries` row of an [`AbsentCatalog`].
+/// One `entries` or `entities` row of an [`AbsentCatalog`].
 #[derive(Debug, Clone, Deserialize)]
 pub struct AbsentEntry {
     /// The other edition's ids for the blocks or entities this edition has no counterpart for.
@@ -65,6 +68,12 @@ impl AbsentIndex {
             return Err(AbsentError::UnsupportedSchemaVersion {
                 got: catalog.schema_version,
                 supported: SUPPORTED_ABSENT_SCHEMA,
+            });
+        }
+        if catalog.schema_version < ENTITIES_SCHEMA && !catalog.entities.is_empty() {
+            return Err(AbsentError::EntitiesBeforeSchema {
+                got: catalog.schema_version,
+                since: ENTITIES_SCHEMA,
             });
         }
         if catalog.entries.is_empty() && catalog.entities.is_empty() {
@@ -148,6 +157,17 @@ pub enum AbsentError {
         got: u32,
         /// The highest version this build reads.
         supported: u32,
+    },
+    /// The catalog lists `entities` under a `schema_version` older than the one that adds them.
+    #[error(
+        "registry pack absent schema_version {got} lists `entities`, which schema_version {since} \
+         adds"
+    )]
+    EntitiesBeforeSchema {
+        /// The declared version.
+        got: u32,
+        /// The version that adds `entities`.
+        since: u32,
     },
     /// The catalog declared no block and no entity; a pack without absences leaves the component
     /// out.

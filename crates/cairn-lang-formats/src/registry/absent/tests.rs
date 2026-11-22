@@ -75,6 +75,11 @@ fn a_faulty_catalog_is_refused_with_its_first_fault() {
             },
         ),
         (
+            r#"{ "schema_version": 1, "namespace": "minecraft",
+                 "entities": [{ "ids": ["text_display"], "reason": "no displays" }] }"#,
+            AbsentError::EntitiesBeforeSchema { got: 1, since: 2 },
+        ),
+        (
             r#"{ "schema_version": 2, "namespace": "minecraft", "entries": [], "entities": [] }"#,
             AbsentError::NoEntries,
         ),

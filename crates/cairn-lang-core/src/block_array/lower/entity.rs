@@ -41,6 +41,14 @@ pub(super) struct Placed {
     pub(super) host_face: Option<Face>,
 }
 
+/// What a standing entity placed at `placed` faces once its `facing=` is ignored.
+pub(super) fn facing_left(placed: &Placed) -> &'static str {
+    match placed.host_face {
+        Some(_) => "it faces away from the wall it stands by",
+        None => "it faces south",
+    }
+}
+
 /// The six faces an item frame hangs on.
 pub(super) const EVERY_FACE: [Face; 6] = [
     Face::North,
@@ -192,7 +200,8 @@ pub(super) fn place_one(
     );
 }
 
-/// Declare `cells` as `member`'s box, or refuse a box that leaves the array.
+/// Declare the box from `anchor` to `far` as `member`'s, or refuse one whose far corner leaves the
+/// array.
 pub(super) fn declare_box(
     fixture: Fixture,
     member: &Member,

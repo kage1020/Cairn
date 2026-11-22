@@ -34,7 +34,7 @@ pub enum EntityData {
     Painting {
         /// The variant, as the target spells it.
         variant: String,
-        /// Its width in blocks, along the wall to the right of the way it faces.
+        /// Its width in blocks, along the wall to the right as seen from in front of it.
         width: u32,
         /// Its height in blocks.
         height: u32,
