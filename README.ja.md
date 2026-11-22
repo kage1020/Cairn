@@ -53,6 +53,14 @@ cairn compile cottage.crn --edition java --target 1.21.4
 - `cottage.nbt`: ストラクチャーブロックで読み込めるバニラの構造ファイル
 - `cottage.crn.lock`: ソースのハッシュ、解決したターゲット、ビルドに使ったレジストリパックの記録
 
+1.21.4 で保存した Java のワールドに構造を入れれば、`/place template minecraft:cottage` でそこに建てられます。
+
+```sh
+cairn install cottage.nbt --world ~/.minecraft/saves/MyWorld
+```
+
+別のリリースで保存したワールドには、`cairn install` は構造を入れず、当てはまるターゲットがあれば再コンパイルに使う `--target` を示します。ゲームは自分より新しい構造を読めず、古い構造は欠落を伴うアップグレードでしか読めないので、古い構造は `--allow-cross-version` を付けたときだけ入れます。
+
 同じファイルを Bedrock 向けにもビルドできます。
 
 ```sh
@@ -90,10 +98,11 @@ verified target:         bedrock 1.21.60/block version 18168865, source unchange
 
 ## いま使える機能
 
-- `cairn parse` / `check` / `info` / `lower` / `compile`
+- `cairn parse` / `check` / `info` / `lower` / `compile` / `import` / `diff-blocks` / `install` / `docs`
 - 1 つのソースから Java の `.nbt`、Litematica の `.litematic`、Sponge Schematic の `.schem` のいずれかと、Bedrock の `.mcstructure` を出力
 - `cairn import`。この 4 つのどのファイルも、同じブロックへコンパイルし直せる生のメンバーの `.crn` として読み戻します。復元するのはブロックとその規則性で、意図ではないことを `W_SEMANTIC_LOSS` で示します。
 - `cairn diff-blocks`。構造ファイルを、`.crn` がそのファイルのターゲットで組むものと比べ、block IoU、食い違う領域とその考えられる原因、それを埋める `edit` の行を示します。リフトが収束するまで繰り返せます。
+- `/place template` が読み込めるように Java の構造ファイルをワールドに入れる `cairn install`。ワールドより新しいバージョン向けの構造は拒否し、古いバージョン向けの構造は `--allow-cross-version` がなければ拒否します。
 - メンバー: 床、壁、ドア、窓、屋根 (`gable` / `shed` / `hip` / `flat`)、階段、梁、チェスト、トラップドア、音符ブロック、文字を持つ看板、ベッド、レッドストーンのセンサーとアクチュエーター (感圧板、レバー、ボタン、日照センサー、オブザーバー、ランプ、ピストン、ディスペンサー)、手で置くレッドストーンの部品 (`repeater` / `comparator` / `redstone_torch` / `redstone_dust`)、マテリアルや水を満たす `fill`、ブロック ID を直接名指す生のブロック (`raw_block` / `raw_fill` / `raw_repeat`)、`level` による階ごとのまとまり
 - スロットを持つテーマと、そのエディション別バリアント。部位のブロックを割り当てるセレクタ行 (`walls` の隅柱と、ドアや窓を囲む枠)
 - `edit` によるパッチ。セレクタやアドレスが選ぶメンバーを、その行を書き換えずに変えます

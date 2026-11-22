@@ -31,6 +31,7 @@ use commands::diff_blocks::run_diff_blocks;
 use commands::docs::run_docs;
 use commands::import::run_import;
 use commands::info::run_info;
+use commands::install::run_install;
 use commands::lower::run_lower;
 use commands::parse::run_parse;
 use commands::synth::run_synth;
@@ -101,6 +102,7 @@ fn main() -> ExitCode {
             file,
             format,
         }) => run_diff_blocks(&structure, &file, format),
+        Some(Command::Install(args)) => run_install(&args),
         Some(Command::Docs { page, title, toc }) => {
             run_docs(page.as_deref(), title.as_deref(), toc)
         }

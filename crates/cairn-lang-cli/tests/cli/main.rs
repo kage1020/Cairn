@@ -10,6 +10,7 @@ mod docs;
 mod edit;
 mod import;
 mod info;
+mod install;
 mod limits;
 mod lower;
 mod parse;
