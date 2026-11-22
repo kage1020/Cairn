@@ -257,6 +257,10 @@ impl Footprint {
 /// Largest voxel volume the lowering pass builds for one scope: a 256-cube.
 pub const MAX_STRUCTURE_VOLUME: usize = 256 * 256 * 256;
 
+/// The `origin=` value that marks a raw member `cairn import` wrote (`spec/materials-themes` "Raw
+/// blocks").
+pub const IMPORTED_ORIGIN: &str = "imported";
+
 const _: () = assert!(
     crate::block_array::walkway::ROUTE_AREA_CAP <= MAX_STRUCTURE_VOLUME as u64,
     "a walkway inside the router's area cap must also be inside the structure volume bound",

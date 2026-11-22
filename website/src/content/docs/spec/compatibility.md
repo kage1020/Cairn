@@ -210,7 +210,7 @@ build yet, or what the spec reserves for a later extension. Source the spec itse
 code. The placeholders today include:
 
 - `E_UNKNOWN_KEYWORD`, on a keyword the spec specifies that the compiler does not know yet, such as
-  `spawn`, `painting` and `raw_repeat`;
+  `spawn` and `painting`;
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet

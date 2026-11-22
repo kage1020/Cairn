@@ -194,6 +194,7 @@ pub(super) fn paint_member(
             );
         }
         MemberRole::Level
+        | MemberRole::RawRepeat
         | MemberRole::Circuit
         | MemberRole::Place
         | MemberRole::Connect

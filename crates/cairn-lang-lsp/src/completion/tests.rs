@@ -841,7 +841,8 @@ fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_
             "redstone_torch",
             "redstone_dust",
             "raw_block",
-            "raw_fill"
+            "raw_fill",
+            "raw_repeat"
         ]
     );
     let after = "struct s size=3x3\n  @edition java\n    raw_block at=1,0,1\n  ";
@@ -877,10 +878,32 @@ fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_
             "circuit",
             "raw_block",
             "raw_fill",
+            "raw_repeat",
         ],
     );
     let in_site = "site town size=9x9\n  @";
     assert_eq!(labels(&complete(in_site, "@")), ["edition"]);
+}
+
+#[test]
+fn a_raw_repeat_offers_only_the_raw_members_it_writes_again() {
+    let under = "struct s size=3x3\n  raw_repeat count=2 step=1,0,0\n    r";
+    let items = complete(under, "1,0,0\n    r");
+    assert_eq!(labels(&items), ["raw_block", "raw_fill"]);
+    for item in &items {
+        assert_eq!(item.detail.as_deref(), Some("repeated raw member"));
+        assert_eq!(edit_range(item), range(2, 4, 5));
+    }
+    let guarded = "def d size=3x3\n  @edition java\n    raw_repeat count=2 step=0,1,0\n      ";
+    assert_eq!(
+        labels(&complete(guarded, "0,1,0\n      ")),
+        ["raw_block", "raw_fill"]
+    );
+    let after = "struct s size=3x3\n  raw_repeat count=2 step=1,0,0\n    raw_block at=0,0,0\n  ";
+    assert_eq!(
+        labels(&complete(after, "at=0,0,0\n  ")),
+        BodyKind::Geometry.allowed_keywords()
+    );
 }
 
 #[test]
