@@ -357,6 +357,95 @@ fn a_trade_no_villager_offers_is_refused() {
 }
 
 #[test]
+fn a_trade_in_a_body_with_no_villager_or_none_with_an_id_says_which_to_write() {
+    for (members, note) in [
+        (
+            "trade villager=lib buy=book sell=emerald",
+            "this body places no villager: write a `villager id=lib` line in it",
+        ),
+        (
+            "villager at=2,1,2\n  trade villager=lib buy=book sell=emerald",
+            "no villager of this body has an `id=`: give the one that trades `id=lib`",
+        ),
+    ] {
+        let src = room(members);
+        let out = lowered(&src);
+        assert_eq!(
+            findings(&src, &out),
+            [(
+                DiagnosticCode::InvalidMember,
+                "trade villager=lib buy=book sell=emerald",
+                "trade `villager=lib`: no villager of this body has `id=lib`",
+                vec![note],
+            )],
+            "{members}",
+        );
+    }
+}
+
+/// `src` lowered for `edition`'s build with no target.
+fn lowered_for(src: &str, edition: Edition) -> BlockArrayIr {
+    let ir = lower(&parse(src).expect("parses"));
+    lower_to_block_array(&ir, &resolve(&ir, Some(edition)), None)
+}
+
+/// A librarian expert at `2,1,2` holding `nbt`, who offers a book for an emerald.
+fn librarian(nbt: &str) -> Entity {
+    Entity {
+        nbt: Some(nbt.to_owned()),
+        ..entity(
+            "minecraft:villager",
+            (2.5, 1.0, 2.5),
+            (2, 1, 2),
+            Face::South,
+            EntityData::Villager {
+                profession: "librarian".to_owned(),
+                level: 4,
+                trades: vec![Trade {
+                    buy: item("book", 1),
+                    sell: item("emerald", 1),
+                }],
+            },
+        )
+    }
+}
+
+#[test]
+fn a_trade_of_a_villager_the_other_edition_s_guard_holds_is_dropped_with_it() {
+    let src = room(
+        "@edition java\n    villager id=lib at=2,1,2 profession=librarian level=expert \
+         nbt={NoAI:1b}\n  trade villager=lib buy=book sell=emerald",
+    );
+    let java = lowered_for(&src, Edition::Java);
+    assert_eq!(findings(&src, &java), Vec::<Finding<'_>>::new());
+    assert_eq!(placed(&java), [librarian("{NoAI:1b}")]);
+    let bedrock = lowered_for(&src, Edition::Bedrock);
+    assert_eq!(findings(&src, &bedrock), Vec::<Finding<'_>>::new());
+    assert_eq!(placed(&bedrock), []);
+}
+
+#[test]
+fn a_trade_is_kept_by_each_edition_whose_guard_holds_a_villager_of_its_id() {
+    let src = room(
+        "@edition java\n    villager id=lib at=2,1,2 profession=librarian level=expert \
+         nbt={NoAI:1b}\n  @edition bedrock\n    villager id=lib at=2,1,2 profession=librarian \
+         level=expert nbt={Persistent:1b}\n  trade villager=lib buy=book sell=emerald",
+    );
+    for (edition, nbt) in [
+        (Edition::Java, "{NoAI:1b}"),
+        (Edition::Bedrock, "{Persistent:1b}"),
+    ] {
+        let out = lowered_for(&src, edition);
+        assert_eq!(
+            findings(&src, &out),
+            Vec::<Finding<'_>>::new(),
+            "{edition:?}"
+        );
+        assert_eq!(placed(&out), [librarian(nbt)], "{edition:?}");
+    }
+}
+
+#[test]
 fn an_item_display_that_names_no_item_is_refused() {
     let src = room("item_display at=2,1,2\n  item_display at=3,1,2 item=\"sword\" scale=2");
     let out = lowered(&src);
@@ -496,9 +585,7 @@ fn a_display_the_target_s_edition_lacks_is_refused_with_what_to_write() {
 #[test]
 fn a_spawn_under_its_edition_s_guard_places_its_type_with_its_nbt_as_written() {
     let src = room("@edition java\n    spawn type=cat at=2,1,2 nbt={variant:\"minecraft:black\"}");
-    let module = parse(&src).expect("parses");
-    let ir = lower(&module);
-    let out = lower_to_block_array(&ir, &resolve(&ir, Some(Edition::Java)), None);
+    let out = lowered_for(&src, Edition::Java);
     assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
     assert_eq!(
         placed(&out),

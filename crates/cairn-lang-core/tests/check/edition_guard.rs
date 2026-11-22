@@ -573,9 +573,8 @@ fn an_entity_line_stands_under_a_guard_only_when_it_writes_nbt() {
 
 #[test]
 fn an_nbt_value_that_is_no_compound_is_semantic_inside_a_guard_and_unrefused_outside_one() {
-    let source = struct_with(
-        "  villager at=1,1,1 nbt=5\n  @edition java\n    armor_stand at=2,1,3 nbt=5\n",
-    );
+    let source =
+        struct_with("  villager at=1,1,1 nbt=5\n  @edition java\n    armor_stand at=2,1,3 nbt=5\n");
     assert_eq!(
         located(&source),
         [("E_SEMANTIC_IN_EDITION_GUARD", "armor_stand at=2,1,3 nbt=5")],

@@ -2,15 +2,18 @@
 //! (`spec/versioning-editions` "An `@edition` guard holds the escape hatch").
 
 use std::borrow::Cow;
+use std::collections::HashSet;
 
+use crate::ast::ValueKind;
 use crate::edition::Edition;
 use crate::error::Span;
 
-use super::{IntentModule, Member};
+use super::{IntentModule, Member, MemberRole};
 
 impl IntentModule {
     /// The module as `edition`'s build reads it, with each guarded member kept only under its
-    /// guard's edition, so `None` keeps none of them.
+    /// guard's edition, so `None` keeps none of them, and each `trade` of a villager it drops
+    /// dropped with it.
     #[must_use]
     pub fn branch_for(&self, edition: Option<Edition>) -> Cow<'_, Self> {
         if !self.has_edition_guards() {
@@ -73,13 +76,61 @@ fn any_guarded(members: &[Member]) -> bool {
 }
 
 fn keep_branch(members: &mut Vec<Member>, edition: Option<Edition>) {
+    let mut dropped = Vec::new();
+    drop_other_branches(members, edition, &mut dropped);
+    let mut kept = Vec::new();
+    collect_villager_ids(members, &mut kept);
+    let traded_by_dropped: HashSet<String> = dropped
+        .into_iter()
+        .filter(|id| !kept.contains(id))
+        .collect();
+    if !traded_by_dropped.is_empty() {
+        drop_trades_of(members, &traded_by_dropped);
+    }
+}
+
+/// Drop each member of `members` under another edition's guard, at any depth, adding the `id=` of
+/// each villager among them to `dropped`.
+fn drop_other_branches(
+    members: &mut Vec<Member>,
+    edition: Option<Edition>,
+    dropped: &mut Vec<String>,
+) {
     members.retain(|member| {
-        member
+        let keep = member
             .edition_guard
-            .is_none_or(|guard| Some(guard) == edition)
+            .is_none_or(|guard| Some(guard) == edition);
+        if !keep {
+            collect_villager_ids(std::slice::from_ref(member), dropped);
+        }
+        keep
     });
     for member in members {
-        keep_branch(&mut member.children.members, edition);
+        drop_other_branches(&mut member.children.members, edition, dropped);
+    }
+}
+
+fn collect_villager_ids(members: &[Member], into: &mut Vec<String>) {
+    for member in members {
+        if matches!(member.role, MemberRole::Villager)
+            && let Some(id) = &member.id
+        {
+            into.push(id.clone());
+        }
+        collect_villager_ids(&member.children.members, into);
+    }
+}
+
+fn drop_trades_of(members: &mut Vec<Member>, villagers: &HashSet<String>) {
+    members.retain(|member| {
+        !(matches!(member.role, MemberRole::Trade)
+            && matches!(
+                member.written("villager").map(|raw| &raw.value.kind),
+                Some(ValueKind::Ident(name)) if villagers.contains(name)
+            ))
+    });
+    for member in members {
+        drop_trades_of(&mut member.children.members, villagers);
     }
 }
 

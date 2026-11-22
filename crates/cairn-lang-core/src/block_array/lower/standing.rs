@@ -271,8 +271,12 @@ fn read_trade(
             .map(|near| did_you_mean(&format!("villager={near}")))
             .into_iter()
             .collect();
-        notes.push(if ids.is_empty() {
-            "this body has no villager with an `id=`: give the villager one".into()
+        notes.push(if ctx.villagers.is_empty() {
+            format!("this body places no villager: write a `villager id={villager}` line in it")
+        } else if ids.is_empty() {
+            format!(
+                "no villager of this body has an `id=`: give the one that trades `id={villager}`"
+            )
         } else {
             format!("this body's villagers are {}", ids.join(", "))
         });

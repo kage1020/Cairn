@@ -1480,7 +1480,8 @@ No build and no other check reads a refused line or what goes with it, so it dra
 alone. A line of that layer in a `site` body is `E_MISPLACED_MEMBER`, with a guard around it or not,
 so a guard there holds nothing that builds.
 
-A pinned build keeps the lines under its own edition's guards and drops the other edition's.
+A pinned build keeps the lines under its own edition's guards and drops the other edition's, with
+the `trade` lines of each villager it drops ([Entities §8.1](/spec/entities/#standing-entities)).
 `cairn compile --edition java` builds the snippet's `minecraft:light` and never builds
 `light_block_15`. Lowering that pins no edition keeps neither: `cairn lower` without `--edition`
 prints the edition-neutral pivot, so it leaves every guarded line out and a note says how many. It

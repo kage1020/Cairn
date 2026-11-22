@@ -151,10 +151,13 @@ villager offers its trades in the order their lines are written. It buys `count=
 64 and 1 without one. `enchant=` puts an enchantment on the item it sells, at `enchant_level=`, a
 whole number from 1 to 255 and 1 without one: an enchanted book stores it, and any other item
 carries it. A `villager=` that names no villager of the body, and a missing or malformed `buy=`
-or `sell=`, are `E_INVALID_MEMBER`, and the trade is not offered. A count or a level out of range or
-of another kind, an `enchant=` that is no id, and an `enchant_level=` without an `enchant=`, are
-`W_IGNORED_ARGUMENT`. A trade sells 12 times before its villager restocks, and its price moves 0.05
-with demand. A `trade` places nothing of its own.
+or `sell=`, are `E_INVALID_MEMBER`, and the trade is not offered. A villager that stands under an
+`@edition` guard takes the trades that name it along: a build that drops it drops them without a
+finding, unless a villager the build keeps has its `id=` ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). A count or a level out
+of range or of another kind, an `enchant=` that is no id, and an `enchant_level=` without an
+`enchant=`, are `W_IGNORED_ARGUMENT`. A trade sells 12 times before its villager restocks, and its
+price moves 0.05 with demand. A `trade` places nothing of its own.
 
 ```
 villager id=smith at=inside.left offset=2 y=1 profession=weaponsmith level=expert
