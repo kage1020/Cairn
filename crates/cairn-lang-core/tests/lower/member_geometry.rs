@@ -397,6 +397,29 @@ fn a_box_member_declares_its_corners_and_holds_what_later_phases_leave_it() {
 }
 
 #[test]
+fn a_raw_member_under_a_raw_repeat_declares_every_copy_from_its_first() {
+    let ir = clean(
+        "6x4",
+        "  raw_repeat count=2 step=3,0,2\n    \
+           raw_block mat=minecraft:stone at=0,0,0\n    \
+           raw_fill mat=minecraft:glass from=2,0,1 to=1,0,0\n",
+    );
+    assert_eq!(
+        geometry(&ir),
+        [
+            (
+                "raw_block",
+                whole((0, 0, 0), boxed((0, 0, 0), (3, 0, 2)), None)
+            ),
+            (
+                "raw_fill",
+                whole((1, 0, 0), boxed((1, 0, 0), (5, 0, 3)), None)
+            ),
+        ],
+    );
+}
+
+#[test]
 fn a_member_under_a_level_declares_the_rows_its_level_raises_it_to() {
     let ir = clean(
         "5x3",

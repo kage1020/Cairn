@@ -45,8 +45,11 @@ enum Context {
     GuardWord { replace: Span },
     /// The word after an indented line's `@edition`: an edition.
     EditionName { replace: Span },
-    /// First word of a line indented under an `@edition` guard: a raw member or a Tier 0 part.
+    /// First word of a line indented under an `@edition` guard: a raw member, a `raw_repeat` or a
+    /// Tier 0 part.
     GuardedMemberKeyword { replace: Span },
+    /// First word of a line indented under a `raw_repeat`: a raw member it writes again.
+    RepeatedMemberKeyword { replace: Span },
 }
 
 /// A `slot NAME -> TARGET` declaration found by the document scan.
@@ -115,22 +118,9 @@ pub fn completions(
                     .map(|kw| (*kw, "theme selector")),
             ),
         )),
-        Some(Context::BindingKey { replace, keys }) => whole(
-            keys.into_iter()
-                .enumerate()
-                .map(|(order, key)| {
-                    completion_item(
-                        &index,
-                        source,
-                        &replace,
-                        key.key(),
-                        lsp_types::CompletionItemKind::PROPERTY,
-                        format!("binds {}", key.part()),
-                        order,
-                    )
-                })
-                .collect(),
-        ),
+        Some(Context::BindingKey { replace, keys }) => {
+            whole(binding_key_items(&index, source, &replace, keys))
+        }
         Some(Context::SlotName { replace }) => whole(slot_name_items(&index, source, &replace)),
         Some(Context::MaterialToken { replace }) => {
             material_items(&index, source, &replace, offset)
@@ -164,6 +154,15 @@ pub fn completions(
                     };
                     (*kw, detail)
                 }),
+        )),
+        Some(Context::RepeatedMemberKeyword { replace }) => whole(keyword_items(
+            &index,
+            source,
+            &replace,
+            cairn_lang_core::intent::known_keywords()
+                .iter()
+                .filter(|kw| role_of(kw).is_repeatable())
+                .map(|kw| (*kw, "repeated raw member")),
         )),
     })
 }
@@ -248,7 +247,13 @@ fn context_at(source: &str, offset: usize) -> Option<Context> {
     if indent == 0 {
         return Some(Context::TopLevelKeyword { replace });
     }
-    if parent_line(&outside, indent).is_some_and(opens_a_guard) {
+    let parent = parent_line(&outside, indent);
+    if parent.is_some_and(|line| line_keyword(line) == "raw_repeat")
+        && matches!(enclosing_item_keyword(&outside), Some("struct" | "def"))
+    {
+        return Some(Context::RepeatedMemberKeyword { replace });
+    }
+    if parent.is_some_and(opens_a_guard) {
         // What a guard holds is misplaced in a `site` body, guarded or not.
         return (enclosing_item_keyword(&outside) != Some("site"))
             .then_some(Context::GuardedMemberKeyword { replace });
@@ -551,6 +556,29 @@ fn keyword_items<'a>(
                 label,
                 lsp_types::CompletionItemKind::KEYWORD,
                 detail.to_owned(),
+                order,
+            )
+        })
+        .collect()
+}
+
+/// An item for each of `keys`, a selector row's binding keys, with the part each one binds.
+fn binding_key_items(
+    index: &LineIndex,
+    source: &str,
+    replace: &Span,
+    keys: Vec<BindingKey>,
+) -> Vec<lsp_types::CompletionItem> {
+    keys.into_iter()
+        .enumerate()
+        .map(|(order, key)| {
+            completion_item(
+                index,
+                source,
+                replace,
+                key.key(),
+                lsp_types::CompletionItemKind::PROPERTY,
+                format!("binds {}", key.part()),
                 order,
             )
         })

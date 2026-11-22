@@ -36,6 +36,7 @@ mod placement_overlap;
 mod port_reads_the_wall_that_paints;
 mod port_rejection_reason;
 mod raw;
+mod raw_repeat;
 mod resolved_state;
 mod roof_seats_on_the_wall;
 mod selector_binding_values;
