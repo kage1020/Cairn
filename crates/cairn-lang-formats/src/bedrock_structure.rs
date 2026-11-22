@@ -159,6 +159,18 @@ pub enum BedrockStructureError {
         /// Its cell.
         pos: (u32, u32, u32),
     },
+    /// A painting no table spells for Bedrock, whose `Motive` names its painting in a spelling of
+    /// its own, reachable only through the public fields, since every Bedrock pack ships a table.
+    #[error(
+        "the painting at {pos:?} names `{variant}`, which no painting table spells as Bedrock \
+         saves it. Fix: build with a registry pack whose `paintings` table has it"
+    )]
+    UnspelledPainting {
+        /// Its cell.
+        pos: (u32, u32, u32),
+        /// The variant its line names.
+        variant: String,
+    },
     /// An item frame whose cell holds a block or another frame, where Bedrock builds the frame as
     /// a block.
     #[error(

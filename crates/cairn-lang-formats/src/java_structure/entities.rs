@@ -78,8 +78,13 @@ fn entity_nbt(entity: &Entity, data_version: i32) -> Compound {
     let mut nbt = Compound::new();
     nbt.insert("id", Tag::String(entity.id.clone()));
     match &entity.data {
-        EntityData::Painting { variant, .. } => {
-            nbt.insert("variant", Tag::String(variant.clone()));
+        EntityData::Painting {
+            variant, spelling, ..
+        } => {
+            let id = spelling
+                .clone()
+                .unwrap_or_else(|| format!("minecraft:{variant}"));
+            nbt.insert("variant", Tag::String(id));
             nbt.insert("facing", Tag::Byte(horizontal_id(entity.facing)));
         }
         EntityData::ItemFrame { item } => {

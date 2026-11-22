@@ -399,3 +399,33 @@ fn a_bedrock_writer_refuses_a_display_it_has_no_entity_for() {
         other => panic!("expected UnmappedEntity, got {other:?}"),
     }
 }
+
+#[test]
+fn a_painting_no_table_spells_is_namespaced_by_java_and_refused_by_bedrock() {
+    let unspell = |mut array: BlockArray| {
+        for entity in &mut array.entities {
+            if let EntityData::Painting { spelling, .. } = &mut entity.data {
+                *spelling = None;
+            }
+        }
+        array
+    };
+    let java = unspell(lowered(ROOM, Edition::Java, "26.3"));
+    let painting = java_entities(&java, "26.3")
+        .into_iter()
+        .find(|entity| entity.contains("minecraft:painting"))
+        .expect("the room hangs a painting");
+    assert_eq!(
+        painting,
+        "{pos:[2.5d,1.5d,3.96875d],blockPos:[2,1,3],nbt:{id:\"minecraft:painting\",\
+         variant:\"minecraft:kebab\",facing:2b}}",
+    );
+    let bedrock = unspell(lowered(ROOM, Edition::Bedrock, "1.21.60"));
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    match build_mcstructure_tag(&bedrock, &target, &states_for(&target)) {
+        Err(BedrockStructureError::UnspelledPainting { pos, variant }) => {
+            assert_eq!((pos, variant.as_str()), ((2, 1, 3), "kebab"));
+        }
+        other => panic!("expected UnspelledPainting, got {other:?}"),
+    }
+}

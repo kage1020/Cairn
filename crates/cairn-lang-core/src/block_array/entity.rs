@@ -32,8 +32,11 @@ pub struct Entity {
 pub enum EntityData {
     /// A painting, hung by its hanging cell (`spec/entities` "Hanging entities").
     Painting {
-        /// The variant, as the target spells it.
+        /// The variant, as its line names it, without a namespace.
         variant: String,
+        /// The variant as the target's painting table spells it; `None` where no table answers.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        spelling: Option<String>,
         /// Its width in blocks, along the wall to the right as seen from in front of it.
         width: u32,
         /// Its height in blocks.

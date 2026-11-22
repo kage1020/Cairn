@@ -115,16 +115,18 @@ An `item_frame` holds the item its `item=` names, one of it, and with none it ha
 `glowing=true` makes it a glow item frame. An `item=` that is no id and a `glowing=` that is no
 `true` or `false` are `W_IGNORED_ARGUMENT`.
 
-Java writes a painting's `variant`, its namespaced id, and its `facing` as a byte, south 0, west 1,
-north 2 and east 3. It writes an item frame, `item_frame` or `glow_item_frame`, with its `Facing` as
-a byte, down 0, up 1, north 2, south 3, west 4 and east 5, and its `Item`. Bedrock writes a painting
-as `minecraft:painting` with its `Motive`, the spelling the target's `paintings` table gives, and
-its `Direction`, numbered as Java's `facing`. Bedrock builds an item frame as a block, `frame` or
-`glow_frame`, whose `facing_direction` is numbered as Java's `Facing`, with `item_frame_map_bit`
-and `item_frame_photo_bit` off. Its block entity, `ItemFrame` or `GlowItemFrame`, holds its `Item`,
-an `ItemRotation` of 0 and an `ItemDropChance` of 1, and takes the line's `nbt=`. The block takes
-the frame's cell, so the writer refuses a frame in a cell a member has built a block in, and names
-the cell and the block.
+Java writes a painting's `variant`, the spelling the target's `paintings` table gives, or with no
+table its name in the `minecraft` namespace, and its `facing` as a byte, south 0, west 1, north 2
+and east 3. It writes an item frame, `item_frame` or `glow_item_frame`, with its `Facing` as a byte,
+down 0, up 1, north 2, south 3, west 4 and east 5, and its `Item`. Bedrock writes a painting as
+`minecraft:painting` with its `Motive`, the spelling the target's `paintings` table gives, and its
+`Direction`, numbered as Java's `facing`, and refuses a painting no table spells, naming its cell.
+Bedrock builds an item frame as a block, `frame` or `glow_frame`, whose `facing_direction` is
+numbered as Java's `Facing`, with `item_frame_map_bit` and `item_frame_photo_bit` off. Its block
+entity, `ItemFrame` or `GlowItemFrame`, holds its `Item`, an `ItemRotation` of 0 and an
+`ItemDropChance` of 1, and takes the line's `nbt=`. The block takes the frame's cell, so the writer
+refuses a frame in a cell a member has built a block in, or another frame hangs in, and names the
+cell and what holds it.
 
 ### Standing entities
 
@@ -185,7 +187,8 @@ book, as an `id` and a `lvl`; from 1.20.5 a `count` and data components, `minecr
 or `minecraft:stored_enchantments`, which map each enchantment's id to its level, under a `levels`
 map before 1.21.5. Bedrock saves an item's `Name`, `Count`, `Damage` and `WasPickedUp`, and its
 enchantment under `tag` as `ench`, by the number Bedrock gives it, so the writer refuses an
-enchantment it has no number for, and names the ones it has.
+enchantment it has no number for, naming the entity that holds or trades the item, its cell and the
+enchantments it has numbers for.
 
 ### Displays
 

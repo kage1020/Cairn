@@ -128,7 +128,8 @@ fn a_painting_by_a_wall_hangs_in_the_cell_inside_it_facing_away() {
             (2, 1, 3),
             Face::North,
             EntityData::Painting {
-                variant: "minecraft:kebab".to_owned(),
+                variant: "kebab".to_owned(),
+                spelling: None,
                 width: 1,
                 height: 1,
             },
@@ -152,7 +153,8 @@ fn a_wide_painting_runs_right_and_up_from_its_anchor_and_hangs_by_the_game_s_cel
             (3, 2, 3),
             Face::North,
             EntityData::Painting {
-                variant: "Pointer".to_owned(),
+                variant: "pointer".to_owned(),
+                spelling: Some("Pointer".to_owned()),
                 width: 4,
                 height: 4,
             },

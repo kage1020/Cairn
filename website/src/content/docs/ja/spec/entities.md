@@ -48,7 +48,7 @@ item_frame id=floor    at=2,1,2 facing=up
 
 `item_frame` は `item=` が示すアイテムを 1 つ持ち、なければ空のまま掛けます。`glowing=true` で輝く額縁になります。ID でない `item=` と、`true` でも `false` でもない `glowing=` は `W_IGNORED_ARGUMENT` です。
 
-Java は絵画の `variant` を名前空間付きの ID で、`facing` を byte で書き出します。南が 0、西が 1、北が 2、東が 3 です。額縁は `item_frame` か `glow_item_frame` として、`Facing` を byte で、下を 0、上を 1、北を 2、南を 3、西を 4、東を 5 として書き出し、`Item` も書き出します。Bedrock は絵画を `minecraft:painting` として、ターゲットの `paintings` テーブルが与える綴りの `Motive` と、Java の `facing` と同じ番号の `Direction` で書き出します。Bedrock は額縁をブロック `frame` か `glow_frame` として組み、`facing_direction` を Java の `Facing` と同じ番号にし、`item_frame_map_bit` と `item_frame_photo_bit` を切ります。そのブロックエンティティ `ItemFrame` か `GlowItemFrame` は、`Item`、0 の `ItemRotation`、1 の `ItemDropChance` を持ち、行の `nbt=` を受け取ります。ブロックは額縁のセルを取るので、書き出しは、メンバーがブロックを組んだセルにある額縁を拒否し、セルとブロックを示します。
+Java は絵画の `variant` を、ターゲットの `paintings` テーブルが与える綴りで、テーブルがなければ `minecraft` 名前空間を付けた名前で、`facing` を byte で書き出します。南が 0、西が 1、北が 2、東が 3 です。額縁は `item_frame` か `glow_item_frame` として、`Facing` を byte で、下を 0、上を 1、北を 2、南を 3、西を 4、東を 5 として書き出し、`Item` も書き出します。Bedrock は絵画を `minecraft:painting` として、ターゲットの `paintings` テーブルが与える綴りの `Motive` と、Java の `facing` と同じ番号の `Direction` で書き出し、どのテーブルも綴らない絵画はセルを示して拒否します。Bedrock は額縁をブロック `frame` か `glow_frame` として組み、`facing_direction` を Java の `Facing` と同じ番号にし、`item_frame_map_bit` と `item_frame_photo_bit` を切ります。そのブロックエンティティ `ItemFrame` か `GlowItemFrame` は、`Item`、0 の `ItemRotation`、1 の `ItemDropChance` を持ち、行の `nbt=` を受け取ります。ブロックは額縁のセルを取るので、書き出しは、メンバーがブロックを組んだセルや、別の額縁が掛かるセルにある額縁を拒否し、セルとそこを占めるものを示します。
 
 ### 立つエンティティ
 
@@ -70,7 +70,7 @@ armor_stand id=stand at=4,1,2 facing=west
 
 Java は村人の `VillagerData` を、`type`、名前空間付きの `profession`、1 から数える `level` として書き出し、`Xp` と、`Offers` の下に `Recipes` として取引も書き出します。取引はそれぞれ `buy`、`sell`、12 の `maxUses`、`rewardExp`、1 の `xp`、0.05 の `priceMultiplier` を持ちます。Bedrock は村人を `minecraft:villager_v2` として、職業をゲームが番号を付ける `Variant` と `PreferredProfession` として、レベルを 0 から数える `TradeTier` と、Java の `Xp` が与える `TradeExperience` として書き出します。取引は `Offers` の下に `Recipes` として、それぞれ `buyA`、`buyCountA`、`sell`、`tier`、`maxUses` を持ち、職業はエンティティ自身のものと並べて `definitions` に書きます。
 
-どちらの書き出しも、アイテムをターゲットが読む形のアイテムスタックとして保存します。Java は 1.20.5 より前では、byte の `Count` と、`tag` の中の `Enchantments` (本なら `StoredEnchantments`) に `id` と `lvl` でエンチャントを保存します。1.20.5 からは `count` とデータコンポーネント `minecraft:enchantments` か `minecraft:stored_enchantments` で、エンチャントの ID をレベルに対応させ、1.21.5 より前はその対応を `levels` の下に置きます。Bedrock はアイテムの `Name`、`Count`、`Damage`、`WasPickedUp` と、`tag` の下の `ench` に Bedrock が与える番号でエンチャントを保存します。そのため書き出しは、番号を持たないエンチャントを拒否し、持っているものを示します。
+どちらの書き出しも、アイテムをターゲットが読む形のアイテムスタックとして保存します。Java は 1.20.5 より前では、byte の `Count` と、`tag` の中の `Enchantments` (本なら `StoredEnchantments`) に `id` と `lvl` でエンチャントを保存します。1.20.5 からは `count` とデータコンポーネント `minecraft:enchantments` か `minecraft:stored_enchantments` で、エンチャントの ID をレベルに対応させ、1.21.5 より前はその対応を `levels` の下に置きます。Bedrock はアイテムの `Name`、`Count`、`Damage`、`WasPickedUp` と、`tag` の下の `ench` に Bedrock が与える番号でエンチャントを保存します。そのため書き出しは、番号を持たないエンチャントを拒否し、そのアイテムを持つか取引するエンティティ、そのセル、番号を持つエンチャントを示します。
 
 ### display
 

@@ -77,22 +77,23 @@ fn hang_painting(
         ctx,
         unread,
     )?;
-    let (spelling, width, height) =
-        match ctx.registry.map_or(PaintingLookup::Unrecorded, |registry| {
+    let (spelling, width, height) = match ctx
+        .registry
+        .map_or(PaintingLookup::Unrecorded, |registry| {
             registry.painting(name)
         }) {
-            PaintingLookup::Known(variant) => (variant.spelling, variant.width, variant.height),
-            PaintingLookup::Unknown {
-                registry,
-                known,
-                elsewhere,
-            } => {
-                return Err(Box::new(unknown_variant(
-                    member, name, &registry, &known, &elsewhere,
-                )));
-            }
-            PaintingLookup::Unrecorded => (format!("minecraft:{name}"), 1, 1),
-        };
+        PaintingLookup::Known(variant) => (Some(variant.spelling), variant.width, variant.height),
+        PaintingLookup::Unknown {
+            registry,
+            known,
+            elsewhere,
+        } => {
+            return Err(Box::new(unknown_variant(
+                member, name, &registry, &known, &elsewhere,
+            )));
+        }
+        PaintingLookup::Unrecorded => (None, 1, 1),
+    };
     let right = placed
         .facing
         .counter_clockwise()
@@ -128,7 +129,8 @@ fn hang_painting(
             block_pos: hung,
             facing: placed.facing,
             data: EntityData::Painting {
-                variant: spelling,
+                variant: name.to_owned(),
+                spelling,
                 width,
                 height,
             },

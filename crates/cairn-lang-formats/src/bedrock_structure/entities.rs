@@ -208,8 +208,17 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
         Tag::Long(i64::try_from(index).map_or(i64::MAX, |index| index + 1)),
     );
     match &entity.data {
-        EntityData::Painting { variant, .. } => {
-            nbt.insert("Motive", Tag::String(variant.clone()));
+        EntityData::Painting {
+            variant, spelling, ..
+        } => {
+            let motive =
+                spelling
+                    .clone()
+                    .ok_or_else(|| BedrockStructureError::UnspelledPainting {
+                        pos: entity.block_pos,
+                        variant: variant.clone(),
+                    })?;
+            nbt.insert("Motive", Tag::String(motive));
             nbt.insert("Direction", Tag::Byte(horizontal_id(entity.facing)));
         }
         EntityData::Villager {
