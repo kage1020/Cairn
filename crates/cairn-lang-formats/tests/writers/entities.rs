@@ -341,9 +341,44 @@ fn a_bedrock_frame_in_a_cell_a_block_holds_is_refused() {
     match build_mcstructure_tag(&array, &target, &states_for(&target)) {
         Err(BedrockStructureError::FrameCellTaken { id, pos, block }) => assert_eq!(
             (id.as_str(), pos, block.as_str()),
-            ("minecraft:frame", (3, 2, 0), "minecraft:cobblestone"),
+            ("minecraft:item_frame", (3, 2, 0), "minecraft:cobblestone"),
         ),
         other => panic!("expected FrameCellTaken, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_bedrock_frame_in_a_cell_another_frame_hangs_in_is_refused_naming_that_frame() {
+    let source =
+        format!("{ROOM}  item_frame at=inside.back offset=3 y=2 item=emerald glowing=true\n");
+    let array = lowered(&source, Edition::Bedrock, "1.21.60");
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    match build_mcstructure_tag(&array, &target, &states_for(&target)) {
+        Err(BedrockStructureError::FrameCellTaken { id, pos, block }) => assert_eq!(
+            (id.as_str(), pos, block.as_str()),
+            (
+                "minecraft:glow_item_frame",
+                (3, 2, 1),
+                "minecraft:item_frame"
+            ),
+        ),
+        other => panic!("expected FrameCellTaken, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_bedrock_trade_enchanted_with_one_the_writer_has_no_number_for_is_refused_at_its_villager() {
+    let source = ROOM.replace("enchant=mending", "enchant=sweeping_edge");
+    let array = lowered(&source, Edition::Bedrock, "1.21.60");
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    match build_mcstructure_tag(&array, &target, &states_for(&target)) {
+        Err(BedrockStructureError::UnmappedEnchantment {
+            holder, pos, id, ..
+        }) => assert_eq!(
+            (holder.as_str(), pos, id.as_str()),
+            ("minecraft:villager", (2, 1, 2), "minecraft:sweeping_edge"),
+        ),
+        other => panic!("expected UnmappedEnchantment, got {other:?}"),
     }
 }
 

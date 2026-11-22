@@ -83,6 +83,8 @@ const ENCHANTMENTS: [(&str, i16); 41] = [
 
 /// An item frame as the block Bedrock builds one of.
 pub(super) struct Frame {
+    /// The entity's id, `minecraft:item_frame` or `minecraft:glow_item_frame`.
+    pub(super) entity: String,
     /// The frame's cell.
     pub(super) pos: (u32, u32, u32),
     /// The block's id, `minecraft:frame` or `minecraft:glow_frame`.
@@ -150,7 +152,7 @@ fn frame(entity: &Entity, item: Option<&Item>) -> Result<Frame, BedrockStructure
         ),
     );
     if let Some(item) = item {
-        block_entity.insert("Item", Tag::Compound(item_stack(item)?));
+        block_entity.insert("Item", Tag::Compound(item_stack(item, entity)?));
     }
     block_entity.insert("ItemRotation", Tag::Float(0.0));
     block_entity.insert("ItemDropChance", Tag::Float(1.0));
@@ -163,6 +165,7 @@ fn frame(entity: &Entity, item: Option<&Item>) -> Result<Frame, BedrockStructure
     }
     check_strings(entity, &block_entity)?;
     Ok(Frame {
+        entity: entity.id.clone(),
         pos: entity.block_pos,
         id: if glowing {
             "minecraft:glow_frame"
@@ -232,7 +235,7 @@ fn entity_nbt(entity: &Entity, index: usize) -> Result<Compound, BedrockStructur
             if !trades.is_empty() {
                 let recipes = trades
                     .iter()
-                    .map(|trade| offer(trade, tier))
+                    .map(|trade| offer(trade, tier, entity))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut offers = Compound::new();
                 offers.insert("Recipes", Tag::List(List::of_compounds(recipes)));
@@ -284,8 +287,9 @@ fn direction_id(facing: Face) -> i32 {
     }
 }
 
-/// `item` as Bedrock saves an item stack, its enchantment under `tag.ench` by number.
-fn item_stack(item: &Item) -> Result<Compound, BedrockStructureError> {
+/// `item`, which `holder` holds or trades, as Bedrock saves an item stack, its enchantment under
+/// `tag.ench` by number.
+fn item_stack(item: &Item, holder: &Entity) -> Result<Compound, BedrockStructureError> {
     let mut stack = Compound::new();
     stack.insert("Name", Tag::String(item.id.clone()));
     stack.insert(
@@ -301,6 +305,8 @@ fn item_stack(item: &Item) -> Result<Compound, BedrockStructureError> {
             .unwrap_or(&enchantment.id);
         let Some(&(_, number)) = ENCHANTMENTS.iter().find(|(known, _)| *known == name) else {
             return Err(BedrockStructureError::UnmappedEnchantment {
+                holder: holder.id.clone(),
+                pos: holder.block_pos,
                 id: enchantment.id.clone(),
                 known: ENCHANTMENTS.map(|(known, _)| known).join(", "),
             });
@@ -315,13 +321,13 @@ fn item_stack(item: &Item) -> Result<Compound, BedrockStructureError> {
     Ok(stack)
 }
 
-/// One of a villager's `Recipes` at trade tier `tier`.
-fn offer(trade: &Trade, tier: i32) -> Result<Compound, BedrockStructureError> {
+/// One of the `Recipes` of `villager` at trade tier `tier`.
+fn offer(trade: &Trade, tier: i32, villager: &Entity) -> Result<Compound, BedrockStructureError> {
     let mut offer = Compound::new();
-    offer.insert("buyA", Tag::Compound(item_stack(&trade.buy)?));
+    offer.insert("buyA", Tag::Compound(item_stack(&trade.buy, villager)?));
     offer.insert("buyCountA", Tag::Int(i32::from(trade.buy.count)));
     offer.insert("buyCountB", Tag::Int(0));
-    offer.insert("sell", Tag::Compound(item_stack(&trade.sell)?));
+    offer.insert("sell", Tag::Compound(item_stack(&trade.sell, villager)?));
     offer.insert("uses", Tag::Int(0));
     offer.insert("maxUses", Tag::Int(TRADE_USES));
     offer.insert("rewardExp", Tag::Byte(1));

@@ -159,33 +159,39 @@ pub enum BedrockStructureError {
         /// Its cell.
         pos: (u32, u32, u32),
     },
-    /// An item frame whose cell holds a block, where Bedrock builds the frame as one.
+    /// An item frame whose cell holds a block or another frame, where Bedrock builds the frame as
+    /// a block.
     #[error(
         "the `{id}` at {pos:?} hangs in a cell that holds `{block}`, and Bedrock builds an item \
          frame as a block of its cell. Fix: move the frame, or the block, to a cell of its own"
     )]
     FrameCellTaken {
-        /// The frame's id.
+        /// The frame's entity id.
         id: String,
         /// Its cell.
         pos: (u32, u32, u32),
-        /// The block the cell holds.
+        /// The block the cell holds, or the entity id of the frame that hangs there first.
         block: String,
     },
     /// An item frame whose cell is outside the grid, reachable only through the public fields.
     #[error("the `{id}` at {pos:?} hangs outside the structure's grid")]
     FrameOutsideGrid {
-        /// The frame's id.
+        /// The frame's entity id.
         id: String,
         /// Its cell.
         pos: (u32, u32, u32),
     },
     /// An enchantment Bedrock saves by a number this writer does not know.
     #[error(
-        "enchantment `{id}` has no Bedrock number this writer knows; it writes {known}. Fix: \
-         compile with `--edition java`, or write another enchantment"
+        "the `{holder}` at {pos:?} holds or trades an item enchanted with `{id}`, which has no \
+         Bedrock number this writer knows; it writes {known}. Fix: compile with `--edition java`, \
+         or write another enchantment"
     )]
     UnmappedEnchantment {
+        /// The id of the entity that holds or trades the item.
+        holder: String,
+        /// The entity's cell.
+        pos: (u32, u32, u32),
         /// The enchantment's id.
         id: String,
         /// The enchantments it maps, comma-joined.
@@ -393,12 +399,13 @@ fn hang_frames(
 ) -> Result<FramedCells, BedrockStructureError> {
     let entries = &block_array.palette.entries;
     let mut taken: HashMap<usize, i32> = HashMap::new();
+    let mut hung: HashMap<usize, String> = HashMap::new();
     let mut frame_entities = Vec::with_capacity(frames.len());
     for frame in frames {
         let (x, y, z) = frame.pos;
         let index = block_array.dims.index(x, y, z).ok_or_else(|| {
             BedrockStructureError::FrameOutsideGrid {
-                id: frame.id.to_owned(),
+                id: frame.entity.clone(),
                 pos: frame.pos,
             }
         })?;
@@ -407,22 +414,25 @@ fn hang_frames(
             .get(index)
             .copied()
             .unwrap_or(PaletteIndex::AIR);
-        if voxel != PaletteIndex::AIR || taken.contains_key(&index) {
-            let block = if voxel == PaletteIndex::AIR {
-                frame.id.to_owned()
-            } else {
+        let holder = match hung.get(&index) {
+            Some(other) => Some(other.clone()),
+            None if voxel == PaletteIndex::AIR => None,
+            None => Some(
                 entries
                     .get(usize::from(voxel.0))
-                    .map_or_else(String::new, |entry| entry.id.clone())
-            };
+                    .map_or_else(String::new, |entry| entry.id.clone()),
+            ),
+        };
+        if let Some(block) = holder {
             return Err(BedrockStructureError::FrameCellTaken {
-                id: frame.id.to_owned(),
+                id: frame.entity,
                 pos: frame.pos,
                 block,
             });
         }
         let slot = palette.slot(palette_entry(frame.id, frame.states, target.block_version))?;
         taken.insert(index, slot);
+        hung.insert(index, frame.entity);
         frame_entities.push((frame.pos, frame.block_entity));
     }
     Ok((taken, frame_entities))
