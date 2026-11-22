@@ -1,0 +1,3 @@
+topic = "openings"
+base = "shed"
+prompt = "Add a one-block glass window to the back wall."

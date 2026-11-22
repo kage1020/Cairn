@@ -110,13 +110,16 @@ finding lists the addresses the members of its keyword carry. An edit that names
 not a member keyword, as its selector's or at any step of its address, is `E_UNKNOWN_KEYWORD` alone.
 
 **Edit stability.** Editing at the level of a concept, such as "make only the second-floor windows
-arched", must be possible without breaking the whole. Edit diffs look only at what a line writes,
-its `intent_state` and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in derived
-results does not harm edit stability. An edit still reaches past the members it selects where
-another member's `resolved_state` follows them: a chest an edit moves away leaves its pair a single
-chest, and walls an edit makes taller lift the roof on them. `W_EDIT_RIPPLE` reports each member
-that changes this way ([Lint](/spec/lint/#edits)), so an edit meant for the second-floor windows
-says so when it changed something else.
+arched", must be possible without breaking the whole. An edit's AST diff looks only at what a line
+writes, its `intent_state` and its arguments ([Blockstate Model](/spec/blockstate/)), so a change in
+derived results does not count against it. Its NBT diff counts every cell whose block changed,
+derived states included, which is where a change that ripples into an unrelated member shows. The
+evaluation measures both on two whole programs, before and after a follow-up request ([Evaluation
+Framework](/spec/evaluation/#131-primary-metrics)). An edit still reaches past the members it
+selects where another member's `resolved_state` follows them: a chest an edit moves away leaves its
+pair a single chest, and walls an edit makes taller lift the roof on them. `W_EDIT_RIPPLE` reports
+each member that changes this way ([Lint](/spec/lint/#edits)), so an edit meant for the second-floor
+windows says so when it changed something else.
 
 When an edit selects a member, lowering builds each body twice, with its edits and as written, and
 compares the cells of every member no edit selected, matched by its line. A member under one an edit

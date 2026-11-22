@@ -1,0 +1,3 @@
+topic = "roofs"
+base = "hut"
+prompt = "Give the hut a gable roof."
