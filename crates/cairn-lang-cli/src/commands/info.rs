@@ -202,11 +202,19 @@ fn print_axes_report(axes: &VersionAxes) {
     outln!("intended targets:        {intended_line}");
 
     let semantic_line = joined_or(
-        "(none)",
-        ", ",
-        axes.semantic_sensitive
-            .iter()
-            .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
+        "(no editions requested)",
+        "   ",
+        axes.edition_portability.iter().map(|ep| {
+            let members = joined_or(
+                "(none)",
+                ", ",
+                axes.semantic_sensitive
+                    .iter()
+                    .filter(|f| f.edition == ep.edition)
+                    .map(|f| format!("{}({} @{})", f.member, f.reason, f.boundary_version)),
+            );
+            format!("{}: {members}", capitalise(ep.edition.as_str()))
+        }),
     );
     outln!("semantic-sensitive:      {semantic_line}");
 }

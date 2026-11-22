@@ -251,6 +251,13 @@ hand-written `meanings.json` names, or a version gives the token's block a state
 meaning token. The pack hash moves with every table, so the `builtin_*_pack_hash` snapshots in
 `cairn-lang-formats` move too.
 
+The constraint catalog, `registry-data/constraints.json`, is written by hand for both editions
+([Lint §11.4](/spec/lint/#114-constraint-catalog)), and no script regenerates it. Its loader refuses
+an id no Java version's `blocks.json` declares and a state value none gives the block, so a renamed
+or removed block fails the catalog's load test until its row follows. Its hash is its own, outside
+the pack hashes, and the `the_builtin_catalog_loads_and_hashes_its_text` snapshot moves with every
+edit.
+
 ### The evaluation harness
 
 `cargo eval` runs the loop of the [Evaluation Framework](/spec/evaluation/) over the prompt set in

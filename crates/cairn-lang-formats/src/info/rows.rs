@@ -6,8 +6,8 @@ use std::collections::HashSet;
 use cairn_lang_core::block_array::{BlockArrayIr, lower_to_block_array};
 use cairn_lang_core::intent::IntentModule;
 use cairn_lang_core::resolve::{
-    DegradedEntry, EditionReport, UnsupportedEntry, UnsupportedReason, declared_version_floors,
-    resolve,
+    DegradedEntry, EditionReport, SemanticSensitiveFinding, UnsupportedEntry, UnsupportedReason,
+    declared_version_floors, resolve,
 };
 use cairn_lang_core::suggest::{candidate_list, did_you_mean};
 use cairn_lang_core::{Diagnostic, Edition, Module, Resolution, Severity};
@@ -24,7 +24,7 @@ use crate::build::scopes::dropped_scopes;
 use crate::portability::{
     InvalidPalette, PortabilityReport, portability_for_bedrock, portability_for_java,
 };
-use crate::registry::builtin_pack;
+use crate::registry::{builtin_constraints, builtin_pack};
 
 /// Each requested edition's report row, from a dry-run lower per edition, its circuits laid, and
 /// one per version.
@@ -131,6 +131,7 @@ pub(super) fn edition_rows(
                 refusal,
                 inferred_range,
                 respelled,
+                semantic_sensitive: semantic_sensitive(edition, &block_ir),
             });
         }
     }
@@ -291,6 +292,16 @@ fn backticked(names: &[String]) -> String {
         .map(|name| format!("`{name}`"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// The members of `block_ir` the constraint catalog lists for `edition`, at any of its versions.
+fn semantic_sensitive(edition: Edition, block_ir: &BlockArrayIr) -> Vec<SemanticSensitiveFinding> {
+    builtin_pack(edition)
+        .view(None)
+        .semantic_sensitive(builtin_constraints(), block_ir)
+        .into_iter()
+        .flatten()
+        .collect()
 }
 
 /// How portable `block_ir`'s palette is on `edition`'s built-in pack.

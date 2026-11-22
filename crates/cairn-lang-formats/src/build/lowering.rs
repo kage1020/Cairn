@@ -15,7 +15,7 @@ use super::gate::build_diagnostics;
 use super::run_level::{RunLevelMessage, partial_build, requires_conflict, unsupported_target};
 use super::scopes::{built_scopes, dropped_scopes};
 use crate::data_version::{ResolvedTarget, UnsupportedTarget, resolve_target};
-use crate::registry::builtin_pack;
+use crate::registry::{builtin_pack, builtin_view};
 
 /// What [`check_lowering`] found, and what the run owes a refusal for.
 #[derive(Debug)]
@@ -55,7 +55,7 @@ pub fn check_lowering(
     let pinned = resolved.as_ref().ok().map(ResolvedTarget::mc_version);
     // The theme variant decides which id a `mat_slot=` reaches, so resolve for the edition.
     let resolution = resolve(ir, Some(edition));
-    let registry = builtin_pack(edition).view(pinned);
+    let registry = builtin_view(edition, pinned);
     let block_ir = lower_to_block_array(ir, &resolution, Some(&registry));
     CheckLowering {
         dropped_scopes: dropped_scopes(&resolution, &block_ir),
@@ -104,7 +104,7 @@ pub fn lower_for_target(
     let ir = lower(module);
     let resolution = resolve(&ir, Some(edition));
     let pack = builtin_pack(edition);
-    let registry = pack.view(mc_version);
+    let registry = builtin_view(edition, mc_version);
     let mut block_ir = lower_to_block_array(&ir, &resolution, Some(&registry));
     let conflicts = if floors.is_empty() {
         Vec::new()

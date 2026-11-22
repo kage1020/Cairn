@@ -484,7 +484,7 @@ fn a_lock_value_that_would_break_its_row_adds_no_row_to_the_report() {
          respelled:               Java: none\n\
          buildable targets:       Java: 1.20.4, 1.21, 1.21.4, 26.3\n\
          intended targets:        (none declared)\n\
-         semantic-sensitive:      (none)\n\
+         semantic-sensitive:      Java: (none)\n\
          verified target:         (unreadable lock)\n",
     );
     assert_eq!(
