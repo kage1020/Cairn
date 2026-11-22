@@ -51,7 +51,8 @@ The root holds:
   bits as the largest index needs, and at least 2, from the low end of each long. An index that
   does not fit what is left of one long runs on into the next. `TileEntities` holds each block
   entity as the `.nbt` writer writes its `nbt`, with its `x`, `y` and `z` from the region's corner.
-  `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty.
+  `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty, so `cairn compile` notes how
+  many entities the build places are left out, and that `--structure-format nbt` writes them.
 
 ### 12.1.2 Sponge Schematic
 
@@ -85,7 +86,8 @@ The root holds one `Schematic` compound:
   its `nbt`, without `id`. Since `Id` names a block entity, one with no string `id`, which a
   `raw_block`'s `nbt=` compound can leave out, is refused.
 
-Biomes and entities are not written.
+Biomes and entities are not written, and `cairn compile` notes the entities left out as it does for
+a `.litematic`.
 
 The `.schem` reader takes version 2 or 3, so a file from a tool that writes only version 2 still
 reads. It holds the file to the layout its `Version` gives it, in whatever order the fields are

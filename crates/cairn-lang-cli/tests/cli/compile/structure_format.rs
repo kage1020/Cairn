@@ -259,6 +259,30 @@ fn a_raw_block_compound_without_a_string_id_is_refused_as_a_schem_and_written_as
 }
 
 #[test]
+fn litematic_and_schem_note_the_entities_they_leave_out_and_nbt_writes_them() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\n\
+                  struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                  armor_stand at=2,1,2\n  villager at=3,1,2\n";
+    for (format, stderr) in [
+        (
+            "litematic",
+            "note: a `.litematic` file writes no entities, so the 2 entities the build places are \
+             left out; `--structure-format nbt` writes them\n",
+        ),
+        (
+            "schem",
+            "note: a `.schem` file writes no entities, so the 2 entities the build places are left \
+             out; `--structure-format nbt` writes them\n",
+        ),
+        ("nbt", ""),
+    ] {
+        let fixture = Fixture::new(source);
+        let run = compile_with(&fixture, &["--structure-format", format]);
+        assert_eq!(String::from_utf8_lossy(&run.stderr), stderr, "{format}");
+    }
+}
+
+#[test]
 fn a_structure_format_for_bedrock_is_refused_before_the_file_is_read() {
     let result = cairn(
         "compile",

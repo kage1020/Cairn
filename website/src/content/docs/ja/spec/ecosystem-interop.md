@@ -24,7 +24,7 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 
 - `MinecraftDataVersion` はターゲットの DataVersion、`Version` はそのリリース向けの Litematica が読める schematic のバージョンで、1.20.5 の DataVersion (3837) より前なら 6、それ以降なら 7 です。`SubVersion` は 1 です。
 - `Metadata`: ファイルの名前にあたる `Name`、ソースには作者を書かないので `Cairn` とする `Author`、空の `Description`、`RegionCount`、リージョンのボクセル数を合計した `TotalVolume`、そのうち air、cave air、void air 以外の数を数えた `TotalBlocks`、すべてのリージョンを囲む箱の大きさの `EnclosingSize` です。作成時刻、更新時刻、プレビュー画像は入れないので、同じソースからは常に同じバイト列が書き出されます。
-- `Regions`: 各リージョンには、最小の角にあたる `Position` と、どの軸も正の `Size` を入れます。`BlockStatePalette` には、リージョンのブロック状態を air を先頭にして並べ、どの DataVersion でも `Name` と `Properties` のキーで書きます。構造ファイルが `id` と `properties` に切り替わる版でも、Litematica はこのキーのままだからです。`BlockStates` には、各ボクセルのパレット番号を `(y, z, x)` の順に、最大の番号に必要なビット数 (2 ビット以上) で、各 long の下位から詰めます。1 つの long の残りに収まらない番号は、次の long にまたがります。`TileEntities` には、各ブロックエンティティを `.nbt` の書き出しが `nbt` に書くのと同じ形で入れ、リージョンの角からの `x`、`y`、`z` を加えます。`Entities`、`PendingBlockTicks`、`PendingFluidTicks` は空です。
+- `Regions`: 各リージョンには、最小の角にあたる `Position` と、どの軸も正の `Size` を入れます。`BlockStatePalette` には、リージョンのブロック状態を air を先頭にして並べ、どの DataVersion でも `Name` と `Properties` のキーで書きます。構造ファイルが `id` と `properties` に切り替わる版でも、Litematica はこのキーのままだからです。`BlockStates` には、各ボクセルのパレット番号を `(y, z, x)` の順に、最大の番号に必要なビット数 (2 ビット以上) で、各 long の下位から詰めます。1 つの long の残りに収まらない番号は、次の long にまたがります。`TileEntities` には、各ブロックエンティティを `.nbt` の書き出しが `nbt` に書くのと同じ形で入れ、リージョンの角からの `x`、`y`、`z` を加えます。`Entities`、`PendingBlockTicks`、`PendingFluidTicks` は空なので、`cairn compile` は、ビルドが置くエンティティのうち省かれる数と、`--structure-format nbt` ならそれを書き出すことを注記します。
 
 ### 12.1.2 Sponge Schematic
 
@@ -44,7 +44,7 @@ block-array IR をシリアライズすると、`.nbt` / `.litematic` / `.schem`
 - `Offset` は前述のとおりです。
 - `Blocks`: `Palette` は、各ブロック状態をプロパティを名前順に並べた `namespace:id[name=value,...]` の綴りで書き、block array のパレット (air が先頭) での番号に対応付けます。プロパティの値にカンマを含むものなど、綴りを読み戻すと別の状態になってしまうものは拒否します。`Data` には、各ボクセルの番号を `(y, z, x)` の順に varint で入れます。`BlockEntities` には、各ブロックエンティティを `Pos`、`Id`、そして `.nbt` の書き出しが `nbt` に書くフィールドから `id` を除いたものを入れた `Data` として入れます。`Id` がブロックエンティティを名指すので、文字列の `id` を持たないものは拒否します。`raw_block` の `nbt=` の複合は `id` を省けます。
 
-バイオームとエンティティは書き出しません。
+バイオームとエンティティは書き出しません。`cairn compile` は、`.litematic` と同じく、省かれるエンティティを注記します。
 
 `.schem` の読み込みはバージョン 2 と 3 を受け付けるので、バージョン 2 しか書き出さないツールのファイルも読めます。フィールドがどの順に保存されていても、ファイルはその `Version` が定める配置どおりでなければなりません。バージョン 2 はすべてのフィールドをルートに置き、ブロックのデータを `BlockData` とし、ブロックエンティティのフィールドを `Id` と `Pos` と同じ階層に並べます。バージョン 3 はそれらをルートの `Schematic` に置き、`Palette`、`Data`、`BlockEntities` を `Blocks` に入れ、ブロックエンティティのフィールドを `Data` に入れます。読み込みは、`PaletteMax` とバイオームを除く schematic とその `Blocks` の各フィールドと、ブロックエンティティの `Id`、`Pos`、バージョン 3 の `Data` を読みます。`Metadata` と各エンティティは保存されたとおりに返し、ルート、schematic、`Blocks` にあるそれ以外の名前は読み飛ばします。次のものは、そのパスを示して拒否します。
 
