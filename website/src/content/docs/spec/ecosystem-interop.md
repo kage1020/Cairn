@@ -52,7 +52,8 @@ The root holds:
   bits as the largest index needs, and at least 2, from the low end of each long. An index that
   does not fit what is left of one long runs on into the next. `TileEntities` holds each block
   entity as the `.nbt` writer writes its `nbt`, with its `x`, `y` and `z` from the region's corner.
-  `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty.
+  `Entities`, `PendingBlockTicks` and `PendingFluidTicks` are empty, so `cairn compile` notes how
+  many entities the build places are left out, and that `--structure-format nbt` writes them.
 
 ### 12.1.2 Sponge Schematic
 
@@ -83,9 +84,11 @@ The root holds one `Schematic` compound:
   spelling would read back as another, such as one with a comma in a property value, is refused.
   `Data` holds each voxel's index as a varint, in `(y, z, x)` order. `BlockEntities` holds each
   block entity as its `Pos`, its `Id`, and a `Data` holding the fields the `.nbt` writer writes in
-  its `nbt`, without `id`.
+  its `nbt`, without `id`. Since `Id` names a block entity, one with no string `id`, which a
+  `raw_block`'s `nbt=` compound can leave out, is refused.
 
-Biomes and entities are not written.
+Biomes and entities are not written, and `cairn compile` notes the entities left out as it does for
+a `.litematic`.
 
 The `.schem` reader takes version 2 or 3, so a file from a tool that writes only version 2 still
 reads. It holds the file to the layout its `Version` gives it, in whatever order the fields are
@@ -183,13 +186,16 @@ Each side is a set of bodies. STRUCTURE's are the bodies an import writes: one f
 region, at the minimum corner the schematic gives it, else one for the file, its structure voids
 read as air. FILE's are its structs and its sites, each site laid as one body: its placements and
 walkways at their positions in the site, a later array's block over an earlier one's and its air
-over nothing, moved so its lowest corner is `(0, 0, 0)`. When FILE builds one body, it is compared
-with the whole of STRUCTURE, whatever either is named: with STRUCTURE's one body, or with its
-regions laid as one body by the same rule, each at its corner, in the order the file stores them.
-So the `.litematic` a site compiles to compares with that site cell for cell. Laid regions are named
-after STRUCTURE's stem, as the body of a `.nbt` is. Otherwise a body pairs with the body of the
-other side that has its name, and a body with none is compared with nothing. Two paired bodies are
-compared cell by cell from their `(0, 0, 0)` cells, over the box that holds both.
+over nothing, moved so its lowest corner is `(0, 0, 0)`. On Bedrock, an item frame takes its cell as
+the `frame` or `glow_frame` block Bedrock builds it as ([Entities
+§8.1](/spec/entities/#hanging-entities)), by its id alone, as an import reads that block. When FILE
+builds one body, it is compared with the whole of STRUCTURE, whatever either is named: with
+STRUCTURE's one body, or with its regions laid as one body by the same rule, each at its corner, in
+the order the file stores them. So the `.litematic` a site compiles to compares with that site cell
+for cell. Laid regions are named after STRUCTURE's stem, as the body of a `.nbt` is. Otherwise a
+body pairs with the body of the other side that has its name, and a body with none is compared with
+nothing. Two paired bodies are compared cell by cell from their `(0, 0, 0)` cells, over the box that
+holds both.
 
 A cell holds a block unless it lies outside its body or holds `minecraft:air`, `minecraft:cave_air`
 or `minecraft:void_air`. Only blocks are compared: the block entity data and entities STRUCTURE
@@ -452,7 +458,7 @@ the build ships, chosen by what the file says it was saved at:
 
 - A file saved at a shipped target's `DataVersion`, or at its block version, is stamped with that
   target. Of several that share a block version, it is the oldest whose state map has a canonical
-  state for every block of the file, or the oldest when none has.
+  state for every block of the file, or, when none has, for the most of them.
 - A file saved between two shipped targets is stamped with the nearest after it. The game loads a
   file an older release saved, renaming what it has renamed since, so the later target reads the
   file as the game would. A block the file spells as that release no longer does is refused
@@ -473,7 +479,7 @@ first that it recovers blocks rather than intent, then once for each kind of thi
 that the source does not carry, by the body it is in:
 
 - block entity data, such as a chest's contents, a sign's text or a command block's command, which
-  no raw member carries, with how many block entities of each id;
+  an import does not write, with how many block entities of each id;
 - entities, with how many of each id, since an import writes blocks only
   ([Entities](/spec/entities/));
 - structure voids, the cells a `.nbt`'s `blocks` lists nothing at and the `-1` of a `.mcstructure`'s

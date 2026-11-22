@@ -13,9 +13,9 @@ use crate::block_array::args::{
 use crate::block_array::geometry::{Declared, outer_face};
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 use crate::block_array::roof::{
-    Cardinal, STAIR_BASE_ID, StairShape, inward_cardinal, shed_high_side, stair_state,
+    STAIR_BASE_ID, StairShape, inward_compass, shed_high_side, stair_state,
 };
-use crate::block_array::{Bbox, PaletteIndex};
+use crate::block_array::{Bbox, Compass, PaletteIndex};
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
@@ -185,7 +185,7 @@ impl EaveStates<'_> {
         member: &Member,
         side: WallSide,
         diagnostics: &mut Vec<Diagnostic>,
-    ) -> Option<(Cardinal, &'static str, StairShape)> {
+    ) -> Option<(Compass, &'static str, StairShape)> {
         let mut refuse = |key: &str, other: &str, values: &[&str]| {
             diagnostics.push(diag_invalid_member(
                 member,
@@ -203,7 +203,7 @@ impl EaveStates<'_> {
         };
         let facing = match self.facing {
             Some("out") | None => shed_high_side(side),
-            Some("in") => inward_cardinal(side),
+            Some("in") => inward_compass(side),
             Some(other) => {
                 refuse("facing", other, &["out", "in"]);
                 return None;

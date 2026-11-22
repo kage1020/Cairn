@@ -125,7 +125,7 @@ fn every_shipped_example_reads_back_as_the_bedrock_blocks_its_arrays_translate_t
                     (block.name.clone(), block.states.clone())
                 })
                 .collect();
-            let translated: Vec<(String, Compound)> = array
+            let mut translated: Vec<(String, Compound)> = array
                 .voxels
                 .iter()
                 .map(|slot| {
@@ -134,6 +134,17 @@ fn every_shipped_example_reads_back_as_the_bedrock_blocks_its_arrays_translate_t
                     (form.id, form.states)
                 })
                 .collect();
+            // Bedrock builds an item frame as a block in the frame's cell, which no voxel holds.
+            for entity in &array.entities {
+                let frame = match entity.id.as_str() {
+                    "minecraft:item_frame" => "minecraft:frame",
+                    "minecraft:glow_item_frame" => "minecraft:glow_frame",
+                    _ => continue,
+                };
+                let (x, y, z) = entity.block_pos;
+                let at = array.dims.index(x, y, z).expect("a cell of the array");
+                translated[at] = (frame.to_owned(), read_blocks[at].1.clone());
+            }
             assert_eq!(read_blocks, translated, "{name}");
         }
     }

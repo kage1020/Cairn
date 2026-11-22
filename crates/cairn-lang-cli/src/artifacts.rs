@@ -106,6 +106,7 @@ pub(crate) fn prepare_artifacts<'a>(
                 let path = claims.claim(&scope, &output_filename(&stem, OutputExt::Litematic))?;
                 prepared.push((path, PreparedStructure::Litematic(schematic)));
             }
+            note_entities_left_out(block_ir, ".litematic");
             return Ok(prepared);
         }
         Backend::Schem(java) => {
@@ -125,6 +126,7 @@ pub(crate) fn prepare_artifacts<'a>(
                     PreparedStructure::Schem(schematic),
                 ));
             }
+            note_entities_left_out(block_ir, ".schem");
             return Ok(prepared);
         }
     };
@@ -143,6 +145,25 @@ pub(crate) fn prepare_artifacts<'a>(
         prepared.push((claims.claim(scope, &file_name)?, structure));
     }
     Ok(prepared)
+}
+
+/// Say how many of the entities `block_ir` places a file of `format`, which writes none, leaves out
+/// (`spec/ecosystem-interop` "Litematica").
+fn note_entities_left_out(block_ir: &BlockArrayIr, format: &str) {
+    let left_out: usize = block_ir
+        .structures
+        .values()
+        .map(|array| array.entities.len())
+        .sum();
+    let (entities, are) = match left_out {
+        0 => return,
+        1 => ("entity", "is"),
+        _ => ("entities", "are"),
+    };
+    eprintln!(
+        "note: a `{format}` file writes no entities, so the {left_out} {entities} the build places \
+         {are} left out; `--structure-format nbt` writes them"
+    );
 }
 
 /// How to build a site `refusal` keeps from being one `.litematic`, when another format can.
@@ -170,6 +191,10 @@ fn schem_fix(refusal: &SchemError) -> Option<&'static str> {
         SchemError::UnspellableState { .. } => Some(
             "compile with `--structure-format nbt` or `litematic`, which store each property \
              apart rather than spelled into one key",
+        ),
+        SchemError::BlockEntityWithoutId { .. } => Some(
+            "name the block entity in its `raw_block`'s `nbt=` with a string `id`, such as \
+             `id:\"minecraft:chest\"`",
         ),
         SchemError::DuplicateState { .. } => Some(
             "every palette the compiler builds holds each state once, so this is a bug in Cairn \

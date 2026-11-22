@@ -19,6 +19,8 @@ mod door_wall_fit;
 mod eave_stair_shape;
 mod edit;
 mod edition_guard;
+mod entities;
+mod entity_constraints;
 mod fill;
 mod intent;
 mod l_walkway;

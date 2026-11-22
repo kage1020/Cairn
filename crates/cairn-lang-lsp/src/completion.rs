@@ -45,8 +45,8 @@ enum Context {
     GuardWord { replace: Span },
     /// The word after an indented line's `@edition`: an edition.
     EditionName { replace: Span },
-    /// First word of a line indented under an `@edition` guard: a raw member, a `raw_repeat` or a
-    /// Tier 0 part.
+    /// First word of a line indented under an `@edition` guard: a keyword of the escape-hatch
+    /// layer, or an entity's, whose line stands there when it writes `nbt=`.
     GuardedMemberKeyword { replace: Span },
     /// First word of a line indented under a `raw_repeat`: a raw member it writes again.
     RepeatedMemberKeyword { replace: Span },
@@ -139,22 +139,9 @@ pub fn completions(
                 .into_iter()
                 .map(|edition| (edition.as_str(), "edition")),
         )),
-        Some(Context::GuardedMemberKeyword { replace }) => whole(keyword_items(
-            &index,
-            source,
-            &replace,
-            cairn_lang_core::intent::known_keywords()
-                .iter()
-                .filter(|kw| role_of(kw).is_escape_hatch())
-                .map(|kw| {
-                    let detail = if role_of(kw).is_tier0_part() {
-                        "Tier 0 part"
-                    } else {
-                        "raw member"
-                    };
-                    (*kw, detail)
-                }),
-        )),
+        Some(Context::GuardedMemberKeyword { replace }) => {
+            whole(keyword_items(&index, source, &replace, guarded_keywords()))
+        }
         Some(Context::RepeatedMemberKeyword { replace }) => whole(keyword_items(
             &index,
             source,
@@ -165,6 +152,26 @@ pub fn completions(
                 .map(|kw| (*kw, "repeated raw member")),
         )),
     })
+}
+
+/// Each keyword whose line an `@edition` guard may hold, with its completion detail.
+fn guarded_keywords() -> impl Iterator<Item = (&'static str, &'static str)> {
+    cairn_lang_core::intent::known_keywords()
+        .iter()
+        .filter(|kw| role_of(kw).is_escape_hatch() || role_of(kw).reads_nbt())
+        .map(|kw| {
+            let role = role_of(kw);
+            let detail = if role.is_tier0_part() {
+                "Tier 0 part"
+            } else if role.is_escape_hatch() && role.places_an_entity() {
+                "entity by id"
+            } else if role.places_an_entity() {
+                "entity with nbt="
+            } else {
+                "raw member"
+            };
+            (*kw, detail)
+        })
 }
 
 /// Characters a partial token may contain, the dot for abstract material tokens.

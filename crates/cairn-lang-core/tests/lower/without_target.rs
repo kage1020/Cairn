@@ -2,10 +2,13 @@
 //! their line raises, weighed as if every id some version declares, and every canonical token some
 //! version writes, were declared, and none whose verdict is a target's pack's to give.
 
-use cairn_lang_core::block_array::{IdStanding, findings_without_target, lower_to_block_array};
+use cairn_lang_core::block_array::{
+    AbsentEntity, IdStanding, PaintingLookup, PaintingVariant, findings_without_target,
+    lower_to_block_array,
+};
 use cairn_lang_core::{Diagnostic, Edition, lower, parse, resolve};
 
-use crate::common::{lowered, notes, slice};
+use crate::common::{DECLARED, Tables, blocks, lowered, notes, slice};
 
 /// `source`'s findings lowered with no target, for `edition` or for both, `standing` saying what
 /// the versions of an edition make of an id.
@@ -15,7 +18,14 @@ fn without_target_declaring(
     standing: &dyn Fn(Edition, &str) -> IdStanding,
 ) -> Vec<Diagnostic> {
     let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
-    findings_without_target(&lower(&module), edition, standing)
+    findings_without_target(
+        &lower(&module),
+        edition,
+        &Tables {
+            standing,
+            ..DECLARED
+        },
+    )
 }
 
 /// [`without_target_declaring`] with every id declared.
@@ -541,4 +551,155 @@ fn a_plate_its_own_line_puts_nowhere_is_refused_whichever_edition_paints_its_wal
             ],
         ),
     );
+}
+
+/// A 7x5 room with 3-row walls, its front wall `z=4`, and `member` in it.
+fn room_with(member: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n\n\
+         struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  {member}\n"
+    )
+}
+
+/// What each edition's painting table says of `variant`: both have a 1x1 `kebab`, and Java a
+/// 4x4 `pointer` too.
+fn paintings(edition: Edition, variant: &str) -> PaintingLookup {
+    let known: &[(&str, u32)] = match edition {
+        Edition::Java => &[("kebab", 1), ("pointer", 4)],
+        Edition::Bedrock => &[("kebab", 1)],
+    };
+    match known.iter().find(|(name, _)| *name == variant) {
+        Some(&(name, side)) => PaintingLookup::Known(PaintingVariant {
+            spelling: format!("minecraft:{name}"),
+            width: blocks(side),
+            height: blocks(side),
+        }),
+        None => PaintingLookup::Unknown {
+            registry: edition.as_str().to_owned(),
+            known: known.iter().map(|(name, _)| (*name).to_owned()).collect(),
+            elsewhere: Vec::new(),
+        },
+    }
+}
+
+/// `source`'s findings with no target, for `edition` or for both, as [`paintings`] answers.
+fn without_target_hanging(source: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
+    let tables = Tables {
+        painting: &paintings,
+        ..DECLARED
+    };
+    findings_without_target(&lower(&module), edition, &tables)
+}
+
+/// Each finding as its code, the text it covers, its message and its notes.
+fn worded<'a>(
+    source: &'a str,
+    found: &'a [Diagnostic],
+) -> Vec<(&'static str, &'a str, &'a str, Vec<&'a str>)> {
+    found
+        .iter()
+        .map(|d| {
+            (
+                d.code.as_str(),
+                slice(source, d),
+                d.primary.as_str(),
+                notes(d),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_painting_no_version_of_the_edition_has_is_refused_by_that_edition_s_tables() {
+    let line = "painting at=inside.front offset=2 y=1 variant=kebabb";
+    let source = room_with(line);
+    let refusal = |edition: &'static str| {
+        (
+            "E_INVALID_MEMBER",
+            line,
+            format!("painting `variant=kebabb` is no painting `{edition}` has"),
+        )
+    };
+    for (edition, expected) in [
+        (Some(Edition::Java), vec![refusal("java")]),
+        (Some(Edition::Bedrock), vec![refusal("bedrock")]),
+        (None, vec![refusal("java"), refusal("bedrock")]),
+    ] {
+        let found = without_target_hanging(&source, edition);
+        let found: Vec<_> = worded(&source, &found)
+            .into_iter()
+            .map(|(code, text, primary, _)| (code, text, primary.to_owned()))
+            .collect();
+        assert_eq!(found, expected, "{edition:?}");
+    }
+    let found = without_target_hanging(&source, Some(Edition::Java));
+    assert_eq!(
+        notes(&found[0]),
+        [
+            "did you mean `variant=kebab`?",
+            "`java` has the paintings kebab, pointer"
+        ],
+    );
+}
+
+#[test]
+fn a_painting_hangs_at_the_size_its_edition_s_tables_give_it() {
+    let line = "painting at=inside.front offset=2 y=1 variant=pointer";
+    let source = room_with(line);
+    let java = without_target_hanging(&source, Some(Edition::Java));
+    assert_eq!(
+        (located(&source, &java), java[0].primary.as_str()),
+        (
+            vec![("W_DEFERRED_MEMBER", line)],
+            "painting resolved to a voxel outside the struct's block array",
+        ),
+        "a 4x4 painting from y=1 reaches above the 4-row array",
+    );
+    let bedrock = without_target_hanging(&source, Some(Edition::Bedrock));
+    assert_eq!(located(&source, &bedrock), [("E_INVALID_MEMBER", line)]);
+    assert_eq!(without_target_hanging(&source, None), []);
+    let kebab = room_with("painting at=inside.front offset=2 y=1 variant=kebab");
+    assert_eq!(without_target_hanging(&kebab, None), []);
+}
+
+/// What a text display is on Bedrock, which has none.
+fn no_bedrock_displays(edition: Edition, id: &str) -> Option<AbsentEntity> {
+    (edition == Edition::Bedrock && id == "minecraft:text_display").then(|| AbsentEntity {
+        registry: "bedrock".to_owned(),
+        declared_by: Edition::Java,
+        reason: "Bedrock has no display entities".to_owned(),
+    })
+}
+
+#[test]
+fn an_entity_the_edition_lacks_is_refused_by_a_check_that_pins_that_edition() {
+    let line = "text_display at=3,1,2 text=\"Inn\"";
+    let source = room_with(line);
+    let module = parse(&source).expect("parses");
+    let ir = lower(&module);
+    let tables = Tables {
+        absent: &no_bedrock_displays,
+        ..DECLARED
+    };
+    let bedrock = findings_without_target(&ir, Some(Edition::Bedrock), &tables);
+    assert_eq!(
+        worded(&source, &bedrock),
+        [(
+            "E_PARITY_UNSUPPORTED",
+            line,
+            "`minecraft:text_display` is an entity only Java has, so `bedrock` cannot build it",
+            vec![
+                "Bedrock has no display entities",
+                "the semantic layer is edition-neutral: write floating text as a `hologram` whose \
+                 slot a `theme NAME_java` binds to `text_display` and a `theme NAME_bedrock` to \
+                 `sign`, or place a block or an `item_frame`, which both editions have",
+            ],
+        )],
+    );
+    assert_eq!(
+        findings_without_target(&ir, Some(Edition::Java), &tables),
+        []
+    );
+    assert_eq!(findings_without_target(&ir, None, &tables), []);
 }

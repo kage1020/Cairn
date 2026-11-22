@@ -1,6 +1,8 @@
 //! Translate a resolved theme-slot value into a [`BlockState`], and the pinned target's answers
 //! about its id and its states.
 
+use std::num::NonZeroU32;
+
 use indexmap::IndexMap;
 
 use crate::Edition;
@@ -11,7 +13,7 @@ use crate::resolve::{Resolution, TokenKind, classify_token};
 use crate::suggest::{nearest_match, nearest_namespaced_id};
 
 use super::BlockState;
-use super::constraint::{Constraint, Contents};
+use super::constraint::{Constraint, Contents, EntityBox};
 use super::joins::{Face, Joins};
 
 /// A block state the pinned target's state map has no form for, as
@@ -144,6 +146,20 @@ pub trait TargetRegistry {
         None
     }
 
+    /// Whether every face of `state` is whole, so an entity in its cell stands inside it, or
+    /// `None` when the registry cannot say.
+    fn solid(&self, state: &BlockState) -> Option<bool> {
+        let _ = state;
+        None
+    }
+
+    /// The box of the entity `id` at the pinned target (`spec/lint` "Entity AABB"), or `None`
+    /// when the registry gives it none.
+    fn entity_box(&self, id: &str) -> Option<EntityBox> {
+        let _ = id;
+        None
+    }
+
     /// What a cell holding `state` holds at the pinned target, or `None` when the registry cannot
     /// say.
     fn contents(&self, state: &BlockState) -> Option<Contents> {
@@ -171,6 +187,62 @@ pub trait TargetRegistry {
         let _ = token;
         None
     }
+
+    /// What the target's painting table says of `variant`, a name without its namespace
+    /// (`spec/entities` "Hanging entities").
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        let _ = variant;
+        PaintingLookup::Unrecorded
+    }
+
+    /// The other edition's entity `id` names, when the target's edition has none; `None` when it
+    /// has one or the registry cannot say.
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        let _ = id;
+        None
+    }
+}
+
+/// What a target's painting table says of one variant, as [`TargetRegistry::painting`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum PaintingLookup {
+    /// The target has the variant.
+    Known(PaintingVariant),
+    /// The target has no such variant.
+    Unknown {
+        /// The target, as a diagnostic names it, such as `"java 1.20.4"`.
+        registry: String,
+        /// The variants the target has, in table order.
+        known: Vec<String>,
+        /// The edition's other targetable versions that have it, oldest first.
+        elsewhere: Vec<String>,
+    },
+    /// No table answers, so the variant is not checked and hangs as one cell.
+    Unrecorded,
+}
+
+/// One painting variant of a target's table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PaintingVariant {
+    /// The variant as the target's entity data spells it, as `minecraft:kebab` or `Kebab`.
+    pub spelling: String,
+    /// Its width in blocks.
+    pub width: NonZeroU32,
+    /// Its height in blocks.
+    pub height: NonZeroU32,
+}
+
+/// An entity of one edition that the other has no counterpart for, as
+/// [`TargetRegistry::absent_entity`] answers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AbsentEntity {
+    /// The target that lacks it, as a diagnostic names it, such as `"bedrock 1.21.60"`.
+    pub registry: String,
+    /// The edition that has it.
+    pub declared_by: Edition,
+    /// What the entity is and why the target's edition has none, as the registry pack words it.
+    pub reason: String,
 }
 
 /// What the versions of an edition make of a block id, as a lowering with no target weighs it,
@@ -186,13 +258,39 @@ pub enum IdStanding {
     Declared,
 }
 
+/// What the shipped versions of each edition answer a lowering that pins none of them
+/// (`spec/lint` "Error vs warning").
+pub trait EditionTables {
+    /// What the versions of `edition` make of block `id`.
+    fn id_standing(&self, edition: Edition, id: &str) -> IdStanding;
+
+    /// What `edition`'s painting table, read across its versions, says of `variant`.
+    fn painting(&self, edition: Edition, variant: &str) -> PaintingLookup;
+
+    /// The other edition's entity `id` names, when no version of `edition` has one.
+    fn absent_entity(&self, edition: Edition, id: &str) -> Option<AbsentEntity>;
+}
+
 /// The registry of a lowering with no target. It lifts every abstract token, block id no version
 /// of the edition declares, and canonical token none writes to a stand-in rather than a canonical
 /// state, which is safe because nothing it lowers leaves
 /// [`findings_without_target`](super::findings_without_target).
 pub(crate) struct NoTarget<'a> {
-    /// What the versions of the editions being lowered make of a block id.
-    pub(crate) standing: &'a dyn Fn(&str) -> IdStanding,
+    /// The editions the lowering stands for, the first answering for paintings and entities.
+    pub(crate) editions: &'a [Edition],
+    /// What the versions of each edition answer.
+    pub(crate) tables: &'a dyn EditionTables,
+}
+
+impl NoTarget<'_> {
+    /// The least standing any of the editions gives `id`.
+    fn standing(&self, id: &str) -> IdStanding {
+        self.editions
+            .iter()
+            .map(|edition| self.tables.id_standing(*edition, id))
+            .min()
+            .unwrap_or(IdStanding::Declared)
+    }
 }
 
 impl TargetRegistry for NoTarget<'_> {
@@ -209,15 +307,29 @@ impl TargetRegistry for NoTarget<'_> {
     }
 
     fn may_declare(&self, id: &str) -> bool {
-        id.starts_with(STAND_IN_MARK) || (self.standing)(id) == IdStanding::Declared
+        id.starts_with(STAND_IN_MARK) || self.standing(id) == IdStanding::Declared
     }
 
     fn may_write_token(&self, id: &str) -> bool {
-        (self.standing)(id) > IdStanding::Unknown
+        self.standing(id) > IdStanding::Unknown
     }
 
     fn state_domain(&self, _state: &BlockState) -> StateDomain {
         StateDomain::Unpinned
+    }
+
+    fn painting(&self, variant: &str) -> PaintingLookup {
+        self.editions
+            .first()
+            .map_or(PaintingLookup::Unrecorded, |edition| {
+                self.tables.painting(*edition, variant)
+            })
+    }
+
+    fn absent_entity(&self, id: &str) -> Option<AbsentEntity> {
+        self.editions
+            .first()
+            .and_then(|edition| self.tables.absent_entity(*edition, id))
     }
 }
 

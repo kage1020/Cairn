@@ -109,6 +109,13 @@ pub enum SchemError {
         /// The most an NBT byte array holds.
         limit: usize,
     },
+    /// A block entity with no string `id` to write as its `Id`: a `raw_block` `nbt=` compound
+    /// that writes none, or writes one of another type.
+    #[error("the block entity at {pos:?} has no string `id`, which a `.schem` file names it by")]
+    BlockEntityWithoutId {
+        /// The block entity's voxel.
+        pos: (u32, u32, u32),
+    },
 }
 
 /// A [`SchemFile`] checked to write for its target, so writing it can fail only on I/O.
@@ -145,6 +152,12 @@ pub fn prepare_schem<'a>(
         })?;
     }
     prepare_structure(block_array, target)?;
+    if let Some((pos, _)) = placed_block_entities(block_array, target.data_version)
+        .into_iter()
+        .find(|(_, nbt)| !matches!(nbt.entries.get("id"), Some(Tag::String(_))))
+    {
+        return Err(SchemError::BlockEntityWithoutId { pos });
+    }
     check_string(&file.stem).map_err(|source| SchemError::UnencodableName {
         name: file.stem.clone(),
         source,
@@ -286,7 +299,7 @@ impl Schem<'_> {
                     let id = data
                         .entries
                         .shift_remove("id")
-                        .expect("a placed block entity carries its id");
+                        .expect("prepare_schem refuses a block entity without a string id");
                     let pos = [x, y, z].map(|v| i32::try_from(v).expect("dims checked to fit u16"));
                     let mut nbt = Compound::new();
                     nbt.insert("Pos", Tag::IntArray(pos.to_vec()));

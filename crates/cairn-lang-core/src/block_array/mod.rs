@@ -7,6 +7,7 @@
 mod args;
 mod attach;
 mod constraint;
+mod entity;
 mod geometry;
 mod joins;
 mod lower;
@@ -21,16 +22,20 @@ use indexmap::IndexMap;
 use serde::Serialize;
 
 pub use attach::{AttachError, LaidBlock, LaidEntity};
-pub use constraint::{Constraint, Contents, Support, Vertical};
+pub use constraint::{Constraint, Contents, EntityBox, Support, Vertical};
+pub use entity::{
+    Billboard, Enchantment, Entity, EntityData, Item, Profession, StackCount, Trade, VillagerLevel,
+};
 pub use geometry::{Bbox, MemberGeometry};
-pub use joins::{Covers, Face, Faces, JoinKind, Joins};
+pub use joins::{Compass, Covers, Face, Faces, JoinKind, Joins};
 pub use lower::{
     BUILTIN_BLOCK_IDS, findings_under_guards, findings_without_target, lower_to_block_array,
 };
 pub use material::{
-    AbsentConcept, BlockIdSet, DeclaredElsewhere, DomainFault, IdOrigin, IdStanding,
-    MaterialDeferred, OutOfDomain, StateDomain, TargetRegistry, UnknownId, UnmappedState,
-    bound_canonical_tokens, resolve_block_state,
+    AbsentConcept, AbsentEntity, BlockIdSet, DeclaredElsewhere, DomainFault, EditionTables,
+    IdOrigin, IdStanding, MaterialDeferred, OutOfDomain, PaintingLookup, PaintingVariant,
+    StateDomain, TargetRegistry, UnknownId, UnmappedState, bound_canonical_tokens,
+    resolve_block_state,
 };
 pub use roof::is_stair;
 // `port_world_position` stays private: it needs the wall column the body was lowered against.
@@ -127,11 +132,11 @@ pub struct BlockArray {
     pub palette: Palette,
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
-    /// Block entities on the grid: a sign's text, a bed's colour and a circuit comparator's
-    /// strength.
+    /// Block entities on the grid, each beside the block that keeps it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
-    /// Free entities; always empty, as no member lowers to one.
+    /// The entities the body's members place, in the order of their cells, as [`Dims::index`]
+    /// lays them out, and in line order within one cell.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub entities: Vec<Entity>,
     /// The [`crate::resolve::Resolution`] key this volume was lowered from (`struct::cottage`).
@@ -589,6 +594,11 @@ pub enum BlockEntityData {
         #[serde(skip_serializing_if = "Option::is_none")]
         color: Option<DyeColor>,
     },
+    /// The `nbt={...}` compound a `raw_block` writes, as written, which a writer saves as given.
+    Nbt {
+        /// The compound's text.
+        compound: String,
+    },
 }
 
 /// One of the sixteen dye colours, serialized as its name, such as `light_blue`.
@@ -704,15 +714,6 @@ impl SignText {
     pub fn lines(&self) -> &[String] {
         &self.lines
     }
-}
-
-/// An entity (frames, paintings, item displays, ...), without its payload.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct Entity {
-    /// World-space coordinate the entity sits at.
-    pub pos: (f64, f64, f64),
-    /// Entity id, e.g. `minecraft:item_frame`.
-    pub id: String,
 }
 
 #[cfg(test)]

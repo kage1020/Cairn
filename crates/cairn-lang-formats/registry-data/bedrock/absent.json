@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "namespace": "minecraft",
   "entries": [
     {
@@ -8,6 +8,16 @@
         "test_instance_block"
       ],
       "reason": "a block of Java's test framework, which runs and reports the tests a structure holds; Bedrock has no such block"
+    }
+  ],
+  "entities": [
+    {
+      "ids": [
+        "text_display",
+        "block_display",
+        "item_display"
+      ],
+      "reason": "a display entity, which draws text, a block or an item where it stands without being one, with no box and no collision; Bedrock has no display entity"
     }
   ]
 }

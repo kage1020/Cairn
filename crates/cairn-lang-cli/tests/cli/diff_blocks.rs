@@ -102,6 +102,33 @@ fn a_source_that_builds_the_structure_converges_on_each_edition() {
 }
 
 #[test]
+fn an_item_frame_on_bedrock_compares_as_the_block_it_is_saved_as() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let source = format!(
+        "{HUT}  item_frame id=plain at=2,1,2 facing=up\n  \
+         item_frame id=lit at=1,1,1 facing=up item=diamond glowing=true\n"
+    );
+    let src = write_source(tmp.path(), "hut.crn", &source);
+    let artifact = compiled(tmp.path(), &src, "bedrock", "1.21.60", "hut.mcstructure");
+    let run = diff_blocks(&[&artifact, &src]);
+    let expected = format!(
+        "{} against {} at bedrock 1.21.60, a shipped target that saves that block version\n{}\
+         no cell differs\n",
+        artifact.display(),
+        src.display(),
+        metric_lines("1.000", "1.000", "0%"),
+    );
+    let note = format!(
+        "note: only blocks are compared, not the block entity data `{}` holds\n",
+        artifact.display()
+    );
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(0), expected.as_str(), note.as_str())
+    );
+}
+
+#[test]
 fn a_lift_that_misses_names_its_region_and_the_patch_that_fixes_it() {
     let (tmp, src, artifact) = built_hut();
     let lift = write_source(

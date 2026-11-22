@@ -173,6 +173,16 @@ impl MemberRole {
                 | Self::NoteBlock
                 | Self::Sign
                 | Self::Bed
+                | Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::Trade
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Hologram
+                | Self::Spawn
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -208,6 +218,16 @@ impl MemberRole {
                 | Self::NoteBlock
                 | Self::Sign
                 | Self::Bed
+                | Self::Painting
+                | Self::ItemFrame
+                | Self::ArmorStand
+                | Self::Villager
+                | Self::Trade
+                | Self::TextDisplay
+                | Self::BlockDisplay
+                | Self::ItemDisplay
+                | Self::Hologram
+                | Self::Spawn
                 | Self::Repeater
                 | Self::Comparator
                 | Self::RedstoneTorch
@@ -247,6 +267,16 @@ impl MemberRole {
             Self::NoteBlock => "note_block",
             Self::Sign => "sign",
             Self::Bed => "bed",
+            Self::Painting => "painting",
+            Self::ItemFrame => "item_frame",
+            Self::ArmorStand => "armor_stand",
+            Self::Villager => "villager",
+            Self::Trade => "trade",
+            Self::TextDisplay => "text_display",
+            Self::BlockDisplay => "block_display",
+            Self::ItemDisplay => "item_display",
+            Self::Hologram => "hologram",
+            Self::Spawn => "spawn",
             Self::Repeater => "repeater",
             Self::Comparator => "comparator",
             Self::RedstoneTorch => "redstone_torch",
@@ -348,7 +378,7 @@ impl Arguments {
     }
 
     /// Record `key=value`, a key no [`MemberRole::state_arguments`] of its member names.
-    pub(super) fn insert(&mut self, key: String, value: ValueWithSpan) {
+    pub(crate) fn insert(&mut self, key: String, value: ValueWithSpan) {
         self.fields.insert(key, value);
     }
 

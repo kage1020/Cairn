@@ -1,6 +1,7 @@
 //! What `cairn diff-blocks` reports on a source and the structure file it lifts
 //! (`spec/ecosystem-interop` "The report").
 
+use std::borrow::Cow;
 use std::slice;
 
 use cairn_lang_core::block_array::BlockArrayIr;
@@ -9,6 +10,7 @@ use cairn_lang_core::voxel_diff::{DiffInput, DiffReport, diff};
 use cairn_lang_core::{Edition, diagnose_parse_failure, parse};
 use serde::Serialize;
 
+use crate::bedrock_structure::frames_as_blocks;
 use crate::build::artifact::prepare_artifact;
 use crate::build::finding::{Found, render_findings};
 use crate::build::lowering::{BuildRefusal, Lowered, lower_for_target};
@@ -167,7 +169,7 @@ pub fn diff_blocks(source: &str, structure: &DecodedStructure) -> DiffBlocksRun 
         structure: structure.bodies(),
         source,
         module: &lowered.ir,
-        built: &lowered.block_ir,
+        built: &as_saved(edition, Cow::Borrowed(&lowered.block_ir)),
         build: &build,
     });
     DiffBlocksRun {
@@ -250,5 +252,13 @@ fn build_candidate(text: &str, edition: Edition, target: &ResolvedTarget) -> Opt
     if lowered.verdict().is_err() || checked_by_backend(&lowered.block_ir, target).is_err() {
         return None;
     }
-    Some(lowered.block_ir)
+    Some(as_saved(edition, Cow::Owned(lowered.block_ir)).into_owned())
+}
+
+/// The blocks `block_ir` saves as on `edition`: on Bedrock, each item frame as its block.
+fn as_saved(edition: Edition, block_ir: Cow<'_, BlockArrayIr>) -> Cow<'_, BlockArrayIr> {
+    match edition {
+        Edition::Java => block_ir,
+        Edition::Bedrock => Cow::Owned(frames_as_blocks(&block_ir)),
+    }
 }

@@ -109,8 +109,8 @@ fn a_block_entity_no_raw_member_carries_is_warned_of_and_out_makes_its_directory
         run.stderr,
         format!(
             "{INTENT_LOSS}\n\
-             warning[W_SEMANTIC_LOSS]: `crossbar`: 1 block entity is not written, since a raw \
-             member carries no block entity data, such as a chest's contents or a command \
+             warning[W_SEMANTIC_LOSS]: `crossbar`: 1 block entity is not written, since an \
+             import writes no block entity data, such as a chest's contents or a command \
              block's command: 1 `minecraft:comparator`\n\
              {}\n",
             stamped(

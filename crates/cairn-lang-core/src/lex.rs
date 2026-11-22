@@ -9,7 +9,7 @@
 
 mod snbt;
 
-pub use snbt::MAX_NBT_DEPTH;
+pub use snbt::{MAX_NBT_DEPTH, NbtCompound, NbtValue, parse_compound};
 
 use crate::error::{IntContext, LexError, Position, Span};
 
