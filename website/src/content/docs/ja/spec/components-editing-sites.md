@@ -18,6 +18,93 @@ def cottage size=9x7:
   roof   id=roof  kind=gable mat_slot=roof
 ```
 
+### 9.1.1 本体に置く `def`
+
+`struct` か `def` の本体に書いた `place` 行は、その本体の中に `def` を 1 つの部品として組み立てます。床に置くテーブルや、壁際の暖炉がそうです。`use=` が `def` を名指し、`at=` が置く場所を決め、本体のテーマがそのスロットを組み立てます。
+
+```
+struct tavern size=13x9
+  floor id=base  mat_slot=floor
+  walls id=shell mat_slot=wall height=5
+  place use=fireplace at=inside.right offset=3 y=1
+  place use=table     at=3,1,5
+  place use=chair     at=2,1,5 facing=east
+  place use=chair     at=4,1,5 facing=west
+```
+
+**何を組み立てるか。** 本体に置く `def` は、`mat_slot=` を書いた `fill` 行から組み立てます。どの `def` の本体でもそうであるように、各ボックスは `def` の `size=` の敷地の低い角から測ります。そうした `def` はほかの行を持ちません。`size=` がないもの、ほかの種類のメンバー行 (水の `fill` も含む) を持つものは `place` 行の `E_INVALID_MEMBER` になり、組み立てられない最初の行を示し、そこには何も組み立てません。そのため、本体に置く `def` は自分では何も置かず、入れ子は 1 段に保たれます ([構文 §5.2](/ja/spec/syntax/#52-ネスト))。これは置かれた本体のメンバーであって配置ではありません。構造ファイルを書き出さず、ロックファイルは配置として記録せず、ポートも公開しません。
+
+**どちらを向くか。** `def` は `front`、つまり `+z` を向いた形で書き、本体はそれを鉛直軸のまわりに 4 分の 1 回転単位で回します。セルはそれとともに回り、組み立てる各ブロックも回ります。水平の `facing`、`x` か `z` の `axis`、`rotation`、ブロックの状態が書く `north`、`east`、`south`、`west`、そしてレールの `shape` の方角の部分を、ゲームが回して置いた構造のブロックを回すのと同じように回します。[ブロック状態モデル](/ja/spec/blockstate/#つながり) の接続状態は、本体を塗り終えてから、本体の中で各セルの隣にあるブロックから導きます。
+
+**どこに置くか。** `at=` は次の 2 つの形のどちらかを取ります。
+
+- `at=inside.<side>` は、その壁の内側の面に沿って置き、正面が壁から離れる向きに回します。`back` の壁では書いたままの向き、`front` では半回転、`left` と `right` では 4 分の 1 回転です。`size=WxH` の `def` では、背面の列が、同じ `at=` と `y=` の `chest` が `offset=` で占めるセルと、外から見て壁の右端へ向かうその後の `W − 1` 列を占め、`H` 列の分だけ struct の内側へ伸びます。どのセルも壁の輪の厳密に内側です。`y=` は最も低いセルが立つ行で、struct の基準行かその `level` から数え、`offset=` と `y=` は省略すると `0` です。
+- `at=X,Y,Z` は、回した後の敷地の低い角をそのセルに合わせて置き、最も低いセルは行 `Y` に立ちます。`facing=` は正面が向く方角で、省略すると `south` です。`south` は書いたままの `+z` で、`west`、`north`、`east` はその向きを向くように回します。
+
+**マテリアル。** スロットは、本体自身のメンバーと同じく、置かれた本体のテーマに対して解決し ([マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット))、`place` 行ごとに 1 回ずつ解決します。家具ライブラリの `def` は、そのテーマが束縛しないスロットを、ライブラリ自身のテーマに対して解決します ([§9.1.2](#912-家具ライブラリ))。テーマが束縛されていない本体に置いたファイルの `def` は、どのセルも組み立てず、本体は `W_NO_THEME_BOUND` になります ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。
+
+**塗り方。** `fixtures` フェーズで塗り ([コンパイルモデル §4.1](/ja/spec/compilation/#41-フェーズ評価))、それより前のフェーズが残したものの上に置きます。床の行に置いたテーブルは床を、壁にはめ込んだ暖炉は壁を置き換えます。塗ったセルはすべて、その `place` 行が持ち主になります。同じフェーズの 2 行が 1 つのセルを取り合うときは、[コンパイルモデル §4.8](/ja/spec/compilation/#48-同一フェーズ内の衝突とパレット) のとおりに解決します。
+
+**行の書き方。** 本体では `id=` は省略でき、`theme=`、`east_of=`、`north_of=`、`gap=` は `site` のキーなので、そこでは何も読みません。それぞれ `W_IGNORED_ARGUMENT` です ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。座標の `at=` と並べた `offset=` と `y=`、壁の `at=` と並べた `facing=`、`site` の行の `offset=`、`y=`、`facing=` も同じです。`use=` か `at=` のない行、どちらの形でもない `at=`、負でない整数でない `offset=` か `y=`、方角でない `facing=`、そしてセルが壁の輪か struct の敷地をはみ出す `def`、書いたとおりの struct のどの行よりも高くに届く `def` は、それぞれ `E_INVALID_MEMBER` で、そこには組み立てません。`walls` か `roof` が何も組み立てないせいで struct が低く組み上がり、その行に届く `def` は、その行の `fill` と同じく `W_DEFERRED_MEMBER` です。ファイルの `def` もライブラリの `def` も名指さない `use=` は `E_UNRESOLVED_PLACE_REF` で、両方から最も近い名前を示します。本体の `place` が名指す `def` は使われているので、`W_UNUSED_DEF` にはなりません。
+
+### 9.1.2 家具ライブラリ
+
+コンパイラは、部屋に家具を置くための `def` のライブラリを同梱します。ファイルのどの `def` も名指さない本体の `place use=NAME` はライブラリの `def` を名指すので、同じ名前の `def` を宣言したファイルは自分のものを組み立てます。`site` の `use=` が名指すのはファイルの `def` だけです。
+
+ライブラリは次のソースです。テーマは `def` が読むすべてのスロットを束縛するので、テーマがそのどれも束縛しない本体でも、各部品を組み立てられます。そうしたスロットのどれかを束縛するファイルのテーマがあれば、その部品はそこから組み立てます。たとえば `slot chair -> @spruce_stairs` と書けば、椅子はすべてトウヒになります。ライブラリのテーマはファイルのテーマではありません。`theme=` はそれを名指せず、ファイルは同じ名前のテーマを宣言できます。
+
+```
+theme furniture:
+  slot table_leg      -> @oak_fence
+  slot table_top      -> @oak_pressure_plate
+  slot chair          -> @oak_stairs[facing=north]
+  slot hearth         -> @bricks
+  slot fire           -> @campfire
+  slot shelf          -> @bookshelf
+  slot crafting_table -> @crafting_table
+  slot furnace        -> @furnace[facing=south]
+  slot barrel         -> @barrel[facing=up]
+  slot lectern        -> @lectern[facing=south]
+  slot torch          -> @wall_torch[facing=south]
+  slot lantern        -> @lantern[hanging=true]
+
+def table size=1x1:
+  fill id=leg mat_slot=table_leg from=0,0,0 to=0,0,0
+  fill id=top mat_slot=table_top from=0,1,0 to=0,1,0
+
+def chair size=1x1:
+  fill id=seat mat_slot=chair from=0,0,0 to=0,0,0
+
+def fireplace size=3x1:
+  fill id=left   mat_slot=hearth from=0,0,0 to=0,2,0
+  fill id=right  mat_slot=hearth from=2,0,0 to=2,2,0
+  fill id=mantel mat_slot=hearth from=1,2,0 to=1,2,0
+  fill id=fire   mat_slot=fire   from=1,0,0 to=1,0,0
+
+def bookcase size=1x1:
+  fill id=shelves mat_slot=shelf from=0,0,0 to=0,2,0
+
+def crafting_table size=1x1:
+  fill id=bench mat_slot=crafting_table from=0,0,0 to=0,0,0
+
+def furnace size=1x1:
+  fill id=oven mat_slot=furnace from=0,0,0 to=0,0,0
+
+def barrel size=1x1:
+  fill id=cask mat_slot=barrel from=0,0,0 to=0,0,0
+
+def lectern size=1x1:
+  fill id=stand mat_slot=lectern from=0,0,0 to=0,0,0
+
+def wall_torch size=1x1:
+  fill id=flame mat_slot=torch from=0,0,0 to=0,0,0
+
+def lantern size=1x1:
+  fill id=light mat_slot=lantern from=0,0,0 to=0,0,0
+```
+
+各 `def` は、正面を `+z` に、背面を `-z` に向けて書いてあります。そのため `chair` の階段は背もたれを `def` の背面に向け、`furnace` と `lectern` は正面に向かって開き、`wall_torch` は背後のブロックに掛かります。壁際では背面が壁です。`place use=wall_torch at=inside.left offset=3 y=3` は左の壁に松明を掛け、`place use=chair at=inside.back offset=2 y=1` は背もたれを奥の壁に向けた椅子を置きます。`lantern` は上のブロックから吊り下がります。
+
 ## 9.2 編集モデル
 
 重要なメンバーは `id=` を持ちます。さらに `struct` や `def` の本体のメンバーには、どれにも、生成した順番ではなく、親・ロール・side・level・offset から導いた **意味に基づく安定したアドレス** が付きます。`window@front[0]` は `offset=` が正面の壁の左端にいちばん近い窓で、`level[1].window@front[0]` は下から 2 つめの `level` の下でそこにいちばん近い窓です。アドレスの形と、1 つの壁の上で同じロールのメンバーをどう数えるかは [構文 §5.5](/ja/spec/syntax/#55-idクラスアドレス) が定めます。行を並べ替えてもアドレスは変わりません。ただし、その数え方のどの段でも差がつかないメンバーどうしは、アドレスが入れ替わります。ロールの違うメンバー、別の壁のメンバー、壁のもっと先に立つメンバーを足しても、アドレスは変わりません。壁の上で同じロールのメンバーより手前にメンバーを足すと、その後ろの番号がずれます。`id=` はそのためにあります。

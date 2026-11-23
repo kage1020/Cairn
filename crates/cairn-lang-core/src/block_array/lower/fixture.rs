@@ -259,7 +259,7 @@ impl Anchor {
 }
 
 /// Parse a fixture's `at=` value, or the refusal of any other shape.
-fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
+pub(super) fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
     let keyword = fixture.keyword;
     let refuse = |primary: String| {
         Box::new(diag_invalid_member(
@@ -353,7 +353,12 @@ fn intended_anchor(head: &str, tail: &str) -> Option<String> {
 }
 
 /// Read a fixture's `key=` as a non-negative integer, `0` when absent.
-fn coordinate(fixture: Fixture, member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
+pub(super) fn coordinate(
+    fixture: Fixture,
+    member: &Member,
+    key: &str,
+    counts: &str,
+) -> Result<u32, Refusal> {
     let Some(raw) = member.written(key) else {
         return Ok(0);
     };

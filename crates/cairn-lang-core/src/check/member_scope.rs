@@ -175,10 +175,10 @@ fn carries_signal(member: &Member) -> bool {
 }
 
 fn advice(role: &MemberRole, body: BodyKind) -> &'static str {
-    // Reached only for a role the body cannot read, so `Geometry` here means `place` or `connect`.
+    // Reached only for a role the body cannot read, so `Geometry` here means `connect`.
     match (body, role) {
         (BodyKind::Geometry, _) => {
-            "`place` and `connect` describe a site's layout, so they belong in a `site` body"
+            "`connect` lays a walkway between two places of a site, so it belongs in a `site` body"
         }
         (BodyKind::Site, MemberRole::Level) => {
             "a `site` body has no grouping construct: dedent the rows to the site's own indentation and drop the `level`"

@@ -632,7 +632,7 @@ const SWEEP: &[(&str, &str)] = &[
     ("circuit", "  circuit id=c class=c region=r void=2\n"),
     (
         "place",
-        "  place id=a class=c use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n",
+        "  place id=a class=c use=hut theme=t at=origin\n  place id=b use=hut theme=t east_of=a gap=1\n  place id=c use=hut theme=t north_of=a gap=1\n  place use=table at=inside.back offset=1 y=0\n  place use=chair at=1,0,1 facing=west\n",
     ),
     (
         "connect",
@@ -819,12 +819,21 @@ fn every_argument_in_every_role_vocabulary_is_written_by_some_clean_source() {
         );
     }
 
+    // A site's `place` writes a `theme=`, and a body's does not.
+    let (site_places, body_places): (Vec<&str>, Vec<&str>) = sweep_line("place")
+        .lines()
+        .partition(|line| line.contains("theme="));
     let site = format!(
-        "def hut size=3x3:\n  floor mat_slot=m\n  door id=entry side=front at=center\n\ntheme t:\n  slot m -> @oak_planks\n\nsite v:\n{}{}",
-        sweep_line("place"),
+        "def hut size=3x3:\n  floor mat_slot=m\n  door id=entry side=front at=center\n\ntheme t:\n  slot m -> @oak_planks\n\nsite v:\n{}\n{}",
+        site_places.join("\n"),
         sweep_line("connect"),
     );
     assert_eq!(codes(&site), Vec::<&str>::new(), "source:\n{site}");
+    let body = format!(
+        "{PROLOGUE}struct s size=9x9\n  walls mat_slot=m height=3\n{}\n",
+        body_places.join("\n"),
+    );
+    assert_eq!(codes(&body), Vec::<&str>::new(), "source:\n{body}");
 }
 
 #[test]

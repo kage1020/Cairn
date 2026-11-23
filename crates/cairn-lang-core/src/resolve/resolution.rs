@@ -95,6 +95,10 @@ pub struct ScopeResolution {
     pub bound_theme: Option<String>,
     /// Per-member resolved binding, keyed by `member.span.start`.
     pub members: IndexMap<usize, ResolvedMemberBinding>,
+    /// The members of the `def` each `place` line of the body builds, resolved under this scope's
+    /// theme, keyed by that line's `span.start`.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub placed: IndexMap<usize, ScopeResolution>,
 }
 
 /// Resolved data attached to a single [`Member`](crate::intent::Member).

@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
 use crate::error::Span;
-use crate::intent::{Member, MemberRole, Size, patched_actuator, role_of};
+use crate::intent::{DefIr, Member, MemberRole, Size, patched_actuator, role_of};
 use crate::resolve::ScopeResolution;
 
 use crate::block_array::geometry::Declared;
@@ -31,6 +31,7 @@ use super::frame::lay_frames;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::{Openings, paint_member};
 use super::phase::Phase;
+use super::place::reads_a_slot;
 use super::repeat::{imported_rows, is_imported};
 use super::sizing::{max_roof_extra_height, max_roof_overhang, max_wall_top, painting_walls};
 use super::token_diag::{NamedBy, diag_derived_state_domain, diag_state_unmapped};
@@ -41,6 +42,8 @@ use super::written::{Written, written_members};
 pub(super) struct BodyInputs<'a> {
     /// The compile target's registry view.
     pub(super) registry: Option<&'a dyn TargetRegistry>,
+    /// The file's defs, which a body's `place` builds ahead of the furniture library's.
+    pub(super) defs: &'a [DefIr],
     /// The entries each body's palette may hold, air included.
     pub(super) palette_capacity: usize,
 }
@@ -77,6 +80,7 @@ pub(super) fn lower_body_to_block_array<'a>(
 ) -> Option<LoweredBody> {
     let BodyInputs {
         registry,
+        defs,
         palette_capacity,
     } = bodies;
     let (interior_w, interior_h) = (body.size.w.get(), body.size.h.get());
@@ -90,7 +94,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     let written_members = written_members(body.members);
     // A scope that reads no `mat_slot=` loses nothing to a missing theme (`spec/lint` "Materials
     // and targets"), so it is not reported.
-    if theme_missing && flattened.iter().any(|(_, m)| m.read_slot().is_some()) {
+    if theme_missing && flattened.iter().any(|(_, m)| reads_a_slot(m, defs)) {
         diagnostics.push(diag_no_theme_bound_generic(
             body.kind,
             body.scope_label,
@@ -117,6 +121,7 @@ pub(super) fn lower_body_to_block_array<'a>(
     let ctx = StructCtx {
         scope,
         registry,
+        defs,
         theme_missing,
         dims,
         overhang,

@@ -241,7 +241,8 @@ pub(super) fn check_unused_defs(
             ),
             notes: vec![DiagnosticNote {
                 span: None,
-                message: "remove the def, or place an instance via `site ... place use=...`"
+                message: "remove the def, or place an instance via `site ... place use=...`, \
+                          or build one inside a body with `place use=...` there"
                     .to_owned(),
             }],
             data: None,

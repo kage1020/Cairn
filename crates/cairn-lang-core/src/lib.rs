@@ -14,6 +14,7 @@ pub mod check;
 pub(crate) mod diagnostic;
 pub mod edition;
 pub mod error;
+pub mod furniture;
 pub mod ids;
 pub mod intent;
 pub mod lex;

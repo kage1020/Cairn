@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod body_place;
 mod composite_version_floors;
 mod def_member;
 mod intended_targets;

@@ -3,6 +3,7 @@
 //! [`compute_axes`] computes the version axes `cairn info` reports.
 
 mod binding;
+mod body_place;
 mod connect;
 mod output_names;
 mod resolution;

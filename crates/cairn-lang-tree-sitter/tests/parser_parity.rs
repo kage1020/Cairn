@@ -408,6 +408,16 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=9x3\n  window side=front y=1 offset=2 size=3x2 shape=arch\n",
         Accept,
     ),
+    (
+        "place_in_a_body",
+        "struct s size=9x7\n  place use=fireplace at=inside.back offset=3 y=1\n  place use=chair at=2,1,3 facing=east\n",
+        Accept,
+    ),
+    (
+        "place_in_a_body_facing_without_value",
+        "struct s size=9x7\n  place use=chair at=2,1,3 facing=\n",
+        Reject,
+    ),
     // Both accept it either way; only the depth comparison sees where the rows land.
     (
         "blank_line_before_a_grouping_member",

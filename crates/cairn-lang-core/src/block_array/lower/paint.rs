@@ -23,6 +23,7 @@ use super::hanging::{fill_item_frame, fill_painting};
 use super::members::{StructCtx, bound_block, palette_index_for, resolve_member_state};
 use super::note_block::fill_note_block;
 use super::part::{Part, fill_part};
+use super::place::fill_place;
 use super::plate::fill_pressure_plate;
 use super::raw::fill_raw;
 use super::roof_fill::fill_roof;
@@ -68,6 +69,7 @@ pub(super) fn paint_member(
         MemberRole::Beam => fill_beam(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Column => fill_column(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Arch => fill_arch(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Place => fill_place(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {
             let hung = &mut openings.hung;
             let frame = fill_door(member, y_offset, ctx, palette, canvas, hung, diagnostics);
@@ -217,7 +219,6 @@ pub(super) fn paint_member(
         MemberRole::Level
         | MemberRole::RawRepeat
         | MemberRole::Circuit
-        | MemberRole::Place
         | MemberRole::Connect
         | MemberRole::Other(_) => {
             unreachable!("no phase paints a `{}`", MemberRole::keyword(&member.role))

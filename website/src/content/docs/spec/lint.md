@@ -74,9 +74,10 @@ compose to the strictest across every line, so a second one adds a constraint ([
 | `W_INVALID_CAIRN_VERSION` | An `@cairn` value that is not a `YYYY.M[.PATCH]` language version ([§5.3](/spec/syntax/#53-headers)). |
 | `W_FUTURE_CAIRN_VERSION` | An `@cairn` value naming a language version later than the compiler reading it. |
 
-`E_MISPLACED_MEMBER` fires on a `place` / `connect` inside a `struct` or `def`, or a geometry
-keyword among a `site`'s rows. It is reported once at the offending row, and anything indented
-under it goes with it.
+`E_MISPLACED_MEMBER` fires on a `connect` inside a `struct` or `def`, or a geometry keyword among a
+`site`'s rows. A `place` is read in both bodies, so it draws none ([Components, Editing, and
+Multi-building §9.1.1](/spec/components-editing-sites/#911-a-def-placed-in-a-body)). It is reported
+once at the offending row, and anything indented under it goes with it.
 
 It also fires on a `circuit` line under a `level`, directly or through `level`s nested in it. A
 reservation spans the whole scope, so place-and-route reads a `circuit` line only among the
@@ -174,7 +175,7 @@ to compare.
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token nor a member form a `hologram` is built as, or a key a `theme` selector row's keyword binds ([Materials and Themes](/spec/materials-themes/#selector-bindings)) whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
 | `E_THEME_SELECTOR_UNMATCHED` | A `theme` selector row that matches no member of the scopes the theme is bound to. A theme no scope binds is not checked. |
 | `E_THEME_VARIANT_MISSING` | The pinned edition can bind none of a theme's per-edition variants. |
-| `E_INCOMPLETE_PLACE` | A `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_INCOMPLETE_PLACE` | A `site`'s `place` row omits `id=`, `use=`, or `theme=` ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | A `mat_slot=`, or the value of a key a `theme` selector row's keyword binds, resolves to an abstract material token the offered pack's catalog does not declare ([Materials and Themes](/spec/materials-themes/)), or a struct's circuit is built of a circuit token it does not declare ([Redstone §14.5](/spec/redstone/#145-place-and-route)). |
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
@@ -356,9 +357,12 @@ than asked. A `floor` leaves its cells air, a `fill` with a `mat_slot=` paints n
 a `roof` is still built from its default block, as is an eave `stair`, `column`, `arch`,
 `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed` that still fits the shorter
 structure. Any other sensor or actuator, a `note_block`, a `raw_block` and a `raw_fill` need no
-theme and are built where the shorter structure still holds them. Any of these set higher than it
-reaches is deferred. It is judged per scope: a scope with no theme bound that reads no `mat_slot=`
-is not reported, whatever the rest of the module reads. A `mat_slot=` on a keyword that reads none,
+theme and are built where the shorter structure still holds them. A `place` builds nothing of a
+`def` of the file, and builds a def of the furniture library from the library's theme ([Components,
+Editing, and Multi-building §9.1.2](/spec/components-editing-sites/#912-the-furniture-library)). Any
+of these set higher than it reaches is deferred. It is judged per scope: a scope with no theme bound
+that reads no `mat_slot=` is not reported, whatever the rest of the module reads, and a `place` that
+names a `def` of the file reads the slots of that def. A `mat_slot=` on a keyword that reads none,
 such as a `level`'s, is not a read. Nor, for this warning, is one on a member a `level` drops
 ([Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation)), which paints
 nothing whatever the theme: a `floor` or `roof` above `y=0`, or any member of a `level` whose body
@@ -421,17 +425,17 @@ ripple only in where a member's blocks stand, such as the roof that taller walls
 
 | Code | Meaning |
 |---|---|
-| `E_INVALID_PLACE_ID` | A `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
+| `E_INVALID_PLACE_ID` | A `site`'s `place id=` is empty, carries `.`, `:`, `/`, `\`, `*`, `\|`, `?`, `<`, `>`, `"`, whitespace or a control character, or is a device name Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_INVALID_STRUCT_NAME` | A `struct` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_INVALID_SITE_NAME` | A `site` is named after a device Windows reserves (`CON`, `NUL`, `COM1`, …) in any letter case. |
 | `E_DUPLICATE_PLACE_ID` | Two `place` rows in one site share an `id=`. |
 | `E_OUTPUT_NAME_COLLISION` | Two artifacts a build would write share a file name, ignoring case: a `struct` and a `place` of one name, one `id=` placed in two sites, or two walkways whose names flatten alike. |
-| `E_INVALID_PLACE_ORIGIN` | A `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
+| `E_INVALID_PLACE_ORIGIN` | A `site`'s `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_PLACEMENT_OVERLAP` | Two `place` rows of one site resolve to boxes that share a cell, or a `connect` row's walkway lays a cell inside the box of a placement it does not join ([Entities §8.2](/spec/entities/#82-anchor-conventions)). |
-| `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. |
+| `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. A body's `place use=` may name a def of the furniture library as well ([§9.1.2](/spec/components-editing-sites/#912-the-furniture-library)). |
 | `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
-| `W_UNUSED_DEF` | A `def` no `place use=` references. |
+| `W_UNUSED_DEF` | A `def` no `place use=` references, in a `site` or in a body. |
 
 `E_INVALID_PLACE_ID` is about round-tripping rather than taste. The scope key
 `site::SITE::PLACE`, and every walkway key parsed back out of one, is built with `.` and `:` as

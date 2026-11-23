@@ -11,7 +11,8 @@ massing     floor / walls / fill / column
 envelope    roof / stair / beam
 openings    door / window / arch
 fixtures    sign / bed / chest / trapdoor / note_block / センサー / アクチュエーター / Tier 0 の部品 /
-            painting / item_frame / armor_stand / villager / trade / display / hologram / spawn
+            painting / item_frame / armor_stand / villager / trade / display / hologram / spawn /
+            本体の place
 fluids      fill fluid= / water
 logic_synth レッドストーンの合成: Logic IR → Netlist IR (Edition Cell の選択を含む)
 logic_place 床下へのパッド、ライザー、セルの配置 → Placement IR
@@ -21,7 +22,7 @@ raw         raw_block / raw_fill / raw_repeat (エスケープハッチ)
 
 水を含めるブロックを置いてから水を注げるよう、`fill` は `mat_slot=` を書けば `massing`、`fluid=` を書けば `fluids` に属します ([ブロックステート §6.3](/ja/spec/blockstate/#63-waterlogged))。`theme` のセレクタ行が割り当てる部位はメンバーのもので、メンバーのフェーズで作ります ([マテリアルとテーマ](/ja/spec/materials-themes/#セレクタのバインディング))。`walls` メンバーの隅柱は `massing` で、`door` や `window` の枠はすべての開口を切り抜いたあとの `openings` で作ります。
 
-ただし、今のところすべての行が動くわけではありません。`water` はまだキーワードではなく、`E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `sign`、`bed`、`chest`、`trapdoor`、`note_block`、`door` 以外のすべてのセンサーとアクチュエーター、Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品))、そしてエンティティ ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
+ただし、今のところすべての行が動くわけではありません。`water` はまだキーワードではなく、`E_UNKNOWN_KEYWORD` として拒否されるので、ブロックを置くフェーズは `massing`、`envelope`、`openings`、`fixtures`、`fluids`、`raw` の 6 つで、`fixtures` に属するのは `sign`、`bed`、`chest`、`trapdoor`、`note_block`、`door` 以外のすべてのセンサーとアクチュエーター、Tier 0 の部品 ([レッドストーン §14.1](/ja/spec/redstone/#tier-0-の部品))、エンティティ ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階))、そして本体に置く `def` ([コンポーネント・編集・複数建築 §9.1.1](/ja/spec/components-editing-sites/#911-本体に置く-def)) です ([マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック))。3 つの `logic_*` フェーズは、各 struct の回路を、`circuit` 行が基準面の下に確保した層に敷きます。そこはほかのどのフェーズもブロックを置かない場所なので、これらのフェーズは `raw` を含むほかのすべてのフェーズが残した struct を読み、どのフェーズともボクセルを取り合いません。
 
 `roof` の後に書いた `window` も、壁の開口として切り抜かれます。ソース上の順番がメンバーの意味を決めることはありません。成果物の内容も同じで、ソース上の順番には左右されません ([§4.8](#48-同一フェーズ内の衝突とパレット))。ボクセルを共有しない 2 つのメンバーを入れ替えても、ボクセルだけでなく、パレットの番号付けを含めた `BlockArray` 全体が変わりません。
 

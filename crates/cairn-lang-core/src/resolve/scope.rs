@@ -5,7 +5,8 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{Member, MemberBody, ValueWithSpan, levels_under};
+use crate::furniture;
+use crate::intent::{DefIr, Member, MemberBody, MemberRole, ValueWithSpan, levels_under};
 
 use super::binding::{ThemeBinding, TokenKind, classify_token, member_form};
 use super::resolution::{ResolvedMemberBinding, ScopeResolution};
@@ -14,6 +15,8 @@ use super::slots::unresolved_slot_diag;
 
 /// The state every scope resolution reads from and adds to.
 pub(super) struct ResolveCtx<'a> {
+    /// The file's own defs, which a body's `place` names ahead of the furniture library's.
+    pub(super) defs: &'a [DefIr],
     /// Theme bindings by name; selector matching records its members here.
     pub(super) themes: &'a mut IndexMap<String, ThemeBinding>,
     /// Theme names some scope applied.
@@ -57,16 +60,84 @@ pub(super) fn resolve_struct_or_def(
     let mut resolution = ScopeResolution {
         bound_theme: bound.as_ref().map(|(name, _)| name.clone()),
         members: IndexMap::new(),
+        placed: IndexMap::new(),
     };
-    resolve_members(
-        members,
-        &[],
-        bound.as_ref().map(|(name, slots)| (name.as_str(), slots)),
-        sibling_slots,
-        &mut resolution,
-        ctx,
-    );
+    let bound = bound.as_ref().map(|(name, slots)| (name.as_str(), slots));
+    resolve_members(members, &[], bound, sibling_slots, &mut resolution, ctx);
+    resolve_placed_defs(members, bound, sibling_slots, &mut resolution, ctx);
     resolution
+}
+
+/// The name a library def's members are resolved under, which no theme of a file can have.
+const LIBRARY_THEME: &str = "the furniture library's theme";
+
+/// Resolve the `def` each `place` among `members` builds, under the scope's theme, into
+/// `out.placed`; a library def falls back on the library's theme for a slot that one leaves
+/// unbound (`spec/components-editing-sites` "A `def` placed in a body").
+fn resolve_placed_defs(
+    members: &[Member],
+    bound: Option<(&str, &IndexMap<String, ValueWithSpan>)>,
+    sibling_slots: &HashSet<String>,
+    out: &mut ScopeResolution,
+    ctx: &mut ResolveCtx<'_>,
+) {
+    for member in members {
+        resolve_placed_defs(&member.children.members, bound, sibling_slots, out, ctx);
+        if !matches!(member.role, MemberRole::Place) {
+            continue;
+        }
+        let Some(name) = member
+            .arguments
+            .get("use")
+            .and_then(|v| v.value.as_label_str())
+        else {
+            continue;
+        };
+        let mut placed = ScopeResolution {
+            bound_theme: out.bound_theme.clone(),
+            members: IndexMap::new(),
+            placed: IndexMap::new(),
+        };
+        if let Some(def) = ctx.defs.iter().find(|def| def.name == name) {
+            resolve_members(&def.members, &[], bound, sibling_slots, &mut placed, ctx);
+        } else if let Some(def) = furniture::def(name) {
+            let slots = library_slots(member, bound.map(|(_, slots)| slots));
+            let none = HashSet::new();
+            resolve_members(
+                &def.members,
+                &[],
+                Some((LIBRARY_THEME, &slots)),
+                &none,
+                &mut placed,
+                ctx,
+            );
+        } else {
+            continue;
+        }
+        out.placed.insert(member.span.start, placed);
+    }
+}
+
+/// The library theme's slots, each one `theme` binds replaced by its binding, and each other
+/// spanned at the `place` line that reads it.
+fn library_slots(
+    place: &Member,
+    theme: Option<&IndexMap<String, ValueWithSpan>>,
+) -> IndexMap<String, ValueWithSpan> {
+    furniture::theme()
+        .slots
+        .iter()
+        .map(|(slot, value)| {
+            let bound = theme.and_then(|theme| theme.get(slot)).cloned();
+            let value = bound.unwrap_or_else(|| {
+                let mut at_the_line = value.clone();
+                at_the_line.span.clone_from(&place.span);
+                at_the_line.value.span.clone_from(&place.span);
+                at_the_line
+            });
+            (slot.clone(), value)
+        })
+        .collect()
 }
 
 /// Resolve `members`, which stand under the `level`s whose ids are `levels`.

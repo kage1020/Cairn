@@ -4,6 +4,7 @@ mod circuit_advice;
 mod comment_length;
 mod diagnostic_catalog;
 mod editor_keywords;
+mod furniture_library;
 mod grammar_fields;
 mod internal_tier;
 mod keyword_reference;
@@ -53,6 +54,7 @@ pub const RULES: &[Rule] = &[
     module_cycles::RULE,
     circuit_advice::RULE,
     state_keys::RULE,
+    furniture_library::RULE,
 ];
 
 /// A fault a rule found, at a file and, when it has one, a line.

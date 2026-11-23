@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use crate::ast::{Item, Module, ThemeRule, ValueKind};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{
-    Actuator, BindingKey, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue,
+    Actuator, BindingKey, BodyKind, IntentModule, Member, MemberRole, SelectorKeys, SelectorValue,
     UNIVERSAL_ARGUMENTS, Unread, ValueWithSpan, role_of, selector_keys,
 };
 use crate::prose::or_list;
@@ -21,14 +21,14 @@ pub(super) fn run(module: &Module, ir: &IntentModule, sink: &mut DiagnosticSink)
     let selected = selector_keys(&ir.themes);
     for s in &ir.structs {
         check_header("struct", &s.args, sink);
-        walk(&s.members, &selected, sink);
+        walk(&s.members, &selected, BodyKind::Geometry, sink);
     }
     for d in &ir.defs {
         check_header("def", &d.args, sink);
-        walk(&d.members, &selected, sink);
+        walk(&d.members, &selected, BodyKind::Geometry, sink);
     }
     for s in &ir.sites {
-        walk(&s.placements, &selected, sink);
+        walk(&s.placements, &selected, BodyKind::Site, sink);
     }
 }
 
@@ -83,14 +83,24 @@ fn check_header(keyword: &str, args: &IndexMap<String, ValueWithSpan>, sink: &mu
     }
 }
 
-fn walk(members: &[Member], selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
+fn walk(
+    members: &[Member],
+    selected: &SelectorKeys<'_>,
+    body: BodyKind,
+    sink: &mut DiagnosticSink,
+) {
     for m in members {
-        check_member(m, selected, sink);
-        walk(&m.children.members, selected, sink);
+        check_member(m, selected, body, sink);
+        walk(&m.children.members, selected, body, sink);
     }
 }
 
-fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut DiagnosticSink) {
+fn check_member(
+    member: &Member,
+    selected: &SelectorKeys<'_>,
+    body: BodyKind,
+    sink: &mut DiagnosticSink,
+) {
     // An unknown keyword's own finding carries the repair.
     let Some(own) = member.role.accepted_arguments() else {
         return;
@@ -124,6 +134,8 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
                     &own,
                 ));
             }
+        } else if let Some(finding) = unread_place_key(member, body, key, &value.span) {
+            sink.push(finding);
         } else if let Some(why) = member.role.unread_argument(key) {
             // A universal key left in the fields failed to hoist, which `check::type_mismatch` or
             // `check::duplicate` reports.
@@ -171,6 +183,61 @@ fn check_member(member: &Member, selected: &SelectorKeys<'_>, sink: &mut Diagnos
             ));
         }
     }
+}
+
+/// The `W_IGNORED_ARGUMENT` on a `place` key the other body reads, or the other form of `at=`
+/// (`spec/components-editing-sites` "A `def` placed in a body").
+fn unread_place_key(
+    member: &Member,
+    body: BodyKind,
+    key: &str,
+    span: &crate::error::Span,
+) -> Option<Diagnostic> {
+    if !matches!(member.role, MemberRole::Place) {
+        return None;
+    }
+    let at = member.written("at").map(|at| &at.value.kind);
+    let (primary, note) = match (body, key) {
+        (BodyKind::Geometry, "theme") => (
+            "`theme=` is a key of a site's `place`, and nothing reads it on a `place` in a body",
+            "the def is built with the theme of the body it stands in — remove the argument",
+        ),
+        (BodyKind::Geometry, "east_of" | "north_of" | "gap") => (
+            "is a key of a site's `place`, and nothing reads it on a `place` in a body",
+            "a def placed in a body stands where its `at=` says, by a wall as `at=inside.<side>` \
+             or at a cell as `at=X,Y,Z` — remove the argument",
+        ),
+        (BodyKind::Geometry, "facing") if matches!(at, Some(ValueKind::DotRef(_))) => (
+            "`facing=` is read on a `place` at a coordinate triple, and this one stands by a wall",
+            "a def placed by a wall faces away from it; to turn it another way, stand it at a \
+             cell with `at=X,Y,Z facing=...`",
+        ),
+        (BodyKind::Geometry, "offset" | "y") if matches!(at, Some(ValueKind::Coord { .. })) => (
+            "is read on a `place` by a wall, and this one stands at a coordinate triple",
+            "the triple names the cell it stands at, its row included — remove the argument",
+        ),
+        (BodyKind::Site, "offset" | "y" | "facing") => (
+            "is a key of a `place` in a body, and nothing reads it on a site's `place`",
+            "a site's `place` stands where its `at=`, `east_of=` or `north_of=` puts it, facing \
+             as its def is written — remove the argument",
+        ),
+        _ => return None,
+    };
+    let primary = if primary.starts_with('`') {
+        format!("{primary}; the value was ignored")
+    } else {
+        format!("`{key}=` {primary}; the value was ignored")
+    };
+    Some(Diagnostic {
+        code: DiagnosticCode::IgnoredArgument,
+        span: span.clone(),
+        primary,
+        notes: vec![DiagnosticNote {
+            span: None,
+            message: note.to_owned(),
+        }],
+        data: None,
+    })
 }
 
 /// A key on the right of a theme selector's arrow that `role`'s keyword lays no part for

@@ -543,9 +543,11 @@ impl MemberRole {
             Self::RawBlock => &["mat", "at", "nbt", "origin"],
             Self::RawFill => &["mat", "from", "to", "origin"],
             Self::RawRepeat => &["count", "step"],
-            // `spec/components-editing-sites` "Origin selectors" and "Cross-scope references"
-            // fix this set.
-            Self::Place => &["use", "theme", "at", "east_of", "north_of", "gap"],
+            // `spec/components-editing-sites` "Origin selectors", "Cross-scope references" and
+            // "A `def` placed in a body" fix this set.
+            Self::Place => &[
+                "use", "theme", "at", "east_of", "north_of", "gap", "offset", "y", "facing",
+            ],
             Self::Connect => &["path"],
             Self::Other(_) => return None,
         })

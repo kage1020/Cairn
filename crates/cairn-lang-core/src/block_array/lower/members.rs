@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{BindingKey, Member, MemberRole, ValueWithSpan};
+use crate::intent::{BindingKey, DefIr, Member, MemberRole, ValueWithSpan};
 use crate::resolve::{ScopeResolution, form_word, member_form};
 
 use crate::block_array::args::{
@@ -31,6 +31,8 @@ use super::written::Written;
 pub(super) struct StructCtx<'a> {
     pub(super) scope: Option<&'a ScopeResolution>,
     pub(super) registry: Option<&'a dyn TargetRegistry>,
+    /// The file's defs, which a `place` line builds ahead of the furniture library's.
+    pub(super) defs: &'a [DefIr],
     pub(super) theme_missing: bool,
     pub(super) dims: Dims,
     pub(super) overhang: u32,
@@ -195,12 +197,11 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
-        | MemberRole::RedstoneDust => MemberDisposition::Paints(Phase::Fixtures),
+        | MemberRole::RedstoneDust
+        | MemberRole::Place => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::RawBlock | MemberRole::RawFill => MemberDisposition::Paints(Phase::Raw),
         MemberRole::Circuit => MemberDisposition::Reserves,
-        MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
-            MemberDisposition::NotLowered
-        }
+        MemberRole::Connect | MemberRole::Other(_) => MemberDisposition::NotLowered,
         MemberRole::Level | MemberRole::RawRepeat => unreachable!(
             "`{}` members must be flattened before phase-bucketing (see `flatten_members`)",
             member.role.keyword(),

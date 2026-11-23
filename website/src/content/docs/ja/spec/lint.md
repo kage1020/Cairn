@@ -50,7 +50,7 @@ title: "11. Lint と制約検証"
 | `W_INVALID_CAIRN_VERSION` | `@cairn` の値が `YYYY.M[.PATCH]` 形式の言語バージョンになっていない ([§5.3](/ja/spec/syntax/#53-ヘッダ))。 |
 | `W_FUTURE_CAIRN_VERSION` | `@cairn` の値が、読んでいるコンパイラより新しい言語バージョンを指している。 |
 
-`E_MISPLACED_MEMBER` は、`struct` / `def` の中の `place` / `connect` や、`site` の行に混ざったジオメトリのキーワードで発生します。問題の行で 1 回だけ報告し、その下にインデントされたものも一緒に落とします。
+`E_MISPLACED_MEMBER` は、`struct` / `def` の中の `connect` や、`site` の行に混ざったジオメトリのキーワードで発生します。`place` はどちらの本体でも読むので、これにはなりません ([コンポーネント・編集・複数建築 §9.1.1](/ja/spec/components-editing-sites/#911-本体に置く-def))。問題の行で 1 回だけ報告し、その下にインデントされたものも一緒に落とします。
 
 `level` の直下、またはその中に入れ子になった `level` の下にある `circuit` 行でも発生します。確保はスコープ全体に及ぶので、配置配線 (place-and-route) が `circuit` 行を読むのは `struct` / `def` 自身のメンバーの中だけです ([§14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。`level` の下の行は何も確保しません。`E_DUPLICATE_CIRCUIT` が数えるのは本体自身のメンバーだけなので、その行を重ねて報告することはありません。別の `level` の中の `level` のように何もまとめない `level` は、`E_UNSUPPORTED_NESTING` にもなります。こちらはメンバーが失うブロックについての指摘で、`circuit` 行はブロックを書かないからです。
 
@@ -96,7 +96,7 @@ title: "11. Lint と制約検証"
 | `E_UNKNOWN_SLOT_TARGET` | `slot NAME -> VALUE` の値が正規トークンでも抽象マテリアルトークンでも `hologram` を組み上げるメンバーの形でもないか、`theme` のセレクタ行でそのキーワードが割り当てるキーの値 ([マテリアルとテーマ](/ja/spec/materials-themes/#セレクタのバインディング)) が正規トークンでも抽象マテリアルトークンでもない ([マテリアルとテーマ](/ja/spec/materials-themes/))。 |
 | `E_THEME_SELECTOR_UNMATCHED` | `theme` のセレクタ行が、そのテーマを割り当てたスコープのどのメンバーにもマッチしない。どのスコープにも割り当てられていないテーマは検査しない。 |
 | `E_THEME_VARIANT_MISSING` | 固定したエディションに対して、テーマのエディション別バリアントを 1 つも割り当てられない。 |
-| `E_INCOMPLETE_PLACE` | `place` 行に `id=` / `use=` / `theme=` のいずれかがない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
+| `E_INCOMPLETE_PLACE` | `site` の `place` 行に `id=` / `use=` / `theme=` のいずれかがない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_UNKNOWN_ABSTRACT_TOKEN` | `mat_slot=`、または `theme` のセレクタ行でそのキーワードが割り当てるキーの値が、渡されたパックのカタログに宣言されていない抽象マテリアルトークンに解決される ([マテリアルとテーマ](/ja/spec/materials-themes/))。または struct の回路が、カタログに宣言されていない回路のトークンで組み上がる ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。 |
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じく抽象マテリアルトークンだが、カタログがまったく渡されておらず、照合できない。 |
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。固定したターゲットのパックがそのブロックのステートを記録しておらず、照らし合わせる先がない ([バージョンとエディション](/ja/spec/versioning-editions/#ステートはターゲットでのブロックのステートと照らし合わせる))。 |
@@ -140,7 +140,7 @@ title: "11. Lint と制約検証"
 
 メンバーがどう作られるかは警告に示されます。`floor` はセルを空気のまま残し、`fill` は箱のどのセルも塗らず、`roof`、軒の `stair`、`beam`、`column`、`arch`、`door`、`pressure_plate`、`button`、`chest`、`trapdoor`、`sign`、`bed` は既定のブロックで作られます。`walls` は建たず、段も占めないので、そこを切り抜く `door` や `window`、その上に渡す `beam` は外されます。`window` は切り抜かれないので壁が残り、そのポートも一緒に拒否されます ([§9.3.5](/ja/spec/components-editing-sites/#935-ポートと-connect))。
 
-`W_NO_THEME_BOUND` は、1 段上で起きる同じ形の問題です。どのテーマにも解決されない `mat_slot=` には読むスロット表がないので、メンバーは同じように欠けた形で作られます。テーマがなければ `walls` は 1 つも建たず、段も占めないので、`door` も `window` も切り抜かれず、`beam` も渡されず、構造物は要求より低くなります。`floor` はセルを空気のまま残し、`mat_slot=` を書いた `fill` は箱のどのセルも塗らず、`roof` はそれでも既定のブロックで作られます。軒の `stair`、`column`、`arch`、`pressure_plate`、`button`、`chest`、`trapdoor`、`sign`、`bed` も、低くなった構造物に収まれば既定のブロックで作られます。ほかのセンサーとアクチュエーター、`note_block`、`raw_block`、`raw_fill` はテーマを必要とせず、低くなった構造物に収まる位置なら作られます。どれも、それより高い位置のものは見送られます。判定はスコープごとに行います。テーマが割り当てられておらず、`mat_slot=` も読まないスコープは、モジュールのほかの部分が何を読んでいても報告しません。`level` に書いたものなど、`mat_slot=` を読まないキーワードに書かれた `mat_slot=` は、読んだことになりません。この警告では、`level` が落としたメンバー ([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出)) の `mat_slot=` も読んだことになりません。そのメンバーは、テーマが何であれ何も塗らないからです。`y=0` より上の `floor` や `roof`、本体が `E_UNSUPPORTED_NESTING` になる `level` のメンバーがこれにあたります。
+`W_NO_THEME_BOUND` は、1 段上で起きる同じ形の問題です。どのテーマにも解決されない `mat_slot=` には読むスロット表がないので、メンバーは同じように欠けた形で作られます。テーマがなければ `walls` は 1 つも建たず、段も占めないので、`door` も `window` も切り抜かれず、`beam` も渡されず、構造物は要求より低くなります。`floor` はセルを空気のまま残し、`mat_slot=` を書いた `fill` は箱のどのセルも塗らず、`roof` はそれでも既定のブロックで作られます。軒の `stair`、`column`、`arch`、`pressure_plate`、`button`、`chest`、`trapdoor`、`sign`、`bed` も、低くなった構造物に収まれば既定のブロックで作られます。ほかのセンサーとアクチュエーター、`note_block`、`raw_block`、`raw_fill` はテーマを必要とせず、低くなった構造物に収まる位置なら作られます。`place` は、ファイルの `def` を何も組み立てず、家具ライブラリの `def` はライブラリのテーマで組み立てます ([コンポーネント・編集・複数建築 §9.1.2](/ja/spec/components-editing-sites/#912-家具ライブラリ))。どれも、それより高い位置のものは見送られます。判定はスコープごとに行います。テーマが割り当てられておらず、`mat_slot=` も読まないスコープは、モジュールのほかの部分が何を読んでいても報告しません。ファイルの `def` を名指す `place` は、その `def` のスロットを読みます。`level` に書いたものなど、`mat_slot=` を読まないキーワードに書かれた `mat_slot=` は、読んだことになりません。この警告では、`level` が落としたメンバー ([コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出)) の `mat_slot=` も読んだことになりません。そのメンバーは、テーマが何であれ何も塗らないからです。`y=0` より上の `floor` や `roof`、本体が `E_UNSUPPORTED_NESTING` になる `level` のメンバーがこれにあたります。
 
 `@intended_targets` の 3 つのコードは、ファイルが表明した意図を、そのファイル自身の下限と照らし合わせます ([バージョンとエディション §10.4](/ja/spec/versioning-editions/#ヒントは下限と突き合わせる))。そのエディションでビルドできないバージョンは `W_INTENDED_TARGET_UNSUPPORTED` で、下限とは照らし合わせません。作者がまず対処すべきなのは「そのターゲットはここには存在しない」という事実で、その隣に cap を並べると、ビルドを止めているわけではない行を直させることになるからです。残り、つまりそのエディションで *ビルドできる* バージョンだけを数えます。そのすべてが下限を下回れば `E_INTENDED_TARGET_CAP` です。ファイルは自分が対象だと言っているどのバージョン向けにもビルドできず、そのいずれかを `cairn compile --target` に渡した時点で `E_VERSION_CAP` になります。*一部* だけなら `W_INTENDED_TARGET_CAP` です。このヘッダはヒントで ([§5.3](/ja/spec/syntax/#53-ヘッダ))、下限より上のバージョンは問題なくビルドできるからです。そもそもビルドできないバージョンは、どちらの数にも入れません。リストのどの部分の答えにもならず、数に入れると、何もビルドできないファイルを「半分だけの問題」として報告することになるからです。1 つのヘッダに cap のコードと unsupported のコードが同時に付くこともあります。挙げたバージョンが、同じ理由で誤っているとは限らないからです。
 
@@ -162,17 +162,17 @@ title: "11. Lint と制約検証"
 
 | コード | 意味 |
 |---|---|
-| `E_INVALID_PLACE_ID` | `place id=` が空である。`.` / `:` / `/` / `\` / `*` / `\|` / `?` / `<` / `>` / `"` / 空白 / 制御文字を含む。または、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
+| `E_INVALID_PLACE_ID` | `site` の `place id=` が空である。`.` / `:` / `/` / `\` / `*` / `\|` / `?` / `<` / `>` / `"` / 空白 / 制御文字を含む。または、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
 | `E_INVALID_STRUCT_NAME` | `struct` の名前が、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
 | `E_INVALID_SITE_NAME` | `site` の名前が、大文字小文字を問わず Windows が予約しているデバイス名 (`CON`、`NUL`、`COM1` など) である。 |
 | `E_DUPLICATE_PLACE_ID` | 同じ site の 2 つの `place` 行が同じ `id=` を持っている。 |
 | `E_OUTPUT_NAME_COLLISION` | ビルドが書き出すはずの 2 つの成果物が、大文字小文字を無視すると同じファイル名になる。同じ名前の `struct` と `place`、2 つの site に置かれた同じ `id=`、平坦化すると同じ名前になる 2 本の通路などで起きる。 |
-| `E_INVALID_PLACE_ORIGIN` | `place` に原点セレクタがない、または 2 つ以上ある。`origin` 以外の `at=` を持っている。または `east_of=` / `north_of=` の値がラベルではない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
+| `E_INVALID_PLACE_ORIGIN` | `site` の `place` に原点セレクタがない、または 2 つ以上ある。`origin` 以外の `at=` を持っている。または `east_of=` / `north_of=` の値がラベルではない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_PLACEMENT_OVERLAP` | 1 つの site の 2 つの `place` 行が、セルを共有する箱に解決される。または、`connect` 行の通路が、結ばない配置の箱の中にセルを敷く ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))。 |
-| `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を指している。 |
+| `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を指している。本体の `place use=` は家具ライブラリの def も指せる ([§9.1.2](/ja/spec/components-editing-sites/#912-家具ライブラリ))。 |
 | `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを指している。 |
 | `W_DEFERRED_PLACE` | `east_of=` / `north_of=` が id を理由に拒否された `place` を指しているので、指している側の行も配置されない。 |
-| `W_UNUSED_DEF` | どの `place use=` からも参照されていない `def`。 |
+| `W_UNUSED_DEF` | `site` でも本体でも、どの `place use=` からも参照されていない `def`。 |
 
 `E_INVALID_PLACE_ID` は好みの問題ではなく、読み戻せるかどうかの問題です。スコープキー `site::SITE::PLACE` と、そこから読み戻すすべての通路のキーは、`.` と `:` を区切りにして組み立てるので、これらを含む id は読み戻せません。id は出力ディレクトリに書くファイルの名前でもあり、`/` や `\` はその名前をパスに変えてしまいます。区切りを含む相対的な id はサブディレクトリに書き込まれ、絶対パスの id は出力ディレクトリそのものを置き換えます。`*` / `|` / `?` / `<` / `>` / `"` と U+0000 から U+001F の制御文字は Windows のファイル名に使えないので、これらを含む id は Linux ではビルドできても Windows では書き出せません。Microsoft の命名規則は、後ろにどんな拡張子が付いても、一連のデバイス名も予約しています。`CON`、`PRN`、`AUX`、`NUL`、`COM0` から `COM9`、`LPT0` から `LPT9`、そして上付き数字を数字とみなす `COM¹`、`COM²`、`COM³`、`LPT¹`、`LPT²`、`LPT³` で、いずれも大文字小文字を問いません。この規則を適用する Windows のリリースは、`CON.nbt` をファイルではなくコンソールとして開きます。どちらもすべてのプラットフォームで拒否するので、id が受け付けられるかどうかは検査するホストに左右されません。残りの制御文字 U+007F から U+009F は Windows のファイル名に使えますが、別の理由で拒否します。何も表示されないか端末のカーソルを動かしてしまうので、id を引用する指摘がその文字を表示できないからです。`id=` は文字列リテラルを受け付けるので、この検査がなければ、これらの値はそのまま通ってしまいます。
 

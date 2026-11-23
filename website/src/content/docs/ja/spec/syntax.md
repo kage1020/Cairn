@@ -115,7 +115,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 
 `y=N` がまとめられた各メンバーにとって何を意味するかは、[コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出) で定めています。
 
-**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`beam`、`column`、`arch`、`level`、`pressure_plate`、`lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser`、`chest`、`trapdoor`、`note_block`、`sign`、`bed`、`painting`、`item_frame`、`armor_stand`、`villager`、`trade`、`text_display`、`block_display`、`item_display`、`hologram`、`spawn`、`repeater`、`comparator`、`redstone_torch`、`redstone_dust`、`circuit`、`raw_block`、`raw_fill`、`raw_repeat`)。`site` の本体は配置を記述します (`place`、`connect`)。キーワードの表はグローバルなので、一方のキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
+**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`beam`、`column`、`arch`、`level`、`pressure_plate`、`lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser`、`chest`、`trapdoor`、`note_block`、`sign`、`bed`、`painting`、`item_frame`、`armor_stand`、`villager`、`trade`、`text_display`、`block_display`、`item_display`、`hologram`、`spawn`、`repeater`、`comparator`、`redstone_torch`、`redstone_dust`、`circuit`、`raw_block`、`raw_fill`、`raw_repeat`、`place`)。`site` の本体は配置を記述します (`place`、`connect`)。`place` はどちらでも読み、`struct` / `def` の本体ではその中に `def` を組み立てます ([コンポーネント・編集・複数建築 §9.1.1](/ja/spec/components-editing-sites/#911-本体に置く-def))。キーワードの表はグローバルなので、ほかのキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
 
 `logic` と `assert` の行はメンバーではないので、この規則は適用されません。`logic` の行は、どちらの本体にあってもレッドストーンの合成が読みます。`assert` の行については、それ自身の形と、名指す信号を検査します。真理値表は `cairn check` が検査し ([リテラルと区切り](#511-リテラルと区切り))、名指す信号はレッドストーンの合成が解決します (`E_LOGIC_UNBOUND_SIGNAL`)。レイテンシの上限は敷いた回路に沿って数え、`truth` と `always` はその回路を動かして検査します ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。
 
@@ -223,7 +223,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 **トップレベル項目。**
 
 - **`struct`。** 1 つの建物です。行で宣言した `size=WxH` のフットプリントの上に、本体から組み上げます。[コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出) を参照してください。
-- **`def`。** スロットを持つ再利用できる建物で、`site` の `place` 行が配置します。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
+- **`def`。** スロットを持つ再利用できる建物か、その部品で、`site` の `place` 行が配置し、本体の `place` 行がその中に組み立てます。[コンポーネント・編集・複数建築 §9.1](/ja/spec/components-editing-sites/#91-コンポーネントを定義する-def) を参照してください。
 - **`theme`。** スロット名ごとにマテリアルトークンを割り当て、セレクタ行で、選んだ各メンバーの部位のブロックを割り当てます。[マテリアルとテーマ §7.1](/ja/spec/materials-themes/#71-依存性注入としてのスロット) を参照してください。
 - **`site`。** 複数の `def` を並べて配置し、その間に通路を敷きます。[コンポーネント・編集・複数建築 §9.3](/ja/spec/components-editing-sites/#93-site-による複数建築) を参照してください。
 
@@ -474,12 +474,15 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 - **`raw_repeat`。** その下の `raw_block` と `raw_fill` の行を、一定の間隔でずらして繰り返し書きます。[マテリアルとテーマ §7.4](/ja/spec/materials-themes/#74-生のブロック) を参照してください。
   - **`count=`。** 書くコピーの数で、正の整数です。
   - **`step=`。** 各コピーが 1 つ前のコピーからどれだけ離れるかで、座標の組です。
-- **`place`。** `site` の中に `def` を配置します。[コンポーネント・編集・複数建築 §9.3.2](/ja/spec/components-editing-sites/#932-原点セレクタ) を参照してください。
-  - **`use=`。** 配置する `def` です。
-  - **`theme=`。** その `def` を組み上げるテーマです。
-  - **`at=`。** `origin` で、ワールドの `(0, 0, 0)` に固定します。
-  - **`east_of=`。** 自分が東隣に立つ、先に宣言した配置です。
-  - **`north_of=`。** 自分が北隣に立つ、先に宣言した配置です。
-  - **`gap=`。** 隣に立つ配置との間に空けるセルの数です。
+- **`place`。** `site` の中に `def` を配置するか、`struct` か `def` の本体の中に `def` を組み立てます。[コンポーネント・編集・複数建築 §9.3.2](/ja/spec/components-editing-sites/#932-原点セレクタ) と [§9.1.1](/ja/spec/components-editing-sites/#911-本体に置く-def) を参照してください。
+  - **`use=`。** 配置する `def` です。本体ではファイルの `def` か家具ライブラリの `def` です。
+  - **`theme=`。** `site` で、その `def` を組み上げるテーマです。
+  - **`at=`。** `site` では `origin` で、ワールドの `(0, 0, 0)` に固定します。本体では壁の面 `inside.<side>` か座標の三つ組です。
+  - **`east_of=`。** `site` で、自分が東隣に立つ、先に宣言した配置です。
+  - **`north_of=`。** `site` で、自分が北隣に立つ、先に宣言した配置です。
+  - **`gap=`。** `site` で、隣に立つ配置との間に空けるセルの数です。
+  - **`offset=`。** 壁際で、背面の列が始まる壁の列です。
+  - **`y=`。** 壁際で、最も低いセルが立つ段です。
+  - **`facing=`。** 座標の三つ組で、正面が向く方角です。`south` の代わりに書きます。
 - **`connect`。** 2 つのポートを結ぶ通路で、`FROM.PORT to TO.PORT` と書きます。[コンポーネント・編集・複数建築 §9.3.5](/ja/spec/components-editing-sites/#935-ポートと-connect) を参照してください。
   - **`path=`。** 通路を敷くマテリアルトークンです。

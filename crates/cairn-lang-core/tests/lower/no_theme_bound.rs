@@ -97,7 +97,8 @@ fn a_themeless_scope_is_told_how_each_role_degrades() {
              `column`, `arch`, `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed` \
              that still fits the shorter structure; any other sensor or actuator, a \
              `note_block`, a `raw_block` and a `raw_fill` need no theme and are built where the \
-             shorter structure still holds them",
+             shorter structure still holds them; a `place` builds nothing of a `def` of the \
+             file, and a def of the furniture library from the library's theme",
             "a scope binds a theme when the module declares exactly one logical theme, or the \
              `place` names one with `theme=`; under a `--edition` pin that theme must also have \
              a variant for that edition",

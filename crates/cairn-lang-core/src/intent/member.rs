@@ -192,10 +192,11 @@ impl MemberRole {
                 | Self::Circuit
                 | Self::RawBlock
                 | Self::RawFill
-                | Self::RawRepeat,
+                | Self::RawRepeat
+                | Self::Place,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
-            (BodyKind::Geometry, Self::Place | Self::Connect)
+            (BodyKind::Geometry, Self::Connect)
             | (
                 BodyKind::Site,
                 Self::Floor

@@ -17,6 +17,7 @@ mod member_scope;
 mod missing_material;
 mod nesting;
 mod output_name_collision;
+mod place_keys;
 mod positional;
 mod requires;
 mod truth_table;

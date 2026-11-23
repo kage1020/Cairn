@@ -98,6 +98,11 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   parameterization allowed, though until a mechanism for it is specified the header takes only
   `size=`. The minimum version of a composite is the max of its parts. See
   [components-editing-sites §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
+- **Furniture library.** The `def`s the compiler ships for furnishing a room, such as `table`,
+  `chair` and `fireplace`, with a theme of their own that builds any slot the body's theme leaves
+  unbound. A body's `place use=table` builds one inside it, turned to face away from the wall it
+  stands by. See
+  [components-editing-sites §9.1.2](/spec/components-editing-sites/#912-the-furniture-library).
 - **`site`.** A multi-building container that places `def`-derived structures by topological
   relations (`east_of`, `gap=`, `connect`), not absolute coordinates. See
   [components-editing-sites §9.3](/spec/components-editing-sites/#93-multi-building-with-site).

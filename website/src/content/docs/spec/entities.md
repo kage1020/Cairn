@@ -311,6 +311,7 @@ under the base plane raises them with the struct ([Redstone
 | `painting` | its bottom-left cell | every cell it covers | the face it hangs on |
 | `fill`, `raw_fill` | the low corner of its box | the box `from=` and `to=` span | none |
 | `column`, `arch` | the low corner of its first copy | the box from its first copy to its last | none |
+| `place` in a body | the low corner of its turned footprint, on its lowest row | the box around every cell its def's `fill` lines name, turned | the face of its wall it stands by, none at a coordinate triple |
 | `circuit` | the low corner of its box | every layer it reserves | none |
 
 A window's rectangles are each one a `repeat=` series stamps and, with `sym=true`, the mirror, so a

@@ -24,6 +24,7 @@ mod edition_guard;
 mod entities;
 mod entity_constraints;
 mod fill;
+mod furniture;
 mod intent;
 mod l_walkway;
 mod level_ports;

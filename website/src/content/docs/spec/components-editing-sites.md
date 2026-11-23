@@ -25,6 +25,149 @@ def cottage size=9x7:
   roof   id=roof  kind=gable mat_slot=roof
 ```
 
+### 9.1.1 A `def` placed in a body
+
+A `place` line in a `struct` or `def` body builds a `def` inside that body, as one piece of it: a
+table on the floor, a hearth against a wall. Its `use=` names the `def`, its `at=` says where it
+stands, and the theme of the body builds its slots.
+
+```
+struct tavern size=13x9
+  floor id=base  mat_slot=floor
+  walls id=shell mat_slot=wall height=5
+  place use=fireplace at=inside.right offset=3 y=1
+  place use=table     at=3,1,5
+  place use=chair     at=2,1,5 facing=east
+  place use=chair     at=4,1,5 facing=west
+```
+
+**What it builds.** A `def` placed in a body is built from its `fill` lines that write a
+`mat_slot=`, each box measured from the low corner of the def's `size=` footprint, as on any `def`
+body. Such a def holds nothing else. One with no `size=`, or with a member line of any other kind, a
+water `fill` among them, is `E_INVALID_MEMBER` on the `place` line, which names the first line it
+cannot build, and nothing is built there. So a def placed in a body places none itself, and nesting
+stays one deep ([Syntax §5.2](/spec/syntax/#52-nesting)). It is a member of the body it stands in,
+not a placement: it writes no structure file, the lockfile records no placement for it, and it
+exposes no port.
+
+**Which way it faces.** A def is written facing `front`, `+z`, and a body turns it about the
+vertical axis by whole quarter turns. Its cells turn with it, and so does each block it builds: a
+horizontal `facing`, an `axis` of `x` or `z`, a `rotation`, a `north`, `east`, `south` or `west`
+that the block's state writes, and the compass part of a rail's `shape`, each as the game turns the
+blocks of a structure placed turned. The connection states of [Blockstate
+Model](/spec/blockstate/#connections) are derived once the body is painted, from the blocks beside
+each cell in the body.
+
+**Where it stands.** `at=` takes one of two forms:
+
+- `at=inside.<side>` stands it against the inside face of that wall, turned so its front looks away
+  from the wall: as written by the `back` wall, a half turn by `front`, and a quarter turn by `left`
+  or `right`. For a `size=WxH` def, its back row takes the cells a `chest` with the same `at=` and
+  `y=` takes at `offset=` and at the `W − 1` columns after it, toward the wall's right end seen from
+  outside, and its `H` rows reach that far into the struct, each cell strictly inside the wall ring.
+  `y=` is the row its lowest cells stand in, counted from the base row of the struct or of its
+  `level`, and `offset=` and `y=` are `0` when absent.
+- `at=X,Y,Z` stands it with the low corner of its turned footprint at that cell, its lowest cells
+  in row `Y`. `facing=` is the compass word its front looks toward, `south` when absent: `south` is
+  `+z`, as the def is written, and `west`, `north` or `east` turns it to look that way.
+
+**Its materials.** Its slots are resolved against the theme of the body it stands in, as the body's
+own members' are ([Materials and Themes
+§7.1](/spec/materials-themes/#71-slots-as-dependency-injection)), once for each `place` line. A def
+of the furniture library resolves a slot that theme does not bind against the library's own theme
+instead ([§9.1.2](#912-the-furniture-library)). A def of the file in a body with no theme bound
+builds none of its cells, and the body draws `W_NO_THEME_BOUND` ([Lint
+§11.3](/spec/lint/#113-error-vs-warning)).
+
+**How it is painted.** It paints in the `fixtures` phase ([Compilation Model
+§4.1](/spec/compilation/#41-phase-evaluation)), over what the phases before it leave, so a table
+set on the floor row replaces floor and a hearth set into a wall replaces wall. Its `place` line
+owns every cell it paints, and two lines of that phase contesting a cell are resolved as
+[Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette) resolves
+them.
+
+**Its line.** In a body, `id=` is optional, and `theme=`, `east_of=`, `north_of=` and `gap=` are a
+site's keys, which nothing reads there: each is `W_IGNORED_ARGUMENT` ([Lint
+§11.3](/spec/lint/#113-error-vs-warning)). So are `offset=` and `y=` beside a coordinate `at=`,
+`facing=` beside a wall's, and `offset=`, `y=` and `facing=` on a `site`'s rows. A line with no
+`use=` or no `at=`, an `at=` of neither form, an `offset=` or `y=` that is not a non-negative
+integer, a `facing=` that is not a compass word, and a def whose cells leave the wall ring or the
+struct's footprint, or reach above every row the struct as written reaches, are each
+`E_INVALID_MEMBER`, and the def is not built there. A def that reaches a row the struct is built
+short of, because a `walls` or `roof` builds nothing, is `W_DEFERRED_MEMBER`, as a `fill` in those
+rows is. A `use=` that names no `def` of the file and none of the library's is
+`E_UNRESOLVED_PLACE_REF`, with the nearest name among both. A `def` that a body's `place` names is
+used, so it draws no `W_UNUSED_DEF`.
+
+### 9.1.2 The furniture library
+
+The compiler ships a library of `def`s for furnishing a room. A body's `place use=NAME` that names
+no `def` of the file names the library's, so a file that declares a `def` of the same name builds
+its own. A `site`'s `use=` names the file's defs alone.
+
+The library is the source below. Its theme binds every slot its defs read, so a body whose theme
+binds none of them still builds each piece. A theme of the file that binds one of those slots builds
+that piece from it instead, so `slot chair -> @spruce_stairs` makes every chair spruce. The
+library's theme is not one of the file's: `theme=` cannot name it, and a file may declare a theme
+of the same name.
+
+```
+theme furniture:
+  slot table_leg      -> @oak_fence
+  slot table_top      -> @oak_pressure_plate
+  slot chair          -> @oak_stairs[facing=north]
+  slot hearth         -> @bricks
+  slot fire           -> @campfire
+  slot shelf          -> @bookshelf
+  slot crafting_table -> @crafting_table
+  slot furnace        -> @furnace[facing=south]
+  slot barrel         -> @barrel[facing=up]
+  slot lectern        -> @lectern[facing=south]
+  slot torch          -> @wall_torch[facing=south]
+  slot lantern        -> @lantern[hanging=true]
+
+def table size=1x1:
+  fill id=leg mat_slot=table_leg from=0,0,0 to=0,0,0
+  fill id=top mat_slot=table_top from=0,1,0 to=0,1,0
+
+def chair size=1x1:
+  fill id=seat mat_slot=chair from=0,0,0 to=0,0,0
+
+def fireplace size=3x1:
+  fill id=left   mat_slot=hearth from=0,0,0 to=0,2,0
+  fill id=right  mat_slot=hearth from=2,0,0 to=2,2,0
+  fill id=mantel mat_slot=hearth from=1,2,0 to=1,2,0
+  fill id=fire   mat_slot=fire   from=1,0,0 to=1,0,0
+
+def bookcase size=1x1:
+  fill id=shelves mat_slot=shelf from=0,0,0 to=0,2,0
+
+def crafting_table size=1x1:
+  fill id=bench mat_slot=crafting_table from=0,0,0 to=0,0,0
+
+def furnace size=1x1:
+  fill id=oven mat_slot=furnace from=0,0,0 to=0,0,0
+
+def barrel size=1x1:
+  fill id=cask mat_slot=barrel from=0,0,0 to=0,0,0
+
+def lectern size=1x1:
+  fill id=stand mat_slot=lectern from=0,0,0 to=0,0,0
+
+def wall_torch size=1x1:
+  fill id=flame mat_slot=torch from=0,0,0 to=0,0,0
+
+def lantern size=1x1:
+  fill id=light mat_slot=lantern from=0,0,0 to=0,0,0
+```
+
+Each def is written with its front toward `+z` and its back toward `-z`, so a `chair`'s stair has
+its back to the def's back, a `furnace` or `lectern` opens toward its front, and a `wall_torch`
+hangs on the block behind it. By a wall, its back is the wall: a `place use=wall_torch
+at=inside.left offset=3 y=3` hangs a torch on the left wall, and a `place use=chair
+at=inside.back offset=2 y=1` sets a chair with its back to the back wall. A `lantern` hangs from
+the block above it.
+
 ## 9.2 Editing model
 
 Important members carry `id=`. Every member of a `struct` or `def` body also gets a **meaning-based

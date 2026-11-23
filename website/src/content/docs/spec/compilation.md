@@ -12,7 +12,8 @@ massing     floor / walls / fill / column
 envelope    roof / stair / beam
 openings    door / window / arch
 fixtures    sign / bed / chest / trapdoor / note_block / sensors / actuators / Tier 0 parts /
-            painting / item_frame / armor_stand / villager / trade / displays / hologram / spawn
+            painting / item_frame / armor_stand / villager / trade / displays / hologram / spawn /
+            place in a body
 fluids      fill fluid= / water
 logic_synth redstone: Logic IR → Netlist IR (and Edition Cell selection)
 logic_place pads, risers and cells laid under the floor → Placement IR
@@ -30,12 +31,13 @@ opening is cut.
 Not every row runs today. `water` is not a keyword yet and is refused as `E_UNKNOWN_KEYWORD`, so the
 phases that paint are `massing`, `envelope`, `openings`, `fixtures` (whose members are `sign`,
 `bed`, `chest`, `trapdoor`, `note_block`, every sensor and actuator but `door`, the Tier 0 parts
-([Redstone §14.1](/spec/redstone/#tier-0-parts)) and the entities ([Entities
-§8.1](/spec/entities/#81-two-tiers))), `fluids` and `raw` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)). The three `logic_*` phases lay each struct's circuit
-in the layers its `circuit` line reserves under the base plane, where no other phase paints, so they
-read the struct as every other phase leaves it, `raw` included, and contest no voxel with any of
-them.
+([Redstone §14.1](/spec/redstone/#tier-0-parts)), the entities ([Entities
+§8.1](/spec/entities/#81-two-tiers)) and a `def` placed in a body ([Components, Editing, and
+Multi-building §9.1.1](/spec/components-editing-sites/#911-a-def-placed-in-a-body))), `fluids` and
+`raw` ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). The three `logic_*`
+phases lay each struct's circuit in the layers its `circuit` line reserves under the base plane,
+where no other phase paints, so they read the struct as every other phase leaves it, `raw` included,
+and contest no voxel with any of them.
 
 A `window` written after `roof` is still cut as an opening in the wall. Source order never decides
 what a member means. Nor does it decide what the artifact is
