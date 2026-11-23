@@ -115,7 +115,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 
 `y=N` がまとめられた各メンバーにとって何を意味するかは、[コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出) で定めています。
 
-**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`beam`、`level`、`pressure_plate`、`lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser`、`chest`、`trapdoor`、`note_block`、`sign`、`bed`、`painting`、`item_frame`、`armor_stand`、`villager`、`trade`、`text_display`、`block_display`、`item_display`、`hologram`、`spawn`、`repeater`、`comparator`、`redstone_torch`、`redstone_dust`、`circuit`、`raw_block`、`raw_fill`、`raw_repeat`)。`site` の本体は配置を記述します (`place`、`connect`)。キーワードの表はグローバルなので、一方のキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
+**本体がどのキーワードを受け付けるか** も、同じ区別に従います。`struct` / `def` の本体は 1 棟の建物の形を記述します (`floor`、`walls`、`fill`、`door`、`window`、`roof`、`stair`、`beam`、`column`、`arch`、`level`、`pressure_plate`、`lever`、`button`、`daylight`、`observer`、`lamp`、`piston`、`dispenser`、`chest`、`trapdoor`、`note_block`、`sign`、`bed`、`painting`、`item_frame`、`armor_stand`、`villager`、`trade`、`text_display`、`block_display`、`item_display`、`hologram`、`spawn`、`repeater`、`comparator`、`redstone_torch`、`redstone_dust`、`circuit`、`raw_block`、`raw_fill`、`raw_repeat`)。`site` の本体は配置を記述します (`place`、`connect`)。キーワードの表はグローバルなので、一方のキーワードをもう一方の本体に書いても、パースも分類も通ってしまい、そのうえでどこにも使われません。これが `E_MISPLACED_MEMBER` で、問題の行で 1 回だけ報告し、その下にインデントした行もまとめて捨てます。`level` は `struct` / `def` の本体のほかのメンバーをまとめますが、スコープ全体にわたって領域を確保する `circuit` 行はまとめません。`level` の下に書いた `circuit` 行もどこにも使われず、その行で `E_MISPLACED_MEMBER` になります ([レッドストーン §14.5](/ja/spec/redstone/#145-配置配線-place-and-route))。
 
 `logic` と `assert` の行はメンバーではないので、この規則は適用されません。`logic` の行は、どちらの本体にあってもレッドストーンの合成が読みます。`assert` の行については、それ自身の形と、名指す信号を検査します。真理値表は `cairn check` が検査し ([リテラルと区切り](#511-リテラルと区切り))、名指す信号はレッドストーンの合成が解決します (`E_LOGIC_UNBOUND_SIGNAL`)。レイテンシの上限は敷いた回路に沿って数え、`truth` と `always` はその回路を動かして検査します ([レッドストーン §14.7](/ja/spec/redstone/#147-検証))。
 
@@ -171,7 +171,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 
 `sym=` には裸の `true` か `false` を書き、`sym=` のない窓は鏡映しません。それ以外の値 (`sym=yes`、`sym="true"`、`sym=1`) は読み取れない値として扱います。窓は鏡映なしで描き、その値は `W_IGNORED_ARGUMENT` として報告します ([Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分))。ただし、`repeat=` が 1 より大きい窓は例外です。連続する窓の鏡映は将来の拡張のために予約しているので、`sym=true` の連続はまだ切り抜かず、`W_DEFERRED_MEMBER` として報告します。読み取れない `sym=` もそこでは `false` とは読まず、その窓も切り抜かずに、`W_IGNORED_ARGUMENT` とあわせて `W_DEFERRED_MEMBER` として報告します。
 
-**アーチ形の窓。** `shape=arch` は、窓が切り抜く各矩形の上端を丸めます。いちばん上の段の両端の 2 セルは壁に残し、切り抜きも埋めもしません。ほかのセルは `shape=rect` と同じく切り抜きます。`shape=` のない窓は `rect` です。`repeat=` の連続と `sym=true` の鏡映も、切り抜く各矩形の上端を丸めます。枠は矩形の周りに敷くので、残した 2 セルは壁のままです ([マテリアルとテーマ](/ja/spec/materials-themes/#セレクタのバインディング))。アーチには、いちばん上の段の両端の間のセルと、その下の段が要ります。そのため、幅が 3 より小さい窓や高さが 2 より小さい窓の `shape=arch` は `E_INVALID_MEMBER` で、`shape=` に書いたほかの識別子も同じです。識別子でない値は `W_IGNORED_ARGUMENT` で、窓は `rect` として切り抜きます。
+**アーチ形の窓。** `shape=arch` は、窓が切り抜く各矩形の上端を丸めます。いちばん上の段の両端の 2 セルは壁に残し、切り抜きも埋めもしません。ほかのセルは `shape=rect` と同じく切り抜きます。`shape=` のない窓は `rect` です。`repeat=` の連続と `sym=true` の鏡映も、切り抜く各矩形の上端を丸めます。枠は矩形の周りに敷くので、残した 2 セルは壁のままです ([マテリアルとテーマ](/ja/spec/materials-themes/#セレクタのバインディング))。アーチには、いちばん上の段の両端の間のセルと、その下の段が要ります。そのため、幅が 3 より小さい窓や高さが 2 より小さい窓の `shape=arch` は `E_INVALID_MEMBER` で、`shape=` に書いたほかの識別子も同じです。`step=` が窓の幅より小さいアーチ形の `repeat=` の連続も、各コピーが 1 つ前のコピーが壁に残した両端を切り抜いてしまうので、`E_INVALID_MEMBER` です。識別子でない値は `W_IGNORED_ARGUMENT` で、窓は `rect` として切り抜きます。
 
 **ドアがどの列に立つか。** ドアを壁のどの列に置くかは、`at=` の名前付きの位置か `offset=N` で決まります。名前付きの位置は次の 3 つです。
 
@@ -286,7 +286,7 @@ tree-sitter の文法は、3 つの点で既知の例外です。1 つ目に、�
 - **`arch`。** 箱を貫いて切り抜く開口で、いちばん上の段の両端に逆さの階段を置きます。[ブロックステート §6.1](/ja/spec/blockstate/#61-既定では導出し上書きで昇格する) を参照してください。
   - **`from=`。** 箱の一方の角で、座標の組です。
   - **`to=`。** 箱の反対側の角で、座標の組です。
-  - **`axis=`。** アーチが渡る軸で、`x` か `z` です。箱の長い辺の代わりに使います。
+  - **`axis=`。** アーチが渡る軸で、`x` か `z` です。箱の `x` と `z` のうち長い辺の代わりに使います。
   - **`repeat=`。** 連続して切り抜くアーチの数で、最初のアーチも数えます。
   - **`step=`。** 各アーチが 1 つ前のアーチからどれだけ離れているかで、座標の組です。
 - **`level`。** 配下のメンバーをまとめ、そのすべてを基準面から `y=` 段上に持ち上げます。[コンパイルモデル §4.7](/ja/spec/compilation/#47-level-によるまとまりと体積の導出) を参照してください。

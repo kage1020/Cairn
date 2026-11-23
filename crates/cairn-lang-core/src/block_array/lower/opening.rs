@@ -422,6 +422,20 @@ pub(super) fn plan_window(
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowPlan::Refused;
     };
+    if arch && repeat > 1 && step < sw {
+        diagnostics.push(diag_invalid_member(
+            member,
+            format!(
+                "window `shape=arch` with `step={step}` and a `size=` {sw} wide cuts each copy \
+                 over the one before"
+            ),
+            vec![format!(
+                "copies of an arched window share no column, or one cuts the ends the other \
+                 leaves to the wall: give `step=` at least {sw}, or drop `shape=arch`"
+            )],
+        ));
+        return WindowPlan::Refused;
+    }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))

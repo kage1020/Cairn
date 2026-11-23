@@ -70,9 +70,9 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   be intent is overridable." See
   [blockstate §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
 - **Anchor / bbox.** Every primitive carries an `anchor` (reference point), a declared bbox, an
-  actual bbox, and a host face in the IR. Primitives like paintings, item frames, and arch windows
-  have a declared size that differs from the occupied AABB, and these four resolve it. Lowering
-  records the four for every member that builds a cell, beside its `resolved_state`. See
+  actual bbox, and a host face in the IR. Primitives like paintings and item frames have a declared
+  size that differs from the occupied AABB, and these four resolve it. Lowering records the four for
+  every member that builds a cell, beside its `resolved_state`. See
   [entities §8.2](/spec/entities/#82-anchor-conventions).
 
 ## Materials and themes

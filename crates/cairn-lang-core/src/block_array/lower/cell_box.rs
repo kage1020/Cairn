@@ -21,6 +21,8 @@ type Corner = (u64, u64, u64);
 pub(super) enum Shape {
     /// A box between two opposite corners, `from=` and `to=`.
     Box,
+    /// The box of an `arch`, between `from=` and `to=` as a [`Shape::Box`]'s.
+    Arch,
     /// The one cell `at=` names.
     Cell,
     /// The cells of a `column`, `height` rows up from the one `at=` names.
@@ -33,7 +35,7 @@ pub(super) enum Shape {
 impl Shape {
     fn keys(self) -> &'static [&'static str] {
         match self {
-            Self::Box => &["from", "to"],
+            Self::Box | Self::Arch => &["from", "to"],
             Self::Cell | Self::Column { .. } => &["at"],
         }
     }
@@ -41,7 +43,7 @@ impl Shape {
     /// How many rows the shape rises above its highest corner.
     fn rise(self) -> u32 {
         match self {
-            Self::Box | Self::Cell => 0,
+            Self::Box | Self::Arch | Self::Cell => 0,
             Self::Column { height } => height.saturating_sub(1),
         }
     }
@@ -49,7 +51,7 @@ impl Shape {
     /// The note on a corner that is missing or not a triple, saying what one is.
     fn corners_note(self) -> &'static str {
         match self {
-            Self::Box => {
+            Self::Box | Self::Arch => {
                 "write `from=` and `to=` as two opposite corners of the box, each a coordinate \
                  triple `x,y,z`, as in `from=1,1,1 to=3,2,3`"
             }
@@ -66,7 +68,7 @@ impl Shape {
 
     fn holds(self) -> &'static str {
         match self {
-            Self::Box => "which cells its box holds",
+            Self::Box | Self::Arch => "which cells its box holds",
             Self::Cell => "which cell its block goes in",
             Self::Column { .. } => "which cell it stands on",
         }
@@ -76,6 +78,7 @@ impl Shape {
     fn built(self) -> &'static str {
         match self {
             Self::Box => "the box is filled",
+            Self::Arch => "the arch is cut",
             Self::Cell => "the block is placed",
             Self::Column { .. } => "the column is stood",
         }
@@ -83,14 +86,14 @@ impl Shape {
 
     fn rows(self) -> &'static str {
         match self {
-            Self::Box | Self::Column { .. } => "these rows",
+            Self::Box | Self::Arch | Self::Column { .. } => "these rows",
             Self::Cell => "this row",
         }
     }
 
     fn lowered(self) -> &'static str {
         match self {
-            Self::Box => "box",
+            Self::Box | Self::Arch => "box",
             Self::Cell => "`at=`",
             Self::Column { .. } => "`at=` or `height=`",
         }
@@ -99,7 +102,7 @@ impl Shape {
     /// Whose components a bounds note names.
     fn bounded(self) -> &'static str {
         match self {
-            Self::Box => "a corner's",
+            Self::Box | Self::Arch => "a corner's",
             Self::Cell | Self::Column { .. } => "the cell's",
         }
     }
@@ -191,8 +194,8 @@ pub(super) fn repeated_cells(
         .expect("a shape names at least one corner");
     let top = Top::of(key, highest, repeat, y_offset, shape.rise());
     let written = &ctx.written;
-    let above_written = top.row >= written.height;
-    if above_written && !written.unplaced_walls && top.row >= written.reach {
+    let above_written = top.row >= u64::from(written.height);
+    if above_written && !written.unplaced_walls && top.row >= u64::from(written.reach) {
         return Err(Box::new(above_the_struct(member, shape, top, ctx)));
     }
     // From here the repair is on another member, so the line only defers.
@@ -205,7 +208,7 @@ pub(super) fn repeated_cells(
             shape.rows(),
             shape.built(),
         ))
-    } else if top.row >= ctx.dims.y {
+    } else if top.row >= u64::from(ctx.dims.y) {
         Some(ctx.shortfall().note(shape.rows(), shape.built()))
     } else {
         None
@@ -328,19 +331,22 @@ struct Top {
     level: u32,
     /// The rows the shape rises above the corner.
     rise: u32,
-    row: u32,
+    row: u64,
 }
 
 impl Top {
     fn of(key: &'static str, corner: Corner, repeat: Repeat, level: u32, rise: u32) -> Self {
-        let y = u32::try_from(last_copy(corner, repeat).1).unwrap_or(u32::MAX);
+        let row = last_copy(corner, repeat)
+            .1
+            .saturating_add(u64::from(level))
+            .saturating_add(u64::from(rise));
         Self {
             key,
             corner,
             repeat,
             level,
             rise,
-            row: y.saturating_add(level).saturating_add(rise),
+            row,
         }
     }
 

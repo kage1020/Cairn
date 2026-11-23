@@ -86,8 +86,8 @@ than the milestone table because a monthly minor can ship without crossing a mil
 Beyond `2027.2.0` the schedule is not drawn yet. The spec describes more than this plan reaches: the
 lift that turns an import into walls, windows and themes, which the reverse direction leaves to an
 LLM, and the open questions that wait on the data of the [evaluation framework](/spec/evaluation/),
-columns and arches as primitives and interiors. The roadmap will be redrawn around those, and around
-feedback from real use, as 2027.2.0 approaches.
+which shapes to promote to primitives next and interiors. The roadmap will be redrawn around those,
+and around feedback from real use, as 2027.2.0 approaches.
 
 ## Leaving draft
 

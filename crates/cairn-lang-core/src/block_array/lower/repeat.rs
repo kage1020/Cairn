@@ -43,6 +43,11 @@ impl Repeat {
         self.count > 1
     }
 
+    /// How far each copy lies from the one before.
+    pub(super) fn step(self) -> (u32, u32, u32) {
+        self.step
+    }
+
     /// How far the last copy lies from the first.
     pub(super) fn reach(self) -> (u64, u64, u64) {
         let copies = u64::from(self.count.saturating_sub(1));

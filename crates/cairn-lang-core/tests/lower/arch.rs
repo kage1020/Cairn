@@ -140,6 +140,95 @@ fn a_series_cuts_each_arch_a_step_past_the_one_before() {
 }
 
 #[test]
+fn a_written_axis_spans_its_box_across_the_longer_side() {
+    assert_eq!(
+        sprung("arch from=1,1,1 to=3,2,2 axis=z mat_slot=step"),
+        [1, 2, 3]
+            .into_iter()
+            .flat_map(|x| [
+                stair("oak_stairs", "north", (x, 2, 1)),
+                stair("oak_stairs", "south", (x, 2, 2)),
+            ])
+            .collect::<Vec<_>>(),
+    );
+}
+
+#[test]
+fn a_series_whose_copies_touch_cuts_each_arch_whole() {
+    assert_eq!(
+        sprung("arch from=1,1,4 to=3,2,4 repeat=2 step=3,0,0 mat_slot=step"),
+        [
+            stair("oak_stairs", "west", (1, 2, 4)),
+            stair("oak_stairs", "east", (3, 2, 4)),
+            stair("oak_stairs", "west", (4, 2, 4)),
+            stair("oak_stairs", "east", (6, 2, 4)),
+        ],
+    );
+}
+
+#[test]
+fn a_series_whose_copies_share_cells_is_refused() {
+    for (step, primary) in [
+        (
+            "2,0,0",
+            "arch `step=2,0,0` is shorter than its box on every axis, so each copy shares cells \
+             with the one before",
+        ),
+        (
+            "0,1,0",
+            "arch `step=0,1,0` is shorter than its box on every axis, so each copy shares cells \
+             with the one before",
+        ),
+    ] {
+        let line = format!("arch from=1,1,4 to=3,2,4 repeat=2 step={step} mat_slot=step");
+        assert_eq!(
+            refused(&line),
+            [(
+                DiagnosticCode::InvalidMember,
+                line.clone(),
+                primary.to_owned(),
+                vec![
+                    "the box is 3 long on `x`, 2 on `y` and 1 on `z`: give `step=` at least that \
+                     on one axis, so no two copies share a cell"
+                        .to_owned()
+                ],
+            )],
+        );
+    }
+}
+
+#[test]
+fn an_arch_under_a_level_is_cut_in_the_rows_its_level_raises_it_to() {
+    let src = hall("level y=1\n    arch from=1,0,4 to=3,1,4 mat_slot=step");
+    let out = lowered(&src);
+    assert_eq!(findings(&src, &out), Vec::<Finding<'_>>::new());
+    let array = only_structure(&out);
+    assert_eq!(
+        [1, 2, 3].map(|y| layer(array, y)[4].clone()),
+        ["#...###", "#s.s###", "#######"],
+    );
+}
+
+#[test]
+fn an_arch_rising_above_the_struct_under_a_level_is_refused_with_the_row_it_reaches() {
+    let line = "arch from=1,1,4 to=3,3,4 mat_slot=step";
+    assert_eq!(
+        refused(&format!("level y=1\n    {line}")),
+        [(
+            DiagnosticCode::InvalidMember,
+            line.to_owned(),
+            "arch `to=3,3,4` under `level y=1` (row 4) does not fit in the struct (dims.y=4)"
+                .to_owned(),
+            vec![
+                "a corner's `y` runs from 0 to 2 under `level y=1`, the struct's top row being 3"
+                    .to_owned(),
+                "lower the arch's box, or raise the `walls` to reach its rows".to_owned(),
+            ],
+        )],
+    );
+}
+
+#[test]
 fn an_arch_cuts_through_a_column_written_after_it() {
     let members = "arch from=2,1,2 to=4,2,2 mat_slot=step\n  column at=3,1,2 height=3";
     let src = hall(members);
@@ -182,6 +271,23 @@ fn a_span_of_one_cell_is_refused() {
 }
 
 #[test]
+fn a_box_of_one_cell_across_is_refused_for_its_span_before_its_axis() {
+    let line = "arch from=2,1,4 to=2,2,4 mat_slot=step";
+    assert_eq!(
+        refused(line),
+        [(
+            DiagnosticCode::InvalidMember,
+            line.to_owned(),
+            "arch spans 1 cell along `x` and along `z`, leaving no room for its two stairs"
+                .to_owned(),
+            vec![
+                "an arch spans at least 2 cells: widen its box along the axis it spans".to_owned()
+            ],
+        )],
+    );
+}
+
+#[test]
 fn an_axis_that_is_neither_x_nor_z_is_refused() {
     let line = "arch from=2,1,4 to=3,2,4 axis=y mat_slot=step";
     assert_eq!(
@@ -208,7 +314,10 @@ fn an_axis_that_is_no_identifier_is_ignored_and_the_longer_side_spanned() {
             DiagnosticCode::IgnoredArgument,
             "1".to_owned(),
             "`axis=` must be `x` or `z`, not integer `1`; the value was ignored".to_owned(),
-            vec!["the arch spans its box's longer side, as with no `axis=`".to_owned()],
+            vec![
+                "the arch spans the longer of its box's `x` and `z` sides, as with no `axis=`"
+                    .to_owned()
+            ],
         )],
     );
     assert_eq!(
@@ -216,6 +325,31 @@ fn an_axis_that_is_no_identifier_is_ignored_and_the_longer_side_spanned() {
         [
             stair("oak_stairs", "west", (2, 2, 4)),
             stair("oak_stairs", "east", (3, 2, 4)),
+        ],
+    );
+}
+
+#[test]
+fn an_axis_that_is_no_identifier_on_an_arch_refused_for_its_box_says_it_is_not_cut() {
+    let line = "arch from=2,1,1 to=3,2,2 axis=1 mat_slot=step";
+    assert_eq!(
+        refused(line),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                line.to_owned(),
+                "arch box is 2 long on `x` and on `z`, so nothing says which way it spans"
+                    .to_owned(),
+                vec!["write `axis=x` or `axis=z` for the way the arch spans".to_owned()],
+            ),
+            (
+                DiagnosticCode::IgnoredArgument,
+                "1".to_owned(),
+                "`axis=` must be `x` or `z`, not integer `1`; the value was ignored".to_owned(),
+                vec![
+                    "this arch is not cut either way — see the finding on the same line".to_owned()
+                ],
+            ),
         ],
     );
 }
@@ -234,7 +368,8 @@ fn a_material_that_is_no_stair_is_refused_and_the_default_arch_built() {
                 .to_owned(),
             vec![
                 "bind the slot to a `*_stairs` material — the registry pack's `roof.dark_wood`, \
-                 `roof.light_wood`, `roof.warm_wood`, and `roof.cool_wood` all resolve to one"
+                 `roof.light_wood`, `roof.warm_wood`, `roof.cool_wood` and `arch.default` all \
+                 resolve to one"
                     .to_owned(),
                 "reached through `mat_slot=wall`, so every member reading that slot has it too"
                     .to_owned(),

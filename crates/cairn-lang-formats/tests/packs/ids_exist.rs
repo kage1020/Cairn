@@ -70,6 +70,8 @@ fn both_packs_declare_the_tokens_that_redirect_the_member_defaults() {
         ("door.default", "door"),
         ("chest.default", "chest"),
         ("beam.default", "beam"),
+        ("column.default", "column"),
+        ("arch.default", "arch"),
         ("sign.oak", "standing sign"),
         ("sign.oak_wall", "wall sign"),
         ("bed.default", "bed"),

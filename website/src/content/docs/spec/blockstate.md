@@ -110,35 +110,36 @@ target whose tables record no states for the block, or whose id or state map ano
 not size the volume.
 
 A `column` stands a run of its material upright: `height=` blocks, from the cell its `at=` names,
-`at=x,y,z` ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), up. It is laid in
-`massing` ([Compilation Model §4.1](/spec/compilation/#41-phase-evaluation)), and its blocks take
-the state its material writes, so a pillar block stands on its own `axis=y`. `repeat=` stands that
-many columns, the first at `at=` and each `step=` past the one before, `step=dx,dy,dz` read as a
+`at=x,y,z` ([Syntax §5.1.1](/spec/syntax/#511-literals-and-separators)), up. It is laid in `massing`
+([Compilation Model §4.1](/spec/compilation/#41-phase-evaluation)), and its blocks take the state
+its material writes, so a pillar block stands on its own `axis=y`. `repeat=` stands that many
+columns, the first at `at=` and each `step=` past the one before, `step=dx,dy,dz` read as a
 `raw_repeat`'s is ([Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks)). A column
 without `repeat=` stands once, and its `step=` moves nothing. The column's `mat_slot=` names its
 block, and a column without one is built from the registry pack's `@column.default`. A missing
-`height=` or one that is not a positive whole number, a `repeat=` that is not one, a `repeat=` above
-1 with no `step=` or with `step=0,0,0`, and a `step=` or an `at=` that is no triple are
-`E_INVALID_MEMBER`. A column, any copy of it included, is refused or deferred where a `fill`'s box
-over the same cells would be, and like a fill it does not size the volume.
+`height=` or one that is not a positive whole number, a `repeat=` that is not a positive whole
+number, a `repeat=` above 1 with no `step=` or with `step=0,0,0`, and a `step=` or an `at=` that is
+no triple are `E_INVALID_MEMBER`. A column, any copy of it included, is refused or deferred where a
+`fill`'s box over the same cells would be, and like a fill it does not size the volume.
 
-An `arch` cuts an opening through the box between its `from=` and `to=` corners, read as a
-`fill`'s are, and springs it from upside-down stairs. It spans `x` or `z`: the box's longer side
-across, or the `axis=` its line writes, which a box as long on `x` as on `z` MUST write. Every cell
-of the box is cut to air but the two at the ends of its top row, in each layer across the span:
+An `arch` cuts an opening through the box between its `from=` and `to=` corners, read as a `fill`'s
+are, and springs it from upside-down stairs. It spans `x` or `z`: the longer of its box's `x` and
+`z` sides, or the `axis=` its line writes, which a box as long on `x` as on `z` MUST write. Every
+cell of the box is cut to air but the two at the ends of its top row, in each layer across the span:
 each takes the arch's stair upside down, `half=top`, facing out of the opening toward the end it
-lies at, so the end nearer `x=0` or `z=0` faces `west` or `north` and the other `east` or `south`.
-A span of 2 is the two stairs, and a longer one is open between them. The arch is cut in
-`openings`, so it cuts through what the walls, fills and columns under it built, and a cell of the
-box that holds nothing is cut all the same. `repeat=` and `step=` cut a series of arches as they
-stand a series of columns. The arch's `mat_slot=` names its stair, and an arch without one is built
-from the registry pack's `@arch.default`. The block MUST be a stair, one whose id ends in
-`_stairs`; any other is `E_INCOMPATIBLE_MATERIAL`, and the arch is built from `@arch.default` beside
-the error. A span shorter than 2, a box as long on `x` as on `z` with no `axis=`, any other
-identifier for `axis=`, and what a column's series is refused for are `E_INVALID_MEMBER`, and an
-`axis=` that is no identifier is `W_IGNORED_ARGUMENT` and read as if the key were not written. An
-arch is refused or deferred where a `fill`'s box over its cells would be, and does not size the
-volume.
+lies at, so the end nearer `x=0` or `z=0` faces `west` or `north` and the other `east` or `south`. A
+span of 2 is the two stairs, and a longer one is open between them. The arch is cut in `openings`,
+so it cuts through what the walls, fills and columns under it built, and a cell of the box that
+holds nothing is cut all the same. `repeat=` and `step=` cut a series of arches as they stand a
+series of columns. Copies of an arch MUST NOT share a cell, since one copy's air would cut another's
+stair, so a series whose `step=` is shorter than the box on every axis is `E_INVALID_MEMBER`. The
+arch's `mat_slot=` names its stair, and an arch without one is built from the registry pack's
+`@arch.default`. The block MUST be a stair, one whose id ends in `_stairs`; any other is
+`E_INCOMPATIBLE_MATERIAL`, and the arch is built from `@arch.default` beside the error. A span
+shorter than 2, a box as long on `x` as on `z` with no `axis=`, any other identifier for `axis=`,
+and what a column's series is refused for are `E_INVALID_MEMBER`, and an `axis=` that is no
+identifier is `W_IGNORED_ARGUMENT` and read as if the key were not written. An arch is refused or
+deferred where a `fill`'s box over its cells would be, and does not size the volume.
 
 A `note_block` sets one note block in the cell its coordinate triple names, `at=x,y,z` ([Syntax
 §5.1.1](/spec/syntax/#511-literals-and-separators)); a note block turns no way, so it takes no wall

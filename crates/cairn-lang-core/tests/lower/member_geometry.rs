@@ -420,6 +420,27 @@ fn a_raw_member_under_a_raw_repeat_declares_every_copy_from_its_first() {
 }
 
 #[test]
+fn a_column_or_arch_series_declares_every_copy_from_its_first() {
+    let ir = clean(
+        "6x4",
+        "  walls mat_slot=wall height=2\n  \
+         column at=1,0,1 height=2 repeat=2 step=2,0,1\n  \
+         arch from=1,0,0 to=2,1,0 repeat=2 step=3,0,0\n",
+    );
+    assert_eq!(
+        geometry(&ir),
+        [
+            ("arch", whole((1, 0, 0), boxed((1, 0, 0), (5, 1, 0)), None)),
+            (
+                "column",
+                whole((1, 0, 1), boxed((1, 0, 1), (3, 1, 2)), None)
+            ),
+            ("walls", whole((0, 1, 0), boxed((0, 1, 0), (5, 2, 3)), None)),
+        ],
+    );
+}
+
+#[test]
 fn a_member_under_a_level_declares_the_rows_its_level_raises_it_to() {
     let ir = clean(
         "5x3",

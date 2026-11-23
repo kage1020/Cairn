@@ -171,3 +171,57 @@ fn a_shape_that_is_no_identifier_is_ignored_and_the_window_cut_as_rect() {
         ["#########", "##ggg####", "##ggg####", "#########"],
     );
 }
+
+#[test]
+fn an_arched_series_whose_copies_touch_rounds_each_one() {
+    assert_eq!(
+        cut("window side=front y=2 offset=1 size=3x2 repeat=2 step=3 shape=arch mat_slot=glass"),
+        ["#########", "##g##g###", "#gggggg##", "#########"],
+    );
+}
+
+#[test]
+fn an_arched_series_whose_copies_overlap_is_refused() {
+    let line = "window side=front y=2 offset=1 size=3x2 repeat=2 step=2 shape=arch mat_slot=glass";
+    assert_eq!(
+        refused(line),
+        [(
+            DiagnosticCode::InvalidMember,
+            line.to_owned(),
+            "window `shape=arch` with `step=2` and a `size=` 3 wide cuts each copy over the one \
+             before"
+                .to_owned(),
+            vec![
+                "copies of an arched window share no column, or one cuts the ends the other \
+                 leaves to the wall: give `step=` at least 3, or drop `shape=arch`"
+                    .to_owned()
+            ],
+        )],
+    );
+}
+
+#[test]
+fn a_shape_that_is_no_identifier_on_a_refused_window_says_it_is_not_cut() {
+    let line = "window side=front y=2 offset=2 size=3x2 repeat=0 shape=1 mat_slot=glass";
+    assert_eq!(
+        refused(line),
+        [
+            (
+                DiagnosticCode::InvalidMember,
+                line.to_owned(),
+                "window `repeat=0` would stamp no instances; drop the window instead".to_owned(),
+                Vec::new(),
+            ),
+            (
+                DiagnosticCode::IgnoredArgument,
+                "1".to_owned(),
+                "`shape=` must be `rect` or `arch`, not integer `1`; the value was ignored"
+                    .to_owned(),
+                vec![
+                    "this window is not cut either way — see the finding on the same line"
+                        .to_owned()
+                ],
+            ),
+        ],
+    );
+}

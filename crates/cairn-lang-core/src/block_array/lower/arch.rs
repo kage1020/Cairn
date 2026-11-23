@@ -15,7 +15,7 @@ use super::cell_box::{Cell, CellBox, Shape, repeated_cells};
 use super::fixture::Refusal;
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
-use super::repeat::read_series;
+use super::repeat::{Repeat, read_series};
 use super::stand::word;
 
 /// Catalog token an `arch`'s default stair comes from; the pack spells it per edition.
@@ -77,8 +77,9 @@ pub(super) fn fill_arch(
         }
     };
     diagnostics.extend(unread.map(|argument| {
-        argument
-            .report(not_cut.unwrap_or("the arch spans its box's longer side, as with no `axis=`"))
+        argument.report(not_cut.unwrap_or(
+            "the arch spans the longer of its box's `x` and `z` sides, as with no `axis=`",
+        ))
     }));
 }
 
@@ -95,8 +96,11 @@ fn cut_arch(
 ) -> Result<bool, Refusal> {
     let axis = word(member, "axis", axis, &AXES)?;
     let series = read_series(member)?;
-    let cells = repeated_cells(member, Shape::Box, y_offset, series, ctx)?;
+    let cells = repeated_cells(member, Shape::Arch, y_offset, series, ctx)?;
     let span = span_of(member, axis, cells)?;
+    if let Some(refusal) = overlap_refusal(member, cells, series) {
+        return Err(Box::new(refusal));
+    }
     let Some(id) = arch_block_id(member, ctx, diagnostics)? else {
         return Ok(false);
     };
@@ -129,6 +133,18 @@ fn span_of(member: &Member, axis: Option<&str>, cells: CellBox) -> Result<Span, 
     let (low, high) = cells.corners();
     let width = high.0.saturating_sub(low.0).saturating_add(1);
     let depth = high.2.saturating_sub(low.2).saturating_add(1);
+    let too_short = |along: &str| {
+        Box::new(diag_invalid_member(
+            member,
+            format!("arch spans 1 cell along {along}, leaving no room for its two stairs"),
+            vec![
+                "an arch spans at least 2 cells: widen its box along the axis it spans".to_owned(),
+            ],
+        ))
+    };
+    if axis.is_none() && width < 2 && depth < 2 {
+        return Err(too_short("`x` and along `z`"));
+    }
     let span = match axis {
         Some("x") => Span::X,
         Some(_) => Span::Z,
@@ -150,15 +166,36 @@ fn span_of(member: &Member, axis: Option<&str>, cells: CellBox) -> Result<Span, 
         Span::Z => ("z", depth),
     };
     if length < 2 {
-        return Err(Box::new(diag_invalid_member(
-            member,
-            format!("arch spans 1 cell along `{name}`, leaving no room for its two stairs"),
-            vec![
-                "an arch spans at least 2 cells: widen its box along the axis it spans".to_owned(),
-            ],
-        )));
+        return Err(too_short(&format!("`{name}`")));
     }
     Ok(span)
+}
+
+/// The refusal of a series whose copies share cells, where one copy's air would cut another's
+/// stair, or `None`.
+fn overlap_refusal(member: &Member, cells: CellBox, series: Repeat) -> Option<Diagnostic> {
+    let (low, high) = cells.corners();
+    let extent = |l: u32, h: u32| h.saturating_sub(l).saturating_add(1);
+    let (w, h, d) = (
+        extent(low.0, high.0),
+        extent(low.1, high.1),
+        extent(low.2, high.2),
+    );
+    let (dx, dy, dz) = series.step();
+    if !series.repeats() || dx >= w || dy >= h || dz >= d {
+        return None;
+    }
+    Some(diag_invalid_member(
+        member,
+        format!(
+            "arch `step={dx},{dy},{dz}` is shorter than its box on every axis, so each copy \
+             shares cells with the one before"
+        ),
+        vec![format!(
+            "the box is {w} long on `x`, {h} on `y` and {d} on `z`: give `step=` at least that on \
+             one axis, so no two copies share a cell"
+        )],
+    ))
 }
 
 /// The stair an arch springs from: its `mat_slot=`, or the pack's default arch; `None` for a

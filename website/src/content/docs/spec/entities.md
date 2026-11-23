@@ -270,9 +270,9 @@ that its `type` is lost. A note block keeps its `note` there, where it is not 0.
 
 ## 8.2 Anchor conventions
 
-Paintings, item frames, arch windows, stairwells, and overhanging roofs have a declared size that
-differs from the AABB they occupy. Left ambiguous, edit stability, theme swapping, and
-cross-implementation compatibility all break.
+Paintings, item frames, stairwells, and overhanging roofs have a declared size that differs from the
+AABB they occupy. Left ambiguous, edit stability, theme swapping, and cross-implementation
+compatibility all break.
 
 Every primitive therefore carries four things in the IR: an `anchor` (reference point), a declared
 bbox, an actual bbox, and a host face. Lowering derives the four for every member that builds a
@@ -364,9 +364,9 @@ detection: an inner-corner stair left as an outer corner, hanging in mid-air. Re
 blockstate is the IR layer's responsibility.
 
 In the example below, the window's `shape=arch` leaves the two ends of its top row to the wall
-([Syntax §5.4](/spec/syntax/#54-selectors)), so its declared bbox is the 3 by 3 it is cut in. The
-painting's bottom-left cell is the one `offset=2` and `y=2` place inside the front wall, the
-window's `anchor=bottom_center` puts its first column at 3, and the roof's `footprint=` and
+([Syntax §5.4](/spec/syntax/#54-selectors)), and its declared bbox is still the 3 by 3 its `size=`
+names. The painting's bottom-left cell is the one `offset=2` and `y=2` place inside the front wall,
+the window's `anchor=bottom_center` puts its first column at 3, and the roof's `footprint=` and
 `bounds=` name what it builds without them.
 
 ```

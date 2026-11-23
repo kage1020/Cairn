@@ -296,18 +296,17 @@ Tier 0 parts, and an entity's line that writes `nbt=` ([Versioning and Editions
 `y=N` means to each grouped member.
 
 **Which keywords a body accepts** follows the same split. A `struct` / `def` body describes one
-building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `level`,
-`pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`, `dispenser`, `chest`,
-`trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`, `armor_stand`, `villager`,
-`trade`, `text_display`, `block_display`, `item_display`, `hologram`, `spawn`, `repeater`,
-`comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`, `raw_fill`, `raw_repeat`. A `site` body
-describes a layout:
-`place`, `connect`. The keyword table is global, so writing one in the other body parses and
-classifies and then reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending
-row, taking anything indented under it along. A `level` groups the other members of a `struct` /
-`def` body, but not a `circuit` line, whose reservation spans the whole scope: a `circuit` line
-under a `level` reaches nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
-§14.5](/spec/redstone/#145-place-and-route)).
+building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`, `beam`, `column`,
+`arch`, `level`, `pressure_plate`, `lever`, `button`, `daylight`, `observer`, `lamp`, `piston`,
+`dispenser`, `chest`, `trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`,
+`armor_stand`, `villager`, `trade`, `text_display`, `block_display`, `item_display`, `hologram`,
+`spawn`, `repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`,
+`raw_fill`, `raw_repeat`. A `site` body describes a layout: `place`, `connect`. The keyword table is
+global, so writing one in the other body parses and classifies and then reaches nothing. That is
+`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along. A
+`level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
+reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
+`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -433,10 +432,12 @@ beside the `W_IGNORED_ARGUMENT`.
 at the ends of its top row are left to the wall, neither cut nor filled, and every other cell is cut
 as `shape=rect` cuts it. A window without `shape=` is `rect`. A `repeat=` series and a `sym=true`
 mirror round each rectangle they cut, and a frame is laid round the rectangle, so the two cells stay
-the wall's ([Materials and Themes](/spec/materials-themes/#selector-bindings)). An arch needs a
-cell between the ends of its top row and a row under it, so `shape=arch` on a window narrower than 3
-or lower than 2 is `E_INVALID_MEMBER`, as is any other identifier for `shape=`. A value that is no
-identifier is `W_IGNORED_ARGUMENT`, and the window is cut as `rect`.
+the wall's ([Materials and Themes](/spec/materials-themes/#selector-bindings)). An arch needs a cell
+between the ends of its top row and a row under it, so `shape=arch` on a window narrower than 3 or
+lower than 2 is `E_INVALID_MEMBER`, as is any other identifier for `shape=`. So is an arched
+`repeat=` series whose `step=` is less than the window's width, since each copy would cut the ends
+the one before leaves to the wall. A value that is no identifier is `W_IGNORED_ARGUMENT`, and the
+window is cut as `rect`.
 
 **Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
 `offset=N`. The anchors are:
@@ -662,7 +663,8 @@ language server shows the entry's own line on hover.
   See [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
   - **`from=`.** One corner of the box, a coordinate triple.
   - **`to=`.** The opposite corner of the box, a coordinate triple.
-  - **`axis=`.** The axis it spans, `x` or `z`, in place of the box's longer side.
+  - **`axis=`.** The axis it spans, `x` or `z`, in place of the longer of the box's `x` and `z`
+    sides.
   - **`repeat=`.** How many arches the series cuts, the first included.
   - **`step=`.** How far each arch lies from the one before it, a coordinate triple.
 - **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
