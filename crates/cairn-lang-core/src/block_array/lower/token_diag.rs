@@ -28,8 +28,8 @@ pub(super) enum MemberFallback {
     ///
     /// [`fill_window`]: super::window::fill_window
     WallStays,
-    /// A `roof`, an eave `stair`, a `beam`, a `door`, a `pressure_plate`, a `button`, a `chest`, a
-    /// `trapdoor`, a `sign` or a `bed`: built from its default block.
+    /// A `roof`, an eave `stair`, a `beam`, a `column`, an `arch`, a `door`, a `pressure_plate`, a
+    /// `button`, a `chest`, a `trapdoor`, a `sign` or a `bed`: built from its default block.
     DefaultBlock,
     /// A `block_display`: it shows no block, so none is placed.
     Unplaced,
@@ -48,6 +48,8 @@ impl MemberFallback {
             MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::Beam
+            | MemberRole::Column
+            | MemberRole::Arch
             | MemberRole::Door
             | MemberRole::PressurePlate
             | MemberRole::Button

@@ -14,10 +14,10 @@ use serde_json::json;
 use super::*;
 use crate::test_fixtures::{CLEAN, DUPLICATE, SIGN};
 
-/// [`CLEAN`] with a window whose `shape=` no pass reads, so its one finding is a warning.
+/// [`CLEAN`] with a window whose `shape=` is no identifier, so its one finding is a warning.
 const WARNED: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=3x3\n  walls \
                       mat_slot=wall height=3\n  window side=front offset=1 y=1 size=1x1 \
-                      mat_slot=wall shape=round\n";
+                      mat_slot=wall shape=1\n";
 
 const SHOP: &str = "file:///no/such/dir/shop.crn";
 

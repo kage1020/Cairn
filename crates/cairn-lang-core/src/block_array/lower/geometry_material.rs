@@ -15,7 +15,7 @@ use crate::block_array::{BlockState, TargetRegistry};
 /// A block family whose blockstates a member's geometry derives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Family {
-    /// The `*_stairs` blocks a sloped roof and an eave `stair` lay.
+    /// The `*_stairs` blocks a sloped roof, an eave `stair` and an `arch` lay.
     Stair,
     /// The `*_door` blocks a `door` sets in its opening.
     Door,
@@ -162,7 +162,8 @@ impl Family {
         match self {
             Self::Stair => {
                 "bind the slot to a `*_stairs` material — the registry pack's `roof.dark_wood`, \
-                 `roof.light_wood`, `roof.warm_wood`, and `roof.cool_wood` all resolve to one"
+                 `roof.light_wood`, `roof.warm_wood`, `roof.cool_wood` and `arch.default` all \
+                 resolve to one"
             }
             Self::Door => {
                 "bind the slot to a `*_door` material — the registry pack's `door.default` \

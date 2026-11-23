@@ -271,16 +271,17 @@ fn an_edit_repeating_or_mistyping_a_key_is_refused_as_a_line_is() {
 
 #[test]
 fn a_finding_on_an_edit_key_is_said_once_however_many_members_it_selects() {
-    let src = source("edit window[side=front] set shape=arch\n");
+    let src = "struct s size=9x7\n  level y=0\n  level y=3\n\nedit level[] set mat_slot=wall\n";
     assert_eq!(
-        found(&src),
+        found(src),
         [finding(
             "W_IGNORED_ARGUMENT",
-            "arch",
-            "`shape=` is an argument `window` takes and no pass reads yet; the value was ignored",
+            "wall",
+            "`mat_slot=` is accepted on every member, and nothing a `level` builds reads it; the \
+             value was ignored",
             &[
-                "the member is built without it — remove the argument, or keep it and expect no \
-               effect until the lowering rule lands"
+                "the `level` is built the same with it or without it — remove the argument",
+                "the slot name is not looked up in the theme, so a misspelling of it is not caught",
             ],
         )],
     );

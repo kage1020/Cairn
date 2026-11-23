@@ -14,11 +14,16 @@ use crate::block_array::openings::{
     DOOR_HEIGHT, WallSide, WindowArgs, door_base_row, door_column, read_window_args, wall_length,
 };
 
+use super::fixture::Refusal;
 use super::geometry_material::{Family, GeometryMemberDescription, geometry_material_id};
 use super::members::{
     MemberState, StructCtx, UNPAINTED_COURSE, default_block_id, resolve_member_state, side_name,
     side_of, unplaced_walls_note,
 };
+use super::stand::word;
+
+/// The outlines a window's `shape=` takes.
+const SHAPES: [&str; 2] = ["rect", "arch"];
 
 /// Catalog token a `door`'s default material comes from; the pack spells it per edition.
 pub(super) const DOOR_TOKEN: &str = "door.default";
@@ -319,6 +324,38 @@ pub(super) fn read_sym(member: &Member) -> (Option<bool>, Option<UnreadArgument>
     }
 }
 
+/// A window's `shape=` as an identifier, `None` when its line writes none, with the value it could
+/// not read.
+pub(super) fn read_shape(member: &Member) -> (Option<&str>, Option<UnreadArgument>) {
+    match ident_or_ignore(member, "shape", "`rect` or `arch`") {
+        Ok(shape) => (shape, None),
+        Err(unread) => (None, Some(unread)),
+    }
+}
+
+/// Whether a window's `shape=` rounds the top of what it cuts, or the refusal of a shape it does
+/// not take or an arch too small to round (`spec/syntax` "Selectors").
+fn window_arch(member: &Member, shape: Option<&str>, args: WindowArgs) -> Result<bool, Refusal> {
+    if word(member, "shape", shape, &SHAPES)? != Some("arch") {
+        return Ok(false);
+    }
+    if args.width >= 3 && args.height >= 2 {
+        return Ok(true);
+    }
+    Err(Box::new(diag_invalid_member(
+        member,
+        format!(
+            "window `shape=arch` needs a `size=` at least 3 wide and 2 high, not {}x{}",
+            args.width, args.height,
+        ),
+        vec![
+            "an arch leaves the two ends of its top row to the wall, so it needs a cell between \
+             them and a row under them; widen or raise `size=`, or drop `shape=arch`"
+                .to_owned(),
+        ],
+    )))
+}
+
 /// What a window's line cuts.
 #[derive(Debug, Clone)]
 pub(super) enum WindowPlan {
@@ -345,13 +382,16 @@ pub(super) struct WindowCut {
     pub(super) anchor: (u32, u32),
     /// The block its `mat_slot=` binds, or `None` for an opening carved to air.
     pub(super) fill: Option<BlockState>,
+    /// Whether `shape=arch` leaves the two ends of each rectangle's top row to the wall.
+    pub(super) arch: bool,
 }
 
 /// What the window `member` under `level y=y_offset` cuts, with `sym=` read and `None` when it was
-/// unreadable.
+/// unreadable, and `shape=` as [`read_shape`] reads it.
 pub(super) fn plan_window(
     member: &Member,
     sym: Option<bool>,
+    shape: Option<&str>,
     y_offset: u32,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
@@ -371,10 +411,31 @@ pub(super) fn plan_window(
         }
     };
     let (offset, sw, sh) = (args.column, args.width, args.height);
+    let arch = match window_arch(member, shape, args) {
+        Ok(arch) => arch,
+        Err(refusal) => {
+            diagnostics.push(*refusal);
+            return WindowPlan::Refused;
+        }
+    };
     let y_start = args.row_under(y_offset);
     let Some((repeat, step)) = window_series(member, diagnostics) else {
         return WindowPlan::Refused;
     };
+    if arch && repeat > 1 && step < sw {
+        diagnostics.push(diag_invalid_member(
+            member,
+            format!(
+                "window `shape=arch` with `step={step}` and a `size=` {sw} wide cuts each copy \
+                 over the one before"
+            ),
+            vec![format!(
+                "copies of an arched window share no column, or one cuts the ends the other \
+                 leaves to the wall: give `step=` at least {sw}, or drop `shape=arch`"
+            )],
+        ));
+        return WindowPlan::Refused;
+    }
     let len = wall_length(side, ctx.interior_w, ctx.interior_h);
     let refusal = window_span_refusal(side, args, (repeat, step), len)
         .map(|(reason, fix)| diag_invalid_member(member, reason, vec![fix]))
@@ -431,6 +492,7 @@ pub(super) fn plan_window(
         mirror,
         anchor: (args.offset(), args.y().saturating_add(y_offset)),
         fill,
+        arch,
     })
 }
 
@@ -717,7 +779,8 @@ pub(super) fn placed_opening(
         });
     }
     let (sym, _) = read_sym(member);
-    match plan_window(member, sym, y_offset, ctx, &mut reported_on_its_line) {
+    let (shape, _) = read_shape(member);
+    match plan_window(member, sym, shape, y_offset, ctx, &mut reported_on_its_line) {
         WindowPlan::Cut(cut) => Some(Opening {
             side: cut.side,
             top: cut.row.saturating_add(cut.height.saturating_sub(1)),

@@ -1,6 +1,6 @@
-//! The cells a line names with coordinate triples: a box between `from=` and `to=`, or one cell
-//! at `at=` (`spec/syntax` "Literals and separators"), and for a raw member under a `raw_repeat`,
-//! where its copies go.
+//! The cells a line names with coordinate triples: a box between `from=` and `to=`, one cell at
+//! `at=`, or a column rising from it (`spec/syntax` "Literals and separators"), and where the
+//! copies of a series go.
 
 use crate::ast::ValueKind;
 use crate::diagnostic::Diagnostic;
@@ -21,22 +21,37 @@ type Corner = (u64, u64, u64);
 pub(super) enum Shape {
     /// A box between two opposite corners, `from=` and `to=`.
     Box,
+    /// The box of an `arch`, between `from=` and `to=` as a [`Shape::Box`]'s.
+    Arch,
     /// The one cell `at=` names.
     Cell,
+    /// The cells of a `column`, `height` rows up from the one `at=` names.
+    Column {
+        /// How many rows it rises, at least 1.
+        height: u32,
+    },
 }
 
 impl Shape {
     fn keys(self) -> &'static [&'static str] {
         match self {
-            Self::Box => &["from", "to"],
-            Self::Cell => &["at"],
+            Self::Box | Self::Arch => &["from", "to"],
+            Self::Cell | Self::Column { .. } => &["at"],
+        }
+    }
+
+    /// How many rows the shape rises above its highest corner.
+    fn rise(self) -> u32 {
+        match self {
+            Self::Box | Self::Arch | Self::Cell => 0,
+            Self::Column { height } => height.saturating_sub(1),
         }
     }
 
     /// The note on a corner that is missing or not a triple, saying what one is.
     fn corners_note(self) -> &'static str {
         match self {
-            Self::Box => {
+            Self::Box | Self::Arch => {
                 "write `from=` and `to=` as two opposite corners of the box, each a coordinate \
                  triple `x,y,z`, as in `from=1,1,1 to=3,2,3`"
             }
@@ -44,13 +59,18 @@ impl Shape {
                 "write `at=` as the coordinate triple `x,y,z` of the cell the block goes in, as \
                  in `at=1,1,1`"
             }
+            Self::Column { .. } => {
+                "write `at=` as the coordinate triple `x,y,z` of the cell the column's lowest \
+                 block stands in, as in `at=1,1,1`"
+            }
         }
     }
 
     fn holds(self) -> &'static str {
         match self {
-            Self::Box => "which cells its box holds",
+            Self::Box | Self::Arch => "which cells its box holds",
             Self::Cell => "which cell its block goes in",
+            Self::Column { .. } => "which cell it stands on",
         }
     }
 
@@ -58,29 +78,32 @@ impl Shape {
     fn built(self) -> &'static str {
         match self {
             Self::Box => "the box is filled",
+            Self::Arch => "the arch is cut",
             Self::Cell => "the block is placed",
+            Self::Column { .. } => "the column is stood",
         }
     }
 
     fn rows(self) -> &'static str {
         match self {
-            Self::Box => "these rows",
+            Self::Box | Self::Arch | Self::Column { .. } => "these rows",
             Self::Cell => "this row",
         }
     }
 
     fn lowered(self) -> &'static str {
         match self {
-            Self::Box => "box",
+            Self::Box | Self::Arch => "box",
             Self::Cell => "`at=`",
+            Self::Column { .. } => "`at=` or `height=`",
         }
     }
 
     /// Whose components a bounds note names.
     fn bounded(self) -> &'static str {
         match self {
-            Self::Box => "a corner's",
-            Self::Cell => "the cell's",
+            Self::Box | Self::Arch => "a corner's",
+            Self::Cell | Self::Column { .. } => "the cell's",
         }
     }
 }
@@ -110,6 +133,11 @@ impl CellBox {
             low: self.low,
             high: self.shifted(last).high,
         }
+    }
+
+    /// The box's corner with the lowest `x`, `y` and `z`, and the one with the highest.
+    pub(super) fn corners(self) -> (Cell, Cell) {
+        (self.low, self.high)
     }
 
     /// The box, as a member's geometry records it.
@@ -164,10 +192,10 @@ pub(super) fn repeated_cells(
         .copied()
         .max_by_key(|(_, at)| at.1)
         .expect("a shape names at least one corner");
-    let top = Top::of(key, highest, repeat, y_offset);
+    let top = Top::of(key, highest, repeat, y_offset, shape.rise());
     let written = &ctx.written;
-    let above_written = top.row >= written.height;
-    if above_written && !written.unplaced_walls && top.row >= written.reach {
+    let above_written = top.row >= u64::from(written.height);
+    if above_written && !written.unplaced_walls && top.row >= u64::from(written.reach) {
         return Err(Box::new(above_the_struct(member, shape, top, ctx)));
     }
     // From here the repair is on another member, so the line only defers.
@@ -180,7 +208,7 @@ pub(super) fn repeated_cells(
             shape.rows(),
             shape.built(),
         ))
-    } else if top.row >= ctx.dims.y {
+    } else if top.row >= u64::from(ctx.dims.y) {
         Some(ctx.shortfall().note(shape.rows(), shape.built()))
     } else {
         None
@@ -203,12 +231,13 @@ pub(super) fn repeated_cells(
     };
     let mut cells = corners.iter().map(|&(_, at)| cell(at));
     let first = cells.next().expect("a shape names at least one corner");
-    let (low, high) = cells.fold((first, first), |(low, high), c| {
+    let (low, mut high) = cells.fold((first, first), |(low, high), c| {
         (
             (low.0.min(c.0), low.1.min(c.1), low.2.min(c.2)),
             (high.0.max(c.0), high.1.max(c.1), high.2.max(c.2)),
         )
     });
+    high.1 = high.1.saturating_add(shape.rise());
     Ok(CellBox { low, high })
 }
 
@@ -222,8 +251,8 @@ fn last_copy(at: Corner, repeat: Repeat) -> Corner {
     )
 }
 
-/// A corner as a message names it, with where its last copy lands under a `raw_repeat`; `under`
-/// completes the phrase before the copy clause closes.
+/// A corner as a message names it, with where its last copy lands in a series; `under` completes
+/// the phrase before the copy clause closes.
 fn corner_named(key: &str, at: Corner, repeat: Repeat, under: &str) -> String {
     let (x, y, z) = at;
     let written = format!("`{key}={x},{y},{z}`");
@@ -232,8 +261,8 @@ fn corner_named(key: &str, at: Corner, repeat: Repeat, under: &str) -> String {
     }
     let (fx, fy, fz) = last_copy(at, repeat);
     format!(
-        "{written}, whose last of {} `raw_repeat` copies lands at {fx},{fy},{fz}{under},",
-        repeat.count(),
+        "{written}, whose last of {} lands at {fx},{fy},{fz}{under},",
+        repeat.copies(),
     )
 }
 
@@ -279,7 +308,7 @@ fn outside_the_footprint(
         depth.saturating_sub(1),
     )];
     if repeat.repeats() {
-        notes.push("lower the `raw_repeat`'s `count=` or `step=`".to_owned());
+        notes.push(format!("lower the {}", repeat.keys()));
     }
     diag_invalid_member(
         member,
@@ -300,29 +329,53 @@ struct Top {
     repeat: Repeat,
     /// The `level y=` the line is written under.
     level: u32,
-    row: u32,
+    /// The rows the shape rises above the corner.
+    rise: u32,
+    row: u64,
 }
 
 impl Top {
-    fn of(key: &'static str, corner: Corner, repeat: Repeat, level: u32) -> Self {
-        let y = u32::try_from(last_copy(corner, repeat).1).unwrap_or(u32::MAX);
+    fn of(key: &'static str, corner: Corner, repeat: Repeat, level: u32, rise: u32) -> Self {
+        let row = last_copy(corner, repeat)
+            .1
+            .saturating_add(u64::from(level))
+            .saturating_add(u64::from(rise));
         Self {
             key,
             corner,
             repeat,
             level,
-            row: y.saturating_add(level),
+            rise,
+            row,
         }
     }
 
-    /// The corner as a message names it, with the level and struct row under a raised level.
+    /// The corner as a message names it, with the column's height and the struct row it reaches
+    /// when either moves that row off the corner's.
     fn named(self) -> String {
+        let height = if self.rise == 0 {
+            String::new()
+        } else {
+            format!(" with `height={}`", self.rise.saturating_add(1))
+        };
         let under = if self.level == 0 {
             String::new()
         } else {
-            format!(" under `level y={}` (row {})", self.level, self.row)
+            format!(" under `level y={}`", self.level)
         };
-        corner_named(self.key, self.corner, self.repeat, &under)
+        let row = if self.rise > 0 {
+            format!(" (its top in row {})", self.row)
+        } else if self.level > 0 {
+            format!(" (row {})", self.row)
+        } else {
+            String::new()
+        };
+        corner_named(
+            self.key,
+            self.corner,
+            self.repeat,
+            &format!("{height}{under}{row}"),
+        )
     }
 }
 
@@ -368,9 +421,9 @@ fn above_the_struct(member: &Member, shape: Shape, top: Top, ctx: &StructCtx<'_>
         shape.lowered()
     };
     let copies = if top.repeat.repeats() {
-        " or its `raw_repeat`'s `count=` or `step=`"
+        format!(" or its {}", top.repeat.keys())
     } else {
-        ""
+        String::new()
     };
     notes.push(format!(
         "lower the {keyword}'s {lower}{copies}, or raise the `walls` to reach its rows"

@@ -1405,6 +1405,14 @@ const SLOT_READERS: &[(&str, &str)] = &[
         "struct s size=3x3\n  walls height=2\n  beam kind=pillar at=front.top mat_slot=b\n",
     ),
     (
+        "column",
+        "struct s size=3x3\n  column at=1,0,1 height=1 mat_slot=c\n",
+    ),
+    (
+        "arch",
+        "struct s size=3x3\n  arch from=0,0,1 to=1,0,1 mat_slot=a\n",
+    ),
+    (
         "trapdoor",
         "struct s size=3x3\n  trapdoor at=inside.front offset=1 mat_slot=t\n",
     ),

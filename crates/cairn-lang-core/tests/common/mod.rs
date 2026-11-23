@@ -529,7 +529,8 @@ pub const DRAWN_ROLES: &str = "block-array lowering currently voxelises floor, w
     at=<side>.outside|inside.<side>), note_block (at=x,y,z), painting, item_frame, armor_stand, \
     villager, text_display, block_display, item_display, hologram and spawn (at=x,y,z or \
     at=<side>.outside|inside.<side>), trade (villager=<id>), beam (kind=pillar \
-    at=<side>.top|<id>.top), raw_block (mat=<namespace:path> at=x,y,z) and raw_fill \
-    (mat=<namespace:path> from=x,y,z to=x,y,z), and level y=N grouping, and recognises circuit \
+    at=<side>.top|<id>.top), column (at=x,y,z height=N), arch (from=x,y,z to=x,y,z), raw_block \
+    (mat=<namespace:path> at=x,y,z) and raw_fill (mat=<namespace:path> from=x,y,z to=x,y,z), and \
+    level y=N grouping, and recognises circuit \
     region=<label> void=<N> (u32, N>=1) plus actuator patches such as door[id=<name>] \
     opened_by=sig.<name>; other roles will be added as their lowering rules are spec'd";

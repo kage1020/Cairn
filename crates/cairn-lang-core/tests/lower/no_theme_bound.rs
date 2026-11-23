@@ -7,7 +7,8 @@ use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
 use cairn_lang_core::check::DiagnosticCode;
 
 use crate::common::{
-    defers, lowered, lowered_with_resolver_diagnostics, notes, only_structure, slice, state_at,
+    blocks_where, defers, lowered, lowered_with_resolver_diagnostics, notes, only_structure, slice,
+    state_at,
 };
 
 /// One member of each role, every slot reader naming a slot of its own.
@@ -93,10 +94,10 @@ fn a_themeless_scope_is_told_how_each_role_degrades() {
             "a `floor` is left air and a `fill` with a `mat_slot=` paints none of its box; no \
              `walls` is built or takes up rows, so no `door` or `window` is cut and no `beam` \
              laid; a `roof` is built from its default block, and so is an eave `stair`, \
-             `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed` that still fits \
-             the shorter structure; any other sensor or actuator, a `note_block`, a `raw_block` \
-             and a `raw_fill` need no theme and are built where the shorter structure still holds \
-             them",
+             `column`, `arch`, `pressure_plate`, `button`, `chest`, `trapdoor`, `sign` or `bed` \
+             that still fits the shorter structure; any other sensor or actuator, a \
+             `note_block`, a `raw_block` and a `raw_fill` need no theme and are built where the \
+             shorter structure still holds them",
             "a scope binds a theme when the module declares exactly one logical theme, or the \
              `place` names one with `theme=`; under a `--edition` pin that theme must also have \
              a variant for that edition",
@@ -294,4 +295,44 @@ fn a_window_whose_slot_binds_no_material_leaves_its_wall_standing() {
     let ba = only_structure(&out);
     assert_eq!(state_at(ba, 3, 1, 0).id, "minecraft:cobblestone");
     assert_eq!(state_at(ba, 1, 1, 0).id, "minecraft:glass");
+}
+
+#[test]
+fn a_themeless_column_or_arch_that_fits_is_built_from_its_default_block() {
+    let src = "struct s size=5x5\n  \
+               column at=1,0,1 height=1 mat_slot=c\n  \
+               arch from=2,0,1 to=3,0,1 mat_slot=a\n";
+    let out = lowered(src);
+    assert_eq!(
+        findings(src, &out),
+        [
+            (DiagnosticCode::NoThemeBound, src.trim_end(), S_HAS_NO_THEME),
+            (
+                DiagnosticCode::DeferredMember,
+                "column at=1,0,1 height=1 mat_slot=c",
+                "column's `mat_slot=` did not resolve to a block id; it falls back to \
+                 `minecraft:stone_bricks`",
+            ),
+            (
+                DiagnosticCode::DeferredMember,
+                "arch from=2,0,1 to=3,0,1 mat_slot=a",
+                "arch's `mat_slot=` did not resolve to a block id; it falls back to \
+                 `minecraft:stone_brick_stairs`",
+            ),
+        ],
+    );
+    assert_eq!(
+        blocks_where(only_structure(&out), |id| id != "minecraft:air"),
+        [
+            ((1, 0, 1), "minecraft:stone_bricks".to_owned()),
+            (
+                (2, 0, 1),
+                "minecraft:stone_brick_stairs[facing=west,half=top,shape=straight]".to_owned()
+            ),
+            (
+                (3, 0, 1),
+                "minecraft:stone_brick_stairs[facing=east,half=top,shape=straight]".to_owned()
+            ),
+        ],
+    );
 }

@@ -19,6 +19,8 @@
     { "token": "roof.warm_wood", "block": "oak_stairs" },
     { "token": "roof.cool_wood", "block": "spruce_stairs" },
     { "token": "beam.default", "block": "oak_log" },
+    { "token": "column.default", "block": "stone_bricks" },
+    { "token": "arch.default", "block": "stone_brick_stairs" },
     { "token": "sign.oak", "block": "oak_sign" },
     { "token": "sign.oak_wall", "block": "oak_wall_sign" },
     { "token": "bed.default", "block": "red_bed" },

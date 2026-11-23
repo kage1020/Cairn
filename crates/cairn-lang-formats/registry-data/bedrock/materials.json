@@ -27,6 +27,12 @@
     { "token": "roof.warm_wood", "block": "oak_stairs" },
     { "token": "roof.cool_wood", "block": "spruce_stairs" },
     { "token": "beam.default", "block": "oak_log" },
+    {
+      "token": "column.default",
+      "block": "stone_bricks",
+      "overrides": [{ "mc_version": "1.21.0", "block": "stonebrick" }]
+    },
+    { "token": "arch.default", "block": "stone_brick_stairs" },
     { "token": "sign.oak", "block": "standing_sign" },
     { "token": "sign.oak_wall", "block": "wall_sign" },
     { "token": "bed.default", "block": "bed", "canonical": "red_bed" },

@@ -12,6 +12,8 @@ pub const KNOWN_KEYWORDS: &[&str] = &[
     "roof",
     "stair",
     "beam",
+    "column",
+    "arch",
     "level",
     "pressure_plate",
     "lever",
@@ -187,6 +189,10 @@ pub enum MemberRole {
     Stair,
     /// `beam` command, a run of pillar blocks laid along a wall top or over an opening.
     Beam,
+    /// `column` command, a run of blocks standing upright on a cell, or a series of them.
+    Column,
+    /// `arch` command, an opening cut through a box and sprung from upside-down stairs.
+    Arch,
     /// `level` grouping block.
     Level,
     /// `pressure_plate` sensor.
@@ -368,6 +374,8 @@ impl MemberRole {
             | Self::Roof
             | Self::Stair
             | Self::Beam
+            | Self::Column
+            | Self::Arch
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -487,6 +495,8 @@ impl MemberRole {
                 "waterlogged",
             ],
             Self::Beam => &["kind", "at", "axis"],
+            Self::Column => &["at", "height", "repeat", "step"],
+            Self::Arch => &["from", "to", "axis", "repeat", "step"],
             Self::Level => &["y"],
             Self::PressurePlate | Self::Lever | Self::Button | Self::Daylight => {
                 &["at", "offset", "y"]
@@ -555,6 +565,8 @@ impl MemberRole {
             | Self::Roof
             | Self::Stair
             | Self::Beam
+            | Self::Column
+            | Self::Arch
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -627,6 +639,8 @@ impl MemberRole {
             | Self::Fill
             | Self::Window
             | Self::Roof
+            | Self::Column
+            | Self::Arch
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -658,11 +672,6 @@ impl MemberRole {
     #[must_use]
     pub fn unread_arguments(&self) -> &'static [UnreadArgument] {
         match self {
-            // From `spec/entities` "Anchor conventions".
-            Self::Window => &[UnreadArgument {
-                key: "shape",
-                why: Unread::Unreached,
-            }],
             Self::Lever
             | Self::Daylight
             | Self::Observer
@@ -695,10 +704,13 @@ impl MemberRole {
             Self::Floor
             | Self::Walls
             | Self::Fill
+            | Self::Window
             | Self::Roof
             | Self::Door
             | Self::Stair
             | Self::Beam
+            | Self::Column
+            | Self::Arch
             | Self::PressurePlate
             | Self::Button
             | Self::Chest
@@ -785,6 +797,8 @@ impl MemberRole {
             | Self::Door
             | Self::Window
             | Self::Beam
+            | Self::Column
+            | Self::Arch
             | Self::Level
             | Self::PressurePlate
             | Self::Lever
@@ -850,6 +864,8 @@ pub fn role_of(keyword: &str) -> MemberRole {
         "roof" => MemberRole::Roof,
         "stair" => MemberRole::Stair,
         "beam" => MemberRole::Beam,
+        "column" => MemberRole::Column,
+        "arch" => MemberRole::Arch,
         "level" => MemberRole::Level,
         "pressure_plate" => MemberRole::PressurePlate,
         "lever" => MemberRole::Lever,

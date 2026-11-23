@@ -72,6 +72,8 @@ fn without_a_material(member: &Member) -> WithoutAMaterial {
         MemberRole::Roof
         | MemberRole::Stair
         | MemberRole::Beam
+        | MemberRole::Column
+        | MemberRole::Arch
         | MemberRole::Door
         | MemberRole::PressurePlate
         | MemberRole::Button

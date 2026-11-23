@@ -168,6 +168,8 @@ catalogs declare the same tokens, so a theme that binds only these resolves on e
 | `@wood.dark`, `@wood.light`, `@wood.warm`, `@wood.cool` | Planks, by tone |
 | `@roof.dark_wood`, `@roof.light_wood`, `@roof.warm_wood`, `@roof.cool_wood` | Roof stairs, by tone |
 | `@beam.default` | The pillar block a `beam` lays when no `mat_slot=` binds one |
+| `@column.default` | The block a `column` stands when no `mat_slot=` binds one |
+| `@arch.default` | The stair an `arch` springs from when no `mat_slot=` binds one |
 | `@sign.oak`, `@sign.oak_wall` | The standing sign a `sign` stands, and the wall sign it hangs, when no `mat_slot=` binds one |
 | `@bed.default` | The bed a `bed` lays when no `mat_slot=` binds one, a red one |
 | `@bed.white`, `@bed.orange`, `@bed.magenta`, `@bed.light_blue`, `@bed.yellow`, `@bed.lime`, `@bed.pink`, `@bed.gray`, `@bed.light_gray`, `@bed.cyan`, `@bed.purple`, `@bed.blue`, `@bed.brown`, `@bed.green`, `@bed.red`, `@bed.black` | The bed of each dye's colour |

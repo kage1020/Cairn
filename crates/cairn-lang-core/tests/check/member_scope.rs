@@ -15,6 +15,8 @@ const GEOMETRY_ROWS: &[&str] = &[
     "roof kind=flat mat_slot=wall",
     "stair kind=stairs mat_slot=wall",
     "beam kind=pillar at=front.top",
+    "column at=1,0,1 height=2 mat_slot=wall",
+    "arch from=0,1,0 to=1,1,0",
     "level y=0",
     "pressure_plate id=p at=front.outside",
     "lever id=v at=inside.front",
@@ -218,8 +220,8 @@ fn the_candidate_list_is_scoped_to_the_body() {
     );
     assert!(
         notes(&geometry).contains(
-            &"expected one of: floor, walls, fill, door, window, roof, stair, beam, level, \
-             pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
+            &"expected one of: floor, walls, fill, door, window, roof, stair, beam, column, arch, \
+             level, pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
              trapdoor, note_block, sign, bed, painting, item_frame, armor_stand, villager, trade, \
              text_display, block_display, item_display, hologram, spawn, repeater, comparator, \
              redstone_torch, redstone_dust, circuit, raw_block, raw_fill, raw_repeat"

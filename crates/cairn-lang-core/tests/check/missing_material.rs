@@ -264,6 +264,8 @@ const PAINTERS: &[(&str, &str, &str)] = &[
         "roof id=r kind=gable overhang=1",
     ),
     ("beam", "beam id=lintel kind=pillar at=front.top", ""),
+    ("column", "column id=post at=2,1,2 height=3", ""),
+    ("arch", "arch id=gate from=1,1,0 to=3,2,0", ""),
     (
         "pressure_plate",
         "pressure_plate id=p at=inside.front offset=1 y=0",
@@ -391,6 +393,8 @@ fn every_role_is_either_measured_here_or_paints_nothing() {
             | MemberRole::Roof
             | MemberRole::Stair
             | MemberRole::Beam
+            | MemberRole::Column
+            | MemberRole::Arch
             | MemberRole::PressurePlate
             | MemberRole::Lever
             | MemberRole::Button

@@ -18,10 +18,10 @@ const EDITION_SPECIFIC: &str = "@cairn 2026.06\n\n\
 
 const HUT: &str = "theme t:\n  slot a -> @cobblestone\n\nstruct hut size=3x3\n  floor mat_slot=a\n";
 
-/// [`HUT`] with walls and a window whose `shape=` no pass reads, so its one finding is a warning.
+/// [`HUT`] with walls and a window whose `shape=` is no identifier, so its one finding is a warning.
 const WARNED: &str = "theme t:\n  slot a -> @cobblestone\n\nstruct hut size=3x3\n  floor \
                       mat_slot=a\n  walls mat_slot=a height=3\n  window side=front offset=1 y=1 \
-                      size=1x1 mat_slot=a shape=round\n";
+                      size=1x1 mat_slot=a shape=1\n";
 
 const LOCK: &str = "no/such/dir/probe.crn.lock";
 

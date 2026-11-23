@@ -11,9 +11,9 @@ use crate::block_array::{Bbox, PaletteIndex};
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::frame::{Cut, Frame};
 use super::members::{StructCtx, bound_block, side_name};
-use super::opening::{WindowCut, WindowPlan, plan_window, read_sym};
+use super::opening::{WindowCut, WindowPlan, plan_window, read_shape, read_sym};
 
-/// What an unreadable `sym=` leaves of a window that is not cut.
+/// What an unreadable `sym=` or `shape=` leaves of a window that is not cut.
 const NOT_CUT: &str = "this window is not cut either way — see the finding on the same line";
 
 /// Cut a `window`'s rectangles, with the frame a theme binds on it round the ones it cut.
@@ -28,7 +28,8 @@ pub(super) fn fill_window(
     let frame = bound_block(member, BindingKey::Frame, ctx, diagnostics);
     // Read before anything can refuse the window, so it is reported in the same compile.
     let (sym, sym_unread) = read_sym(member);
-    let plan = plan_window(member, sym, y_offset, ctx, diagnostics);
+    let (shape, shape_unread) = read_shape(member);
+    let plan = plan_window(member, sym, shape, y_offset, ctx, diagnostics);
     let (cuts, note) = match plan {
         WindowPlan::Cut(cut) => match cut_window(member, cut, ctx, palette, canvas, diagnostics) {
             Some(cuts) => (
@@ -46,6 +47,13 @@ pub(super) fn fill_window(
         ),
     };
     diagnostics.extend(sym_unread.map(|unread| unread.report(note)));
+    diagnostics.extend(shape_unread.map(|unread| {
+        unread.report(if cuts.is_some() {
+            "the window is cut as `rect`, as with no `shape=`"
+        } else {
+            NOT_CUT
+        })
+    }));
     frame
         .zip(cuts)
         .map(|(state, cuts)| Frame::new(canvas.member(), state, cuts))
@@ -83,6 +91,7 @@ fn cut_window(
                 width,
                 height: cut.height,
                 palette_index,
+                arch: cut.arch,
             };
             paint_window_rect(ctx, rect, canvas);
             rect.cut()
@@ -133,6 +142,7 @@ struct WindowRect {
     width: u32,
     height: u32,
     palette_index: PaletteIndex,
+    arch: bool,
 }
 
 impl WindowRect {
@@ -150,6 +160,10 @@ impl WindowRect {
 fn paint_window_rect(ctx: &StructCtx<'_>, rect: WindowRect, canvas: &mut MemberCanvas<'_>) {
     for du in 0..rect.width {
         for dv in 0..rect.height {
+            let top_end = dv + 1 == rect.height && (du == 0 || du + 1 == rect.width);
+            if rect.arch && top_end {
+                continue;
+            }
             let along = rect.offset.saturating_add(du);
             let row = rect.y_start.saturating_add(dv);
             let Some(cell) = wall_local_to_grid(

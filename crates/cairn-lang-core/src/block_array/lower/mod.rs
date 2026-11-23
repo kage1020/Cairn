@@ -6,6 +6,7 @@
 //! [`flatten_members`]: members::flatten_members
 
 mod anchor;
+mod arch;
 mod beam;
 mod bed;
 mod body;
@@ -13,6 +14,7 @@ mod canvas;
 mod cell_box;
 mod chest;
 mod circuit;
+mod column;
 mod component;
 mod connect;
 mod connections;

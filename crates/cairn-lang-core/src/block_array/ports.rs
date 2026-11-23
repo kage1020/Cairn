@@ -378,6 +378,8 @@ fn is_opening(role: &MemberRole) -> bool {
         | MemberRole::Roof
         | MemberRole::Stair
         | MemberRole::Beam
+        | MemberRole::Column
+        | MemberRole::Arch
         | MemberRole::Level
         | MemberRole::PressurePlate
         | MemberRole::Lever
