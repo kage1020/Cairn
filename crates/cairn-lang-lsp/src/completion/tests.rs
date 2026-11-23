@@ -869,6 +869,8 @@ fn an_edition_guard_completes_its_word_its_edition_and_the_escape_hatches_under_
             "roof",
             "stair",
             "beam",
+            "column",
+            "arch",
             "level",
             "pressure_plate",
             "lever",

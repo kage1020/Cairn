@@ -159,6 +159,8 @@ impl MemberRole {
                 | Self::Roof
                 | Self::Stair
                 | Self::Beam
+                | Self::Column
+                | Self::Arch
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Lever
@@ -204,6 +206,8 @@ impl MemberRole {
                 | Self::Roof
                 | Self::Stair
                 | Self::Beam
+                | Self::Column
+                | Self::Arch
                 | Self::Level
                 | Self::PressurePlate
                 | Self::Lever
@@ -253,6 +257,8 @@ impl MemberRole {
             Self::Roof => "roof",
             Self::Stair => "stair",
             Self::Beam => "beam",
+            Self::Column => "column",
+            Self::Arch => "arch",
             Self::Level => "level",
             Self::PressurePlate => "pressure_plate",
             Self::Lever => "lever",

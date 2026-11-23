@@ -399,21 +399,6 @@ fn a_selector_widens_one_keyword_and_not_the_others() {
 }
 
 #[test]
-fn an_argument_the_spec_defines_and_nothing_reads_is_reported_as_ignored() {
-    // `window shape=` is in `spec/components-editing-sites` "Editing model" and no pass reads it.
-    let d = exactly_one(diagnose(
-        "struct s size=9x7\n  window side=front y=2 offset=2 size=2x2 shape=arch\n",
-    ));
-    assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT");
-    assert!(d.primary.contains("`shape=`"), "got: {}", d.primary);
-    assert!(
-        d.primary.contains("no pass reads yet"),
-        "got: {}",
-        d.primary,
-    );
-}
-
-#[test]
 fn a_key_a_sibling_argument_routed_past_is_reported_as_ignored() {
     // A roof reads `slope_to=` only for `kind=shed`.
     let d = exactly_one(diagnose(
@@ -513,7 +498,7 @@ const SWEEP: &[(&str, &str)] = &[
     ),
     (
         "window",
-        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1 anchor=bottom_left\n",
+        "  window id=n class=c mat_slot=m side=front y=2 offset=1 size=1x1 sym=false repeat=1 step=1 anchor=bottom_left shape=rect\n",
     ),
     (
         "roof",
@@ -526,6 +511,14 @@ const SWEEP: &[(&str, &str)] = &[
     (
         "beam",
         "  beam id=b class=c mat_slot=m kind=pillar at=front.top axis=x\n",
+    ),
+    (
+        "column",
+        "  column id=cl class=c mat_slot=m at=1,0,1 height=3 repeat=2 step=2,0,0\n",
+    ),
+    (
+        "arch",
+        "  arch id=ar class=c mat_slot=m from=0,1,0 to=2,2,0 axis=x repeat=2 step=0,0,2\n",
     ),
     ("level", "  level id=l class=c y=0\n"),
     (
@@ -707,13 +700,6 @@ fn the_table_and_the_sweep_agree_key_for_key() {
 }
 
 #[test]
-fn a_selector_matched_key_is_still_reported_as_ignored() {
-    let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass\n";
-    assert_eq!(codes(src), ["W_IGNORED_ARGUMENT"]);
-    assert_eq!(ignored_at(src), ["slit"]);
-}
-
-#[test]
 fn a_selector_does_not_coin_a_word_one_edit_from_a_real_one() {
     let src = "theme t:\n  slot wall -> @wall.stone.cobble\n  walls[hieght=3] -> trim=@spruce_log\n\nstruct s size=5x5\n  floor mat_slot=wall\n  walls hieght=3 mat_slot=wall\n";
     let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
@@ -750,9 +736,8 @@ fn a_selector_coins_a_word_two_edits_from_a_real_one() {
 #[test]
 fn a_widened_key_appears_once_in_the_closed_set() {
     // `shape` is both in the role's vocabulary and selected on.
-    let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=slit] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=1x2 shape=slit mat_slot=glass zzz=1\n";
-    // Beside it, the unread `shape=slit`.
-    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 2);
+    let src = "theme t:\n  slot glass -> @glass_pane\n  window[shape=arch] -> frame=@spruce_wood\n\nstruct s size=9x7\n  window side=front y=1 size=3x2 shape=arch mat_slot=glass zzz=1\n";
+    let d = only_with_code(src, "E_UNKNOWN_ARGUMENT", 1);
     let listed = notes(&d);
     let line = listed
         .lines()
@@ -771,27 +756,11 @@ fn a_stair_reads_the_height_it_is_written_at() {
     assert_eq!(codes(src), Vec::<&str>::new(), "source:\n{src}");
 }
 
+/// `spec/lint` "Error vs warning" names no key a pass has yet to read.
 #[test]
-fn an_unreached_argument_the_spec_writes_is_accepted_and_reported() {
-    // Written on a known keyword in `spec/entities` "Anchor conventions".
-    let rows = [("window side=front y=2 offset=4 size=3x3", "shape", "arch")];
-    for (line, key, value) in rows {
-        let keyword = keyword_of(line);
-        let src = format!("struct s size=9x9\n  {line} {key}={value}\n");
-        let d = exactly_one(diagnose(&src));
-        assert_eq!(d.code.as_str(), "W_IGNORED_ARGUMENT", "source:\n{src}");
-        assert_eq!(
-            d.primary,
-            format!(
-                "`{key}=` is an argument `{keyword}` takes and no pass reads yet; the value was \
-                 ignored"
-            ),
-        );
-        assert_eq!(&src[d.span.clone()], value, "source:\n{src}");
-    }
-
+fn no_argument_the_spec_writes_is_left_unreached() {
     // `mat_slot` has tests of its own in `tests/lower/unread_mat_slot.rs`.
-    let mut unreached: Vec<(&str, &str)> = known_keywords()
+    let unreached: Vec<(&str, &str)> = known_keywords()
         .iter()
         .flat_map(|keyword| {
             role_of(keyword)
@@ -801,13 +770,7 @@ fn an_unreached_argument_the_spec_writes_is_accepted_and_reported() {
                 .map(move |entry| (*keyword, entry.key))
         })
         .collect();
-    unreached.sort_unstable();
-    let mut written: Vec<(&str, &str)> = rows
-        .iter()
-        .map(|(line, key, _)| (keyword_of(line), *key))
-        .collect();
-    written.sort_unstable();
-    assert_eq!(written, unreached);
+    assert_eq!(unreached, Vec::<(&str, &str)>::new());
 }
 
 #[test]

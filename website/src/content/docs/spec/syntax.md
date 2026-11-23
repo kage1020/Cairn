@@ -116,8 +116,9 @@ the base plane, or from the `level`'s under `level y=N`. A cell named this way s
 `overhang=`, as every member does. No component is negative, since none counts back past the low
 corner, and each is read under the same ceiling as any integer. A key a later chapter defines as a
 distance rather than a cell, such as the `step=` of `raw_repeat` ([Materials and Themes
-§7.4](/spec/materials-themes/#74-raw-blocks)), reads the same three integers as the distance from
-one repeat to the next.
+§7.4](/spec/materials-themes/#74-raw-blocks)) or of a `column` or `arch` series ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), reads the same three integers
+as the distance from one repeat to the next.
 
 A triple is a `key=` value: it is what a key reads when an integer, a `,` and another integer
 follow its `=`. A `-` before either of those integers still starts a triple, which is then refused
@@ -428,6 +429,15 @@ greater than 1 is the exception. Mirroring a series is reserved for a later exte
 not read as `false` there: that window is not cut either, and is reported as `W_DEFERRED_MEMBER`
 beside the `W_IGNORED_ARGUMENT`.
 
+**An arched window.** `shape=arch` rounds the top of each rectangle the window cuts: the two cells
+at the ends of its top row are left to the wall, neither cut nor filled, and every other cell is cut
+as `shape=rect` cuts it. A window without `shape=` is `rect`. A `repeat=` series and a `sym=true`
+mirror round each rectangle they cut, and a frame is laid round the rectangle, so the two cells stay
+the wall's ([Materials and Themes](/spec/materials-themes/#selector-bindings)). An arch needs a
+cell between the ends of its top row and a row under it, so `shape=arch` on a window narrower than 3
+or lower than 2 is `E_INVALID_MEMBER`, as is any other identifier for `shape=`. A value that is no
+identifier is `W_IGNORED_ARGUMENT`, and the window is cut as `rect`.
+
 **Which column a door stands in.** A door's wall-local column comes from an `at=` anchor or from
 `offset=N`. The anchors are:
 
@@ -612,8 +622,8 @@ language server shows the entry's own line on hover.
   - **`sym=`.** With `true`, a mirrored copy across the wall's midpoint is cut too.
   - **`repeat=`.** How many windows the series cuts along the wall, the first included.
   - **`step=`.** How many columns each window starts after the one before it.
-  - **`shape=`.** The opening's outline, read by nothing yet. See
-    [Entities §8.2](/spec/entities/#82-anchor-conventions).
+  - **`shape=`.** The opening's outline: `rect`, or `arch`, which leaves the two ends of its top
+    row to the wall. See [§5.4](#54-selectors).
   - **`anchor=`.** The cell of the window `offset=` and `y=` place, `bottom_left` when absent. See
     [Entities §8.2](/spec/entities/#82-anchor-conventions).
 - **`roof`.** A roof over the walls, in the shape its `kind=` names. See [Compilation Model
@@ -642,6 +652,19 @@ language server shows the entry's own line on hover.
   - **`at=`.** Where it is laid: `<side>.top` along that wall's top row, or `<id>.top` over the
     `door` or `window` with that `id=`.
   - **`axis=`.** The axis its blocks lie along, `x`, `y` or `z`, in place of along its wall.
+- **`column`.** A run of its material standing upright on a cell, or a series of them. See
+  [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`at=`.** The cell its lowest block stands in, a coordinate triple.
+  - **`height=`.** How many rows it rises.
+  - **`repeat=`.** How many columns the series stands, the first included.
+  - **`step=`.** How far each column stands from the one before it, a coordinate triple.
+- **`arch`.** An opening cut through a box, with an upside-down stair at each end of its top row.
+  See [Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override).
+  - **`from=`.** One corner of the box, a coordinate triple.
+  - **`to=`.** The opposite corner of the box, a coordinate triple.
+  - **`axis=`.** The axis it spans, `x` or `z`, in place of the box's longer side.
+  - **`repeat=`.** How many arches the series cuts, the first included.
+  - **`step=`.** How far each arch lies from the one before it, a coordinate triple.
 - **`level`.** Groups the members under it, lifting each of them `y=` rows above the base plane.
   See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
   - **`y=`.** How many rows above the base plane its members stand.

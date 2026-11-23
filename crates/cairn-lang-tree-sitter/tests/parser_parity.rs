@@ -388,6 +388,26 @@ const FIXTURES: &[(&str, &str, Verdict)] = &[
         "struct s size=3x3\n  level y=0\n    floor mat_slot=f\n",
         Accept,
     ),
+    (
+        "column_series",
+        "struct s size=9x3\n  column at=1,0,1 height=3 repeat=3 step=3,0,0\n",
+        Accept,
+    ),
+    (
+        "column_height_without_value",
+        "struct s size=9x3\n  column at=1,0,1 height=\n",
+        Reject,
+    ),
+    (
+        "arch_with_axis",
+        "struct s size=9x3\n  arch from=2,1,0 to=4,2,0 axis=x\n",
+        Accept,
+    ),
+    (
+        "window_arched",
+        "struct s size=9x3\n  window side=front y=1 offset=2 size=3x2 shape=arch\n",
+        Accept,
+    ),
     // Both accept it either way; only the depth comparison sees where the rows land.
     (
         "blank_line_before_a_grouping_member",

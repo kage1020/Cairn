@@ -7,9 +7,9 @@ title: "4. コンパイルモデル"
 コマンドは、順番を気にせず並べて書けます。コンパイラが各コマンドをフェーズに振り分け、フェーズを次の決まった順番で評価します。
 
 ```
-massing     floor / walls / fill
+massing     floor / walls / fill / column
 envelope    roof / stair / beam
-openings    door / window
+openings    door / window / arch
 fixtures    sign / bed / chest / trapdoor / note_block / センサー / アクチュエーター / Tier 0 の部品 /
             painting / item_frame / armor_stand / villager / trade / display / hologram / spawn
 fluids      fill fluid= / water
@@ -147,7 +147,7 @@ Dims.y = void + max(1 + wall_top + roof_extra, imported)
 
 `level` の中のメンバーも、どの項にも、level のオフセットを含めて数えます。`walls height=3` を本体に直接書けば `Dims.y = 4` ですが、同じ walls を `level y=5` の下に書くと `Dims.y = 9` (`1 + 5 + 3`) になります。
 
-**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `beam` / `chest` / `trapdoor` / `note_block` / `sign` / `bed` / すべてのセンサーとアクチュエーター / Tier 0 の部品 / すべてのエンティティ / `hologram` / `fill` / `raw_block` / `raw_fill` は、`raw_repeat` の下にあってもなくても、`N` を自分の形状を測る基準として読みます。ただし開口の上に渡す `beam` は、その開口の `level` が決める位置に置きます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
+**すべての種類のメンバーが、0 以外のオフセットで lowering できるわけではありません。** `walls` / `door` / `window` / `stair` / `beam` / `column` / `arch` / `chest` / `trapdoor` / `note_block` / `sign` / `bed` / すべてのセンサーとアクチュエーター / Tier 0 の部品 / すべてのエンティティ / `hologram` / `fill` / `raw_block` / `raw_fill` は、`raw_repeat` の下にあってもなくても、`N` を自分の形状を測る基準として読みます。ただし開口の上に渡す `beam` は、その開口の `level` が決める位置に置きます。`floor` と `roof` は struct に 1 つしかない面で、持ち上げた `level` の下に書いたものが何を作るかは将来の拡張のために予約しています。そのため、`N > 0` の `level y=N` の下に書くと `W_DEFERRED_MEMBER` を出し、ブロックを生成しません。
 
 **ブロックを置かないメンバーは、体積も決めません。** `N > 0` の `level y=N` の下に書いた屋根の `overhang=` は敷地を広げず、その高さも `Dims.y` を上げません。`level y=0` の下に書いた屋根は描かれるので、本体に書いた屋根と同じように敷地を広げ、`Dims.y` も上げます。メンバーが脱落するどの場合も同じです。`kind=` のない `roof`、`slope_to=` のない `shed`、`footprint=` か `bounds=` が取る 1 つの値以外を書いた `roof` ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約)) は敷地を広げず、材質が解決できない `walls` は `Dims.y` を上げません。
 

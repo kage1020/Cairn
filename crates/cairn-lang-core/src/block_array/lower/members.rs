@@ -160,13 +160,15 @@ pub(super) enum MemberDisposition {
 pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
     match &member.role {
         MemberRole::Fill if member.pours_fluid() => MemberDisposition::Paints(Phase::Fluids),
-        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill => {
+        MemberRole::Floor | MemberRole::Walls | MemberRole::Fill | MemberRole::Column => {
             MemberDisposition::Paints(Phase::Massing)
         }
         MemberRole::Roof | MemberRole::Stair | MemberRole::Beam => {
             MemberDisposition::Paints(Phase::Envelope)
         }
-        MemberRole::Door | MemberRole::Window => MemberDisposition::Paints(Phase::Openings),
+        MemberRole::Door | MemberRole::Window | MemberRole::Arch => {
+            MemberDisposition::Paints(Phase::Openings)
+        }
         MemberRole::PressurePlate
         | MemberRole::Lever
         | MemberRole::Button
@@ -339,6 +341,8 @@ fn level_offset_role_defer(role: &MemberRole, y_offset: u32) -> Option<&'static 
         | MemberRole::Window
         | MemberRole::Stair
         | MemberRole::Beam
+        | MemberRole::Column
+        | MemberRole::Arch
         | MemberRole::PressurePlate
         | MemberRole::Lever
         | MemberRole::Button

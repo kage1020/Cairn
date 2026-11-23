@@ -270,9 +270,6 @@ that its `type` is lost. A note block keeps its `note` there, where it is not 0.
 
 ## 8.2 Anchor conventions
 
-**Subject to change.** A window's `shape=` below is not built yet ([Compatibility
-Tiers](/spec/compatibility/#subject-to-change)).
-
 Paintings, item frames, arch windows, stairwells, and overhanging roofs have a declared size that
 differs from the AABB they occupy. Left ambiguous, edit stability, theme swapping, and
 cross-implementation compatibility all break.
@@ -313,6 +310,7 @@ under the base plane raises them with the struct ([Redstone
 | `item_frame` | its one cell | its one cell | the face it hangs on |
 | `painting` | its bottom-left cell | every cell it covers | the face it hangs on |
 | `fill`, `raw_fill` | the low corner of its box | the box `from=` and `to=` span | none |
+| `column`, `arch` | the low corner of its first copy | the box from its first copy to its last | none |
 | `circuit` | the low corner of its box | every layer it reserves | none |
 
 A window's rectangles are each one a `repeat=` series stamps and, with `sym=true`, the mirror, so a
@@ -365,10 +363,11 @@ Neighbour-dependent blockstate (stairs, fences) breaks when overwritten without 
 detection: an inner-corner stair left as an outer corner, hanging in mid-air. Re-resolving boundary
 blockstate is the IR layer's responsibility.
 
-In the example below, the window's `shape=arch` is accepted and read by no pass, so it is
-`W_IGNORED_ARGUMENT` ([Lint](/spec/lint/)). The painting's bottom-left cell is the one `offset=2`
-and `y=2` place inside the front wall, the window's `anchor=bottom_center` puts its first column at
-3, and the roof's `footprint=` and `bounds=` name what it builds without them.
+In the example below, the window's `shape=arch` leaves the two ends of its top row to the wall
+([Syntax §5.4](/spec/syntax/#54-selectors)), so its declared bbox is the 3 by 3 it is cut in. The
+painting's bottom-left cell is the one `offset=2` and `y=2` place inside the front wall, the
+window's `anchor=bottom_center` puts its first column at 3, and the roof's `footprint=` and
+`bounds=` name what it builds without them.
 
 ```
 painting id=hall_art at=inside.front offset=2 y=2 variant=kebab

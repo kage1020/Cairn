@@ -11,6 +11,8 @@ struct s size=9x7
   roof kind=gable overhang=1
   stair id=up from=0 to=1
   beam kind=pillar at=front.top axis=x
+  column at=2,1,2 height=3 repeat=2 step=4,0,0
+  arch from=3,1,0 to=5,3,0 axis=x
   pressure_plate id=plate at=front.outside
   lever id=sw at=inside.front offset=2 -> sig.power
   button id=bt at=front.outside offset=5
@@ -154,6 +156,40 @@ struct s size=9x7
               (signal_ref
                 (identifier)
                 (identifier))))
+          (command_arg
+            (attribute
+              (identifier)
+              (identifier)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (integer)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))))
+      (member_stmt
+        (member_keyword)
+        (command_arg_list
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
+          (command_arg
+            (attribute
+              (identifier)
+              (coordinate)))
           (command_arg
             (attribute
               (identifier)

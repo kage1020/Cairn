@@ -5,11 +5,13 @@ use crate::intent::{BindingKey, Member, MemberRole};
 
 use crate::block_array::geometry::Declared;
 
+use super::arch::fill_arch;
 use super::beam::fill_beam;
 use super::bed::fill_bed;
 use super::canvas::{LazySlot, MemberCanvas, ScopePalette};
 use super::cell_box::Shape;
 use super::chest::fill_chest;
+use super::column::fill_column;
 use super::component::{
     BUTTON, DAYLIGHT, DISPENSER, LAMP, LEVER, OBSERVER, PISTON, fill_component,
 };
@@ -64,6 +66,8 @@ pub(super) fn paint_member(
         MemberRole::Roof => fill_roof(member, ctx, palette, canvas, diagnostics),
         MemberRole::Stair => fill_stair(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Beam => fill_beam(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Column => fill_column(member, y_offset, ctx, palette, canvas, diagnostics),
+        MemberRole::Arch => fill_arch(member, y_offset, ctx, palette, canvas, diagnostics),
         MemberRole::Door => {
             let hung = &mut openings.hung;
             let frame = fill_door(member, y_offset, ctx, palette, canvas, hung, diagnostics);

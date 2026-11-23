@@ -28,7 +28,7 @@ fn a_window_on_the_floor_plane_is_refused_instead_of_carving_the_slab() {
         "{THEME}struct t size=7x5\n  \
          floor mat_slot=floor\n  \
          walls mat_slot=wall height=3\n  \
-         window class=arrow_slit side=front y=0 offset=3 size=1x2 shape=slit\n",
+         window class=arrow_slit side=front y=0 offset=3 size=1x2\n",
     );
     let out = lowered(&src);
     assert_eq!(

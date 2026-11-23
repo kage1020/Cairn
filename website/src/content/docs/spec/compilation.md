@@ -8,9 +8,9 @@ Write commands flat and in any order. The compiler assigns each one to a phase a
 phases in this fixed order:
 
 ```
-massing     floor / walls / fill
+massing     floor / walls / fill / column
 envelope    roof / stair / beam
-openings    door / window
+openings    door / window / arch
 fixtures    sign / bed / chest / trapdoor / note_block / sensors / actuators / Tier 0 parts /
             painting / item_frame / armor_stand / villager / trade / displays / hologram / spawn
 fluids      fill fluid= / water
@@ -244,13 +244,13 @@ Each term counts only the members that will paint:
 Members inside a `level` count in each, at their offset: `walls height=3` written directly gives
 `Dims.y = 4`, and the same walls under `level y=5` give `Dims.y = 9` (`1 + 5 + 3`).
 
-**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `beam`, `chest`,
-`trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the Tier 0 parts, every
-entity, `hologram`, `fill`, `raw_block` and `raw_fill`, under a `raw_repeat` or not, read `N` as the
-base their geometry is measured from, except that a `beam` over an opening lies where its opening's
-`level` puts it. A `floor` and a `roof` are planes a struct has one of, and what one under a raised
-`level` builds is reserved for a later extension: under `level y=N` with `N > 0` each fires
-`W_DEFERRED_MEMBER` and lowers to nothing.
+**Not every role lowers at a non-zero offset.** `walls`, `door`, `window`, `stair`, `beam`,
+`column`, `arch`, `chest`, `trapdoor`, `note_block`, `sign`, `bed`, every sensor and actuator, the
+Tier 0 parts, every entity, `hologram`, `fill`, `raw_block` and `raw_fill`, under a `raw_repeat` or
+not, read `N` as the base their geometry is measured from, except that a `beam` over an opening lies
+where its opening's `level` puts it. A `floor` and a `roof` are planes a struct has one of, and what
+one under a raised `level` builds is reserved for a later extension: under `level y=N` with `N > 0`
+each fires `W_DEFERRED_MEMBER` and lowers to nothing.
 
 **A member that does not paint does not size the volume.** The `overhang=` of a roof under
 `level y=N` with `N > 0` does not widen the footprint, and its height does not raise `Dims.y`; under

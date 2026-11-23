@@ -4,10 +4,12 @@
 pub mod common;
 
 mod address;
+mod arch;
 mod at_side_walkway;
 mod beam;
 mod bed;
 mod chest_block;
+mod column;
 mod components;
 mod conditional_arguments;
 mod connections;
@@ -53,11 +55,11 @@ mod tier0_parts;
 mod trapdoor;
 mod unknown_id_versions;
 mod unplaceable_plate;
-mod unreached_keys;
 mod unread_mat_slot;
 mod unreadable_argument_values;
 mod village;
 mod window_mirror;
+mod window_shape;
 mod window_walkway;
 mod window_wall_fit;
 mod without_target;

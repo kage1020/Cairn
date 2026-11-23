@@ -1,5 +1,5 @@
-//! A `raw_repeat`'s copies, and the rows an imported raw member sizes the volume to
-//! (`spec/materials-themes` "Raw blocks").
+//! A `raw_repeat`'s copies and a `column` or `arch` series, and the rows an imported raw member
+//! sizes the volume to (`spec/materials-themes` "Raw blocks").
 
 use std::collections::HashMap;
 
@@ -10,11 +10,21 @@ use crate::intent::{Member, MemberRole};
 use crate::block_array::IMPORTED_ORIGIN;
 use crate::block_array::args::diag_invalid_member;
 
-/// How many times a raw member is written, and how far each copy lies from the one before.
+/// How many times a line is written, and how far each copy lies from the one before.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Repeat {
     count: u32,
     step: (u32, u32, u32),
+    series: Series,
+}
+
+/// Which line asks for the copies, which a finding names when it tells how to change them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Series {
+    /// The `raw_repeat` a raw member is indented under, with its `count=` and `step=`.
+    RawRepeat,
+    /// The member's own `repeat=` and `step=`.
+    Own,
 }
 
 /// The repeat of each raw member a `raw_repeat` holds, by the span start of the member's line.
@@ -25,12 +35,8 @@ impl Repeat {
     pub(super) const ONCE: Self = Self {
         count: 1,
         step: (0, 0, 0),
+        series: Series::RawRepeat,
     };
-
-    /// How many copies are written.
-    pub(super) fn count(self) -> u32 {
-        self.count
-    }
 
     /// Whether more than one copy is written.
     pub(super) fn repeats(self) -> bool {
@@ -46,6 +52,22 @@ impl Repeat {
             copies * u64::from(y),
             copies * u64::from(z),
         )
+    }
+
+    /// The copies as a finding counts them: "4 `raw_repeat` copies" or "4 copies".
+    pub(super) fn copies(self) -> String {
+        match self.series {
+            Series::RawRepeat => format!("{} `raw_repeat` copies", self.count),
+            Series::Own => format!("{} copies", self.count),
+        }
+    }
+
+    /// The keys a finding asks to change to move the copies, after a determiner.
+    pub(super) fn keys(self) -> &'static str {
+        match self.series {
+            Series::RawRepeat => "`raw_repeat`'s `count=` or `step=`",
+            Series::Own => "`repeat=` or `step=`",
+        }
     }
 
     /// Each copy's shift from the first, the first's `(0, 0, 0)` included.
@@ -132,7 +154,74 @@ pub(super) fn read_repeat(member: &Member) -> Result<Repeat, Box<Diagnostic>> {
              without a `raw_repeat`",
         ));
     }
-    Ok(Repeat { count, step })
+    Ok(Repeat {
+        count,
+        step,
+        series: Series::RawRepeat,
+    })
+}
+
+/// The series a `column` or `arch` line's `repeat=` and `step=` ask for, once when it writes no
+/// `repeat=` (`spec/blockstate` "Derive by default, promote on override").
+///
+/// # Errors
+///
+/// The `E_INVALID_MEMBER` for a `repeat=` or `step=` that does not read, or for a series of more
+/// than one with no step or a zero one.
+pub(super) fn read_series(member: &Member) -> Result<Repeat, Box<Diagnostic>> {
+    let keyword = member.role.keyword();
+    let form = format!(
+        "write `repeat=N step=dx,dy,dz`: the {keyword} is written `N` times, each copy `dx,dy,dz` \
+         past the one before"
+    );
+    let refuse =
+        |primary: String| Box::new(diag_invalid_member(member, primary, vec![form.clone()]));
+    let count = match member.arguments.get("repeat") {
+        None => 1,
+        Some(raw) => match raw.value.kind {
+            ValueKind::Int(n) if n >= 1 => u32::try_from(n).ok(),
+            _ => None,
+        }
+        .ok_or_else(|| {
+            refuse(format!(
+                "{keyword} `repeat=` must be a positive integer that fits in u32, not {}",
+                raw.value.describe(),
+            ))
+        })?,
+    };
+    let step = match member.arguments.get("step") {
+        None if count > 1 => {
+            return Err(refuse(format!(
+                "{keyword} has `repeat={count}` and no `step=`, so nothing says where each copy \
+                 goes"
+            )));
+        }
+        None => (0, 0, 0),
+        Some(raw) => match raw.value.kind {
+            ValueKind::Coord { x, y, z } => u32::try_from(x)
+                .ok()
+                .zip(u32::try_from(y).ok())
+                .zip(u32::try_from(z).ok())
+                .map(|((x, y), z)| (x, y, z)),
+            _ => None,
+        }
+        .ok_or_else(|| {
+            refuse(format!(
+                "{keyword} `step=` must be a coordinate triple whose components fit in u32, not {}",
+                raw.value.describe(),
+            ))
+        })?,
+    };
+    if count > 1 && step == (0, 0, 0) {
+        return Err(refuse(format!(
+            "{keyword} `step=0,0,0` puts each of its {count} copies in the cells of the first"
+        )));
+    }
+    Ok(Repeat {
+        count,
+        step,
+        series: Series::Own,
+    })
 }
 
 /// The refusal of a `raw_repeat` with no raw member indented under it.
