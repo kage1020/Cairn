@@ -69,7 +69,7 @@ fn a_def_a_body_places_is_used() {
 
 #[test]
 fn a_library_def_resolves_its_slots_once_per_place_line() {
-    let src = "theme t:\n  slot chair -> @spruce_stairs[facing=north]\n\n\
+    let src = "theme t:\n  slot chair_seat -> @spruce_stairs[facing=north]\n\n\
                struct s size=5x5\n  place use=chair at=1,0,1\n  place use=table at=3,0,1\n";
     let resolution = resolve(&ir(src), None);
     assert_eq!(resolution.diagnostics, []);
@@ -99,7 +99,7 @@ fn a_library_def_resolves_its_slots_once_per_place_line() {
             src.find("place use=table").expect("the table line"),
         ],
     );
-    // The body's theme binds `chair`; the library's binds the table's, standing on its line.
+    // The body's theme binds `chair_seat`; the library's binds the table's, standing on its line.
     assert_eq!(
         tokens,
         [

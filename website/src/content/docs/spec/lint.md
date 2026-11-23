@@ -180,7 +180,7 @@ to compare.
 | `W_ABSTRACT_TOKEN_DEFERRED` | The same token with no catalog offered at all, so there is nothing to lift it against. |
 | `W_STATE_LITERAL_UNCHECKED` | A canonical token's state literal (`@oak_log[axis=x]`) was taken as written, since the pinned target's pack records no states for its block to check it against ([Versioning and Editions](/spec/versioning-editions/#a-state-is-checked-against-its-blocks-states-at-the-target)). |
 | `W_NO_THEME_BOUND` | A scope that reads a `mat_slot=` has no theme bound to it, so no `mat_slot=` it reads resolves to a block. |
-| `W_THEME_VARIANT_REBOUND` | A `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
+| `W_THEME_VARIANT_REBOUND` | A `site`'s `place theme=` names one edition's variant and the pinned edition bound a different one ([Versioning and Editions](/spec/versioning-editions/)). |
 | `W_INTENT_DEGRADED` | A palette entry lost an intent the pinned version has no form for, such as a stair's `shape` on Bedrock before 1.26.60, or a state a member wrote that the version works out itself, such as a dust's `connect=` there, in the words of the pack's `sensitivity`, or a Bedrock chest half's `type` where its other half does not stand beside it ([Entities §8.1](/spec/entities/#81-two-tiers)); one line per intent lost ([Versioning and Editions §10.7](/spec/versioning-editions/#107-java--bedrock-portability)). |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | The lock being replaced verified a different `(edition, version)`; the line names both ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
 | `W_SEMANTIC_SENSITIVITY` | After `W_PREVIOUSLY_VERIFIED_TARGET`, the members of this build that may resolve differently at the new target: those whose block a `semantic_sensitivity` row lists at a boundary version lying between the lock's verified version and the target ([§10.6](/spec/versioning-editions/#106-provenance-and-lock)). |
@@ -433,7 +433,7 @@ ripple only in where a member's blocks stand, such as the roof that taller walls
 | `E_INVALID_PLACE_ORIGIN` | A `site`'s `place` carries no origin selector or more than one, an `at=` other than `origin`, or an `east_of=` / `north_of=` that is not a label ([§9.3](/spec/components-editing-sites/#93-multi-building-with-site)). |
 | `E_PLACEMENT_OVERLAP` | Two `place` rows of one site resolve to boxes that share a cell, or a `connect` row's walkway lays a cell inside the box of a placement it does not join ([Entities §8.2](/spec/entities/#82-anchor-conventions)). |
 | `E_UNRESOLVED_PLACE_REF` | A `place use=`, an `east_of=` / `north_of=`, or a `connect` endpoint names a place or def that does not exist. A body's `place use=` may name a def of the furniture library as well ([§9.1.2](/spec/components-editing-sites/#912-the-furniture-library)). |
-| `E_UNRESOLVED_THEME_REF` | A `place theme=` names a theme the module does not declare. |
+| `E_UNRESOLVED_THEME_REF` | A `site`'s `place theme=` names a theme the module does not declare. |
 | `W_DEFERRED_PLACE` | An `east_of=` / `north_of=` names a `place` refused for its id, so the row naming it is not placed either. |
 | `W_UNUSED_DEF` | A `def` no `place use=` references, in a `site` or in a body. |
 

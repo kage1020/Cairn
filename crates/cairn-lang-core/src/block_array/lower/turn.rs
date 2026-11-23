@@ -4,7 +4,7 @@
 use indexmap::IndexMap;
 
 use crate::block_array::BlockState;
-use crate::block_array::joins::Face;
+use crate::block_array::joins::{Compass, Face};
 
 use super::cell_box::Cell;
 
@@ -12,16 +12,15 @@ use super::cell_box::Cell;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Turn(u8);
 
-/// The compass words of the four sideways faces, clockwise from north.
-const COMPASS: [&str; 4] = ["north", "east", "south", "west"];
-
 impl Turn {
-    /// The turn that brings a front written toward `south` to look toward `face`, or `None` for
-    /// `up` and `down`.
-    pub(super) fn to_face(face: Face) -> Option<Self> {
-        let at = |face: Face| Face::SIDES.iter().position(|side| *side == face);
-        let (to, from) = (at(face)?, at(Face::South)?);
-        u8::try_from((to + 4 - from) % 4).ok().map(Self)
+    /// The turn that brings a front written toward `south` to look toward `toward`.
+    pub(super) const fn toward(toward: Compass) -> Self {
+        Self(match toward {
+            Compass::South => 0,
+            Compass::West => 1,
+            Compass::North => 2,
+            Compass::East => 3,
+        })
     }
 
     /// The `(x, z)` extent a `(width, depth)` footprint takes once turned.
@@ -47,12 +46,16 @@ impl Turn {
 
     /// The compass word `word` turns to, or `None` for a word that names none.
     fn compass(self, word: &str) -> Option<&'static str> {
-        let at = COMPASS.iter().position(|name| *name == word)?;
-        Some(COMPASS[(at + usize::from(self.0)) % 4])
+        let mut face = Compass::of(Face::from_name(word)?)?.face();
+        for _ in 0..self.0 {
+            face = face.clockwise()?;
+        }
+        Some(face.as_str())
     }
 
     /// `state` turned: a sideways `facing`, an `axis` of `x` or `z`, a `rotation`, each of
-    /// `north`, `east`, `south` and `west`, and the compass words of a rail's `shape`.
+    /// `north`, `east`, `south` and `west`, and the compass words of an `orientation` and of a
+    /// rail's `shape`. A state the line leaves unwritten stays unwritten, and so unturned.
     pub(super) fn state(self, state: &BlockState) -> BlockState {
         if self.0 == 0 {
             return state.clone();
@@ -71,6 +74,7 @@ impl Turn {
                     .ok()
                     .filter(|rotation| *rotation < 16)
                     .map(|rotation| ((rotation + 4 * self.0) % 16).to_string()),
+                "orientation" => self.orientation(value),
                 "shape" => self.rail_shape(value),
                 _ => None,
             };
@@ -81,6 +85,13 @@ impl Turn {
             id: state.id.clone(),
             properties,
         }
+    }
+
+    /// A crafter's or jigsaw's `orientation`, its front and its top, each compass word turned.
+    fn orientation(self, orientation: &str) -> Option<String> {
+        let (front, top) = orientation.split_once('_')?;
+        let turn = |word: &str| self.compass(word).unwrap_or(word).to_owned();
+        Some(format!("{}_{}", turn(front), turn(top)))
     }
 
     /// A rail's `shape` turned, or `None` for a value that names no compass direction, as a

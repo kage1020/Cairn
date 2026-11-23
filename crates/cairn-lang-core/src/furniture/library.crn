@@ -1,47 +1,47 @@
 theme furniture:
-  slot table_leg      -> @oak_fence
-  slot table_top      -> @oak_pressure_plate
-  slot chair          -> @oak_stairs[facing=north]
-  slot hearth         -> @bricks
-  slot fire           -> @campfire
-  slot shelf          -> @bookshelf
-  slot crafting_table -> @crafting_table
-  slot furnace        -> @furnace[facing=south]
-  slot barrel         -> @barrel[facing=up]
-  slot lectern        -> @lectern[facing=south]
-  slot torch          -> @wall_torch[facing=south]
-  slot lantern        -> @lantern[hanging=true]
+  slot table_leg            -> @oak_fence
+  slot table_top            -> @oak_pressure_plate
+  slot chair_seat           -> @oak_stairs[facing=north]
+  slot fireplace_hearth     -> @bricks
+  slot fireplace_fire       -> @campfire[facing=south]
+  slot bookcase_shelves     -> @bookshelf
+  slot crafting_table_bench -> @crafting_table
+  slot furnace_oven         -> @furnace[facing=south]
+  slot barrel_cask          -> @barrel[facing=up]
+  slot lectern_stand        -> @lectern[facing=south]
+  slot wall_torch_flame     -> @wall_torch[facing=south]
+  slot lantern_light        -> @lantern[hanging=true]
 
 def table size=1x1:
   fill id=leg mat_slot=table_leg from=0,0,0 to=0,0,0
   fill id=top mat_slot=table_top from=0,1,0 to=0,1,0
 
 def chair size=1x1:
-  fill id=seat mat_slot=chair from=0,0,0 to=0,0,0
+  fill id=seat mat_slot=chair_seat from=0,0,0 to=0,0,0
 
 def fireplace size=3x1:
-  fill id=left   mat_slot=hearth from=0,0,0 to=0,2,0
-  fill id=right  mat_slot=hearth from=2,0,0 to=2,2,0
-  fill id=mantel mat_slot=hearth from=1,2,0 to=1,2,0
-  fill id=fire   mat_slot=fire   from=1,0,0 to=1,0,0
+  fill id=left   mat_slot=fireplace_hearth from=0,0,0 to=0,2,0
+  fill id=right  mat_slot=fireplace_hearth from=2,0,0 to=2,2,0
+  fill id=mantel mat_slot=fireplace_hearth from=1,2,0 to=1,2,0
+  fill id=fire   mat_slot=fireplace_fire   from=1,0,0 to=1,0,0
 
 def bookcase size=1x1:
-  fill id=shelves mat_slot=shelf from=0,0,0 to=0,2,0
+  fill id=shelves mat_slot=bookcase_shelves from=0,0,0 to=0,2,0
 
 def crafting_table size=1x1:
-  fill id=bench mat_slot=crafting_table from=0,0,0 to=0,0,0
+  fill id=bench mat_slot=crafting_table_bench from=0,0,0 to=0,0,0
 
 def furnace size=1x1:
-  fill id=oven mat_slot=furnace from=0,0,0 to=0,0,0
+  fill id=oven mat_slot=furnace_oven from=0,0,0 to=0,0,0
 
 def barrel size=1x1:
-  fill id=cask mat_slot=barrel from=0,0,0 to=0,0,0
+  fill id=cask mat_slot=barrel_cask from=0,0,0 to=0,0,0
 
 def lectern size=1x1:
-  fill id=stand mat_slot=lectern from=0,0,0 to=0,0,0
+  fill id=stand mat_slot=lectern_stand from=0,0,0 to=0,0,0
 
 def wall_torch size=1x1:
-  fill id=flame mat_slot=torch from=0,0,0 to=0,0,0
+  fill id=flame mat_slot=wall_torch_flame from=0,0,0 to=0,0,0
 
 def lantern size=1x1:
-  fill id=light mat_slot=lantern from=0,0,0 to=0,0,0
+  fill id=light mat_slot=lantern_light from=0,0,0 to=0,0,0

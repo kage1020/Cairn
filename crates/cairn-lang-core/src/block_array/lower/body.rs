@@ -140,6 +140,7 @@ pub(super) fn lower_body_to_block_array<'a>(
             .filter(|(_, member)| matches!(member.role, MemberRole::Door | MemberRole::Window))
             .collect(),
         villagers: villagers_of(&flattened),
+        paint_set: flattened.iter().map(|&(_, member)| member).collect(),
     };
     let (canvas, split_doors, derived) = paint_phases(buckets, &ctx, &mut palette, diagnostics);
     let stand_in = palette.stand_in();
@@ -176,11 +177,9 @@ pub(super) fn lower_body_to_block_array<'a>(
             overhang,
         };
         let entities = placed_entities(&flattened, &placed);
-        let refused = flattened.iter().any(|(_, member)| {
-            scope
-                .and_then(|scope| scope.members.get(&member.span.start))
-                .is_some_and(|binding| binding.refused)
-        });
+        let refused = flattened
+            .iter()
+            .any(|(_, member)| scope.is_some_and(|scope| scope.refuses(member.span.start)));
         target_findings(&built, &entities, registry, refused, raised, diagnostics);
     }
 

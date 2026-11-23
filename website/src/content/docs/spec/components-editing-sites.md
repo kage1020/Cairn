@@ -43,20 +43,23 @@ struct tavern size=13x9
 
 **What it builds.** A `def` placed in a body is built from its `fill` lines that write a
 `mat_slot=`, each box measured from the low corner of the def's `size=` footprint, as on any `def`
-body. Such a def holds nothing else. One with no `size=`, or with a member line of any other kind, a
-water `fill` among them, is `E_INVALID_MEMBER` on the `place` line, which names the first line it
-cannot build, and nothing is built there. So a def placed in a body places none itself, and nesting
-stays one deep ([Syntax §5.2](/spec/syntax/#52-nesting)). It is a member of the body it stands in,
-not a placement: it writes no structure file, the lockfile records no placement for it, and it
-exposes no port.
+body. Such a def holds nothing else. One with no `size=`, with a member line of any other kind, a
+water `fill` among them, or with a `fill` whose `from=` and `to=` are not two coordinate triples or
+whose box reaches past the def's footprint, is `E_INVALID_MEMBER` on the `place` line, which names
+the first line it cannot build, and nothing is built there. So a def placed in a body places none
+itself, and nesting stays one deep ([Syntax §5.2](/spec/syntax/#52-nesting)). It is a member of the
+body it stands in, not a placement: it writes no structure file, the lockfile records no placement
+for it, and it exposes no port.
 
 **Which way it faces.** A def is written facing `front`, `+z`, and a body turns it about the
-vertical axis by whole quarter turns. Its cells turn with it, and so does each block it builds: a
-horizontal `facing`, an `axis` of `x` or `z`, a `rotation`, a `north`, `east`, `south` or `west`
-that the block's state writes, and the compass part of a rail's `shape`, each as the game turns the
-blocks of a structure placed turned. The connection states of [Blockstate
-Model](/spec/blockstate/#connections) are derived once the body is painted, from the blocks beside
-each cell in the body.
+vertical axis by whole quarter turns. Its cells turn with it, and so does each state its blocks
+write: a horizontal `facing`, an `axis` of `x` or `z`, a `rotation`, a `north`, `east`, `south` or
+`west`, and the compass words of an `orientation` and of a rail's `shape`, each as the game turns
+the blocks of a structure placed turned. A state the block leaves unwritten is not turned, though
+the game would turn its default, so a slot whose block should turn writes that state: a bare
+`@spruce_stairs` faces its default way however the def is turned, and `@spruce_stairs[facing=north]`
+turns with it. The connection states of [Blockstate Model](/spec/blockstate/#connections) are
+derived once the body is painted, from the blocks beside each cell in the body.
 
 **Where it stands.** `at=` takes one of two forms:
 
@@ -92,12 +95,12 @@ site's keys, which nothing reads there: each is `W_IGNORED_ARGUMENT` ([Lint
 `facing=` beside a wall's, and `offset=`, `y=` and `facing=` on a `site`'s rows. A line with no
 `use=` or no `at=`, an `at=` of neither form, an `offset=` or `y=` that is not a non-negative
 integer, a `facing=` that is not a compass word, and a def whose cells leave the wall ring or the
-struct's footprint, or reach above every row the struct as written reaches, are each
-`E_INVALID_MEMBER`, and the def is not built there. A def that reaches a row the struct is built
-short of, because a `walls` or `roof` builds nothing, is `W_DEFERRED_MEMBER`, as a `fill` in those
-rows is. A `use=` that names no `def` of the file and none of the library's is
-`E_UNRESOLVED_PLACE_REF`, with the nearest name among both. A `def` that a body's `place` names is
-used, so it draws no `W_UNUSED_DEF`.
+struct's footprint, reach above every row the struct as written reaches, or take a cell a `door`,
+`window` or `arch` holds, which painting it would erase, are each `E_INVALID_MEMBER`, and the def is
+not built there. A def that reaches a row the struct is built short of, because a `walls` or `roof`
+builds nothing, is `W_DEFERRED_MEMBER`, as a `fill` in those rows is. A `use=` that names no `def`
+of the file and none of the library's is `E_UNRESOLVED_PLACE_REF`, with the nearest name among both.
+A `def` that a body's `place` names is used, so it draws no `W_UNUSED_DEF`.
 
 ### 9.1.2 The furniture library
 
@@ -106,59 +109,59 @@ no `def` of the file names the library's, so a file that declares a `def` of the
 its own. A `site`'s `use=` names the file's defs alone.
 
 The library is the source below. Its theme binds every slot its defs read, so a body whose theme
-binds none of them still builds each piece. A theme of the file that binds one of those slots builds
-that piece from it instead, so `slot chair -> @spruce_stairs` makes every chair spruce. The
-library's theme is not one of the file's: `theme=` cannot name it, and a file may declare a theme
-of the same name.
+binds none of them still builds each piece. Each slot is named for its def and the part it builds. A
+body whose theme binds one of those slots builds that piece from it instead, so `slot chair_seat ->
+@spruce_stairs[facing=north]` makes every chair spruce. The library's theme is not one of the
+file's: `theme=` cannot name it, and a file may declare a theme of the same name.
 
 ```
 theme furniture:
-  slot table_leg      -> @oak_fence
-  slot table_top      -> @oak_pressure_plate
-  slot chair          -> @oak_stairs[facing=north]
-  slot hearth         -> @bricks
-  slot fire           -> @campfire
-  slot shelf          -> @bookshelf
-  slot crafting_table -> @crafting_table
-  slot furnace        -> @furnace[facing=south]
-  slot barrel         -> @barrel[facing=up]
-  slot lectern        -> @lectern[facing=south]
-  slot torch          -> @wall_torch[facing=south]
-  slot lantern        -> @lantern[hanging=true]
+  slot table_leg            -> @oak_fence
+  slot table_top            -> @oak_pressure_plate
+  slot chair_seat           -> @oak_stairs[facing=north]
+  slot fireplace_hearth     -> @bricks
+  slot fireplace_fire       -> @campfire[facing=south]
+  slot bookcase_shelves     -> @bookshelf
+  slot crafting_table_bench -> @crafting_table
+  slot furnace_oven         -> @furnace[facing=south]
+  slot barrel_cask          -> @barrel[facing=up]
+  slot lectern_stand        -> @lectern[facing=south]
+  slot wall_torch_flame     -> @wall_torch[facing=south]
+  slot lantern_light        -> @lantern[hanging=true]
 
 def table size=1x1:
   fill id=leg mat_slot=table_leg from=0,0,0 to=0,0,0
   fill id=top mat_slot=table_top from=0,1,0 to=0,1,0
 
 def chair size=1x1:
-  fill id=seat mat_slot=chair from=0,0,0 to=0,0,0
+  fill id=seat mat_slot=chair_seat from=0,0,0 to=0,0,0
 
 def fireplace size=3x1:
-  fill id=left   mat_slot=hearth from=0,0,0 to=0,2,0
-  fill id=right  mat_slot=hearth from=2,0,0 to=2,2,0
-  fill id=mantel mat_slot=hearth from=1,2,0 to=1,2,0
-  fill id=fire   mat_slot=fire   from=1,0,0 to=1,0,0
+  fill id=left   mat_slot=fireplace_hearth from=0,0,0 to=0,2,0
+  fill id=right  mat_slot=fireplace_hearth from=2,0,0 to=2,2,0
+  fill id=mantel mat_slot=fireplace_hearth from=1,2,0 to=1,2,0
+  fill id=fire   mat_slot=fireplace_fire   from=1,0,0 to=1,0,0
 
 def bookcase size=1x1:
-  fill id=shelves mat_slot=shelf from=0,0,0 to=0,2,0
+  fill id=shelves mat_slot=bookcase_shelves from=0,0,0 to=0,2,0
 
 def crafting_table size=1x1:
-  fill id=bench mat_slot=crafting_table from=0,0,0 to=0,0,0
+  fill id=bench mat_slot=crafting_table_bench from=0,0,0 to=0,0,0
 
 def furnace size=1x1:
-  fill id=oven mat_slot=furnace from=0,0,0 to=0,0,0
+  fill id=oven mat_slot=furnace_oven from=0,0,0 to=0,0,0
 
 def barrel size=1x1:
-  fill id=cask mat_slot=barrel from=0,0,0 to=0,0,0
+  fill id=cask mat_slot=barrel_cask from=0,0,0 to=0,0,0
 
 def lectern size=1x1:
-  fill id=stand mat_slot=lectern from=0,0,0 to=0,0,0
+  fill id=stand mat_slot=lectern_stand from=0,0,0 to=0,0,0
 
 def wall_torch size=1x1:
-  fill id=flame mat_slot=torch from=0,0,0 to=0,0,0
+  fill id=flame mat_slot=wall_torch_flame from=0,0,0 to=0,0,0
 
 def lantern size=1x1:
-  fill id=light mat_slot=lantern from=0,0,0 to=0,0,0
+  fill id=light mat_slot=lantern_light from=0,0,0 to=0,0,0
 ```
 
 Each def is written with its front toward `+z` and its back toward `-z`, so a `chair`'s stair has
@@ -309,14 +312,14 @@ The Y axis is unaffected by topological selectors; every placement currently lan
 
 ### 9.3.2 Origin selectors
 
-Each `place` carries **exactly one** of `at`, `east_of`, `north_of`. In the formulas below,
-`prior` is the placement `ID` names and `new` is the one being placed. An origin is a placement's
-low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint plus the roof's
-`overhang=` columns on each side, the same inflated extent the lockfile records.
+Each `place` of a site carries **exactly one** of `at`, `east_of`, `north_of`. In the formulas
+below, `prior` is the placement `ID` names and `new` is the one being placed. An origin is a
+placement's low-`x`, low-`z` corner, and `dims` is its full extent: the `size=WxH` footprint plus
+the roof's `overhang=` columns on each side, the same inflated extent the lockfile records.
 
 | Selector | Effect | Notes |
 |---|---|---|
-| `at=origin` | Anchors at world `(0, 0, 0)`. | The only legal `at=` value. The first `place` in a site must use it, since there is no implicit default. |
+| `at=origin` | Anchors at world `(0, 0, 0)`. | The only legal `at=` value in a site. The first `place` in a site must use it, since there is no implicit default. |
 | `east_of=ID gap=N` | New origin = `(prior.x + prior.dims.x + N, prior.y, prior.z)`. | `ID` must name a place declared earlier in the same `site`. `gap` is in blocks between the two facing bounding-box faces (each the wall plus its `overhang=` columns; `0` → the boxes touch), defaulting to `0`. |
 | `north_of=ID gap=N` | New origin = `(prior.x, prior.y, prior.z − new.dims.z − N)`. | Same `ID` and `gap` rules as `east_of`. Because an origin is the low-`z` corner, the step back is the new placement's own depth: that is what puts its `+z` face `N` blocks from the prior's `−z` face whichever of the two is deeper. |
 
@@ -351,11 +354,11 @@ does one refused because the row it is placed relative to was. An `E_INCOMPATIBL
 
 ### 9.3.3 Cross-scope references
 
-Every `place` row declares `id=`, `use=`, and `theme=`. A row short of any of them cannot become a
-placement: there is no name for its structure file, no `def` to instantiate, or no theme to resolve
-its `mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every missing key,
-and the row is dropped. A key that is present but not a label (`use=3`) is `E_TYPE_MISMATCH_LABEL`
-instead.
+Every `place` row of a site declares `id=`, `use=`, and `theme=`. A row short of any of them cannot
+become a placement: there is no name for its structure file, no `def` to instantiate, or no theme to
+resolve its `mat_slot=` members against. That is `E_INCOMPLETE_PLACE`. The message names every
+missing key, and the row is dropped. A key that is present but not a label (`use=3`) is
+`E_TYPE_MISMATCH_LABEL` instead.
 
 `id=` is required rather than auto-assigned, unlike the geometry members of
 [§9.2](#92-editing-model), because it is the name `east_of=` and `connect` refer to and the name its

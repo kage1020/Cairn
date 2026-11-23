@@ -561,7 +561,7 @@ fn collect_floors(module: &Module, scope: FloorScope) -> Vec<VersionFloor> {
 
 /// The parts of a module a build actually instantiates, by declared name.
 struct InstantiatedParts<'a> {
-    /// Defs some `place use=NAME` in a `site` names.
+    /// Defs some `place use=NAME` in a `site`, a `struct` or a placed def's body names.
     defs: HashSet<&'a str>,
     /// Themes some scope binds.
     themes: HashSet<&'a str>,
@@ -609,18 +609,28 @@ impl<'a> InstantiatedParts<'a> {
             let Item::Site { body, .. } = item else {
                 continue;
             };
-            parts.walk(body, &declared_defs, &declared_themes, scope);
+            parts.walk(body, &declared_defs, Some((&declared_themes, scope)));
+        }
+        // A body's `place` builds a def one level down, and its `theme=` binds nothing.
+        let placed_from_sites = parts.defs.clone();
+        for item in &module.items {
+            let body = match item {
+                Item::Struct { body, .. } => body,
+                Item::Def { name, body, .. } if placed_from_sites.contains(name.as_str()) => body,
+                _ => continue,
+            };
+            parts.walk(body, &declared_defs, None);
         }
         parts
     }
 
-    /// Collects the `place` lines of one body and the bodies under it.
+    /// Collects the `place` lines of one body and the bodies under it, and the themes their
+    /// `theme=` binds among `themes` under its scope when the body is a site's.
     fn walk(
         &mut self,
         body: &'a [Statement],
         declared_defs: &HashSet<&'a str>,
-        declared_themes: &[&'a str],
-        scope: FloorScope,
+        themes: Option<(&[&'a str], FloorScope)>,
     ) {
         for (_, statement) in guarded_lines(body) {
             let Statement::Generic {
@@ -632,7 +642,7 @@ impl<'a> InstantiatedParts<'a> {
             else {
                 continue;
             };
-            self.walk(children, declared_defs, declared_themes, scope);
+            self.walk(children, declared_defs, themes);
             if keyword != "place" {
                 continue;
             }
@@ -641,7 +651,8 @@ impl<'a> InstantiatedParts<'a> {
             {
                 self.defs.insert(declared);
             }
-            if let Some(written) = label_arg(args, "theme")
+            if let Some((declared_themes, scope)) = themes
+                && let Some(written) = label_arg(args, "theme")
                 && let Some(bound) = bound_alike(
                     declared_themes,
                     written,

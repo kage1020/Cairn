@@ -24,6 +24,35 @@ pub fn def(name: &str) -> Option<&'static DefIr> {
     library().defs.iter().find(|def| def.name == name)
 }
 
+/// The def a body's `place use=NAME` builds.
+#[derive(Debug, Clone, Copy)]
+pub enum Placed<'a> {
+    /// A def of the file.
+    File(&'a DefIr),
+    /// A def of the library, which no def of the file shadows.
+    Library(&'static DefIr),
+}
+
+impl<'a> Placed<'a> {
+    /// The def itself.
+    #[must_use]
+    pub fn def(self) -> &'a DefIr {
+        match self {
+            Self::File(def) | Self::Library(def) => def,
+        }
+    }
+}
+
+/// The def named `name` that a body's `place` builds: the one of `defs`, the file's, or else the
+/// library's.
+#[must_use]
+pub fn placed<'a>(name: &str, defs: &'a [DefIr]) -> Option<Placed<'a>> {
+    defs.iter()
+        .find(|def| def.name == name)
+        .map(Placed::File)
+        .or_else(|| def(name).map(Placed::Library))
+}
+
 /// Every `def` the library ships, in source order.
 #[must_use]
 pub fn defs() -> &'static [DefIr] {

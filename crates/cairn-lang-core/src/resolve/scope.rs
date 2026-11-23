@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use indexmap::IndexMap;
 
 use crate::diagnostic::Diagnostic;
-use crate::furniture;
+use crate::furniture::{self, Placed};
 use crate::intent::{DefIr, Member, MemberBody, MemberRole, ValueWithSpan, levels_under};
 
 use super::binding::{ThemeBinding, TokenKind, classify_token, member_form};
@@ -86,10 +86,9 @@ fn resolve_placed_defs(
         if !matches!(member.role, MemberRole::Place) {
             continue;
         }
-        let Some(name) = member
-            .arguments
-            .get("use")
-            .and_then(|v| v.value.as_label_str())
+        let Some(def) = member
+            .used_def()
+            .and_then(|name| furniture::placed(name, ctx.defs))
         else {
             continue;
         };
@@ -98,21 +97,22 @@ fn resolve_placed_defs(
             members: IndexMap::new(),
             placed: IndexMap::new(),
         };
-        if let Some(def) = ctx.defs.iter().find(|def| def.name == name) {
-            resolve_members(&def.members, &[], bound, sibling_slots, &mut placed, ctx);
-        } else if let Some(def) = furniture::def(name) {
-            let slots = library_slots(member, bound.map(|(_, slots)| slots));
-            let none = HashSet::new();
-            resolve_members(
-                &def.members,
-                &[],
-                Some((LIBRARY_THEME, &slots)),
-                &none,
-                &mut placed,
-                ctx,
-            );
-        } else {
-            continue;
+        match def {
+            Placed::File(def) => {
+                resolve_members(&def.members, &[], bound, sibling_slots, &mut placed, ctx);
+            }
+            Placed::Library(def) => {
+                let slots = library_slots(member, bound.map(|(_, slots)| slots));
+                let none = HashSet::new();
+                resolve_members(
+                    &def.members,
+                    &[],
+                    Some((LIBRARY_THEME, &slots)),
+                    &none,
+                    &mut placed,
+                    ctx,
+                );
+            }
         }
         out.placed.insert(member.span.start, placed);
     }

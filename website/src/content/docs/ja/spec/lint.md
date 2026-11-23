@@ -101,7 +101,7 @@ title: "11. Lint と制約検証"
 | `W_ABSTRACT_TOKEN_DEFERRED` | 同じく抽象マテリアルトークンだが、カタログがまったく渡されておらず、照合できない。 |
 | `W_STATE_LITERAL_UNCHECKED` | 正規トークンのステートリテラル (`@oak_log[axis=x]`) を書かれたまま使った。固定したターゲットのパックがそのブロックのステートを記録しておらず、照らし合わせる先がない ([バージョンとエディション](/ja/spec/versioning-editions/#ステートはターゲットでのブロックのステートと照らし合わせる))。 |
 | `W_NO_THEME_BOUND` | `mat_slot=` を読むスコープにテーマが割り当てられていないので、そこで読む `mat_slot=` はどれもブロックに解決されない。 |
-| `W_THEME_VARIANT_REBOUND` | `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
+| `W_THEME_VARIANT_REBOUND` | `site` の `place theme=` があるエディションのバリアントを名指したが、固定したエディションでは別のバリアントを割り当てた ([バージョンとエディション](/ja/spec/versioning-editions/))。 |
 | `W_INTENT_DEGRADED` | パレットのエントリが、固定したバージョンでは表せない意図を失った。1.26.60 より前の Bedrock での階段の `shape` や、そのバージョンが自分で導くのにメンバーが書いたステート (そこでのダストの `connect=` など) がその例で、パックの `sensitivity` の文言で、または隣にもう一方の半分がない Bedrock のチェストの半分の `type` ([エンティティ §8.1](/ja/spec/entities/#81-2-つの段階)) で、失った意図ごとに 1 行出る ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#107-java--bedrock-の可搬性))。 |
 | `W_PREVIOUSLY_VERIFIED_TARGET` | 置き換えるロックが、別の `(edition, version)` を検証していた。行には両方が示される ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
 | `W_SEMANTIC_SENSITIVITY` | `W_PREVIOUSLY_VERIFIED_TARGET` に続けて、このビルドのメンバーのうち、新しいターゲットでは解決が変わりうるものを示す。ロックが検証したバージョンとターゲットの間にある境界バージョンで、`semantic_sensitivity` の行がそのブロックを挙げているメンバーである ([§10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。 |
@@ -170,7 +170,7 @@ title: "11. Lint と制約検証"
 | `E_INVALID_PLACE_ORIGIN` | `site` の `place` に原点セレクタがない、または 2 つ以上ある。`origin` 以外の `at=` を持っている。または `east_of=` / `north_of=` の値がラベルではない ([§9.3](/ja/spec/components-editing-sites/#93-site-による複数建築))。 |
 | `E_PLACEMENT_OVERLAP` | 1 つの site の 2 つの `place` 行が、セルを共有する箱に解決される。または、`connect` 行の通路が、結ばない配置の箱の中にセルを敷く ([エンティティ §8.2](/ja/spec/entities/#82-アンカーの規約))。 |
 | `E_UNRESOLVED_PLACE_REF` | `place use=`、`east_of=` / `north_of=`、`connect` の端点が、存在しない place や def を指している。本体の `place use=` は家具ライブラリの def も指せる ([§9.1.2](/ja/spec/components-editing-sites/#912-家具ライブラリ))。 |
-| `E_UNRESOLVED_THEME_REF` | `place theme=` が、モジュールの宣言していないテーマを指している。 |
+| `E_UNRESOLVED_THEME_REF` | `site` の `place theme=` が、モジュールの宣言していないテーマを指している。 |
 | `W_DEFERRED_PLACE` | `east_of=` / `north_of=` が id を理由に拒否された `place` を指しているので、指している側の行も配置されない。 |
 | `W_UNUSED_DEF` | `site` でも本体でも、どの `place use=` からも参照されていない `def`。 |
 

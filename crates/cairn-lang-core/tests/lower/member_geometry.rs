@@ -655,3 +655,21 @@ fn the_geometry_serializes_beside_the_resolved_state() {
         }),
     );
 }
+
+#[test]
+fn a_placed_def_declares_the_box_of_its_fills_turned_and_not_its_anchor() {
+    let source = format!(
+        "{PRELUDE}def hang size=2x1:\n  fill mat_slot=wall from=1,2,0 to=1,2,0\n\n\
+         struct s size=5x3\n  walls mat_slot=wall height=3\n  \
+         place use=hang at=1,1,1 facing=north\n  place use=hang at=1,1,1\n"
+    );
+    let ir = lowered(&source);
+    assert_eq!(findings(&source, &ir), []);
+    assert_eq!(
+        geometry(&ir)[1..],
+        [
+            ("place", whole((1, 1, 1), boxed((1, 3, 1), (1, 3, 1)), None)),
+            ("place", whole((1, 1, 1), boxed((2, 3, 1), (2, 3, 1)), None)),
+        ],
+    );
+}

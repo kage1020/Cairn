@@ -252,10 +252,7 @@ fn lower_site<'a>(
             continue;
         };
 
-        let use_name = member
-            .arguments
-            .get("use")
-            .and_then(|v| v.value.as_label_str());
+        let use_name = member.used_def();
         let theme_name = member
             .arguments
             .get("theme")

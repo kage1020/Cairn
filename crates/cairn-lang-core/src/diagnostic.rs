@@ -131,17 +131,17 @@ pub enum DiagnosticCode {
     DefNoSize,
     /// A `place use=`, `east_of=` / `north_of=` or `connect` endpoint names no such def or place.
     UnresolvedPlaceRef,
-    /// A `place theme=NAME` references a theme the module does not declare.
+    /// A `site`'s `place theme=NAME` references a theme the module does not declare.
     UnresolvedThemeRef,
     /// No per-edition variant of a declared theme can bind under the pinned edition.
     ThemeVariantMissing,
-    /// A `place theme=` named one edition's variant and the pinned edition bound another.
+    /// A `site`'s `place theme=` named one edition's variant and the pinned edition bound another.
     ThemeVariantRebound,
     /// A scope's extent exceeds [`crate::block_array::MAX_STRUCTURE_VOLUME`], so it is skipped.
     StructureTooLarge,
     /// A scope paints more states than [`crate::block_array::PALETTE_CAPACITY`], so it is skipped.
     PaletteTooLarge,
-    /// A `place` row omits `id=`, `use=` or `theme=`.
+    /// A `site`'s `place` row omits `id=`, `use=` or `theme=`.
     IncompletePlace,
     /// A `place id=` that [`crate::ids::PlaceId`] refuses.
     InvalidPlaceId,
@@ -153,8 +153,8 @@ pub enum DiagnosticCode {
     DuplicatePlaceId,
     /// Two scopes a build writes share a file name, ignoring case.
     OutputNameCollision,
-    /// A `place` with no origin selector or more than one, an `at=` other than `origin`, or an
-    /// `east_of=` / `north_of=` that is not a label.
+    /// A `site`'s `place` with no origin selector or more than one, an `at=` other than `origin`,
+    /// or an `east_of=` / `north_of=` that is not a label.
     InvalidPlaceOrigin,
     /// Two `place` rows of one site whose boxes share a cell, or a walkway laid inside a
     /// placement it does not join.

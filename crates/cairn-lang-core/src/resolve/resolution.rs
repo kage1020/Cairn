@@ -101,6 +101,20 @@ pub struct ScopeResolution {
     pub placed: IndexMap<usize, ScopeResolution>,
 }
 
+impl ScopeResolution {
+    /// Whether an error refuses the `mat_slot=` of the member whose line starts at `start`, or of
+    /// a line of the def a `place` there builds.
+    pub(crate) fn refuses(&self, start: usize) -> bool {
+        self.members
+            .get(&start)
+            .is_some_and(|binding| binding.refused)
+            || self
+                .placed
+                .get(&start)
+                .is_some_and(|placed| placed.members.values().any(|binding| binding.refused))
+    }
+}
+
 /// Resolved data attached to a single [`Member`](crate::intent::Member).
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct ResolvedMemberBinding {

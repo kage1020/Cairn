@@ -5,7 +5,8 @@
   blocks. It paints in `fixtures`, its slots resolved against the body's theme. Only a sized `def`
   of slotted `fill` lines can be built so; any other, a cell outside the wall ring or the
   footprint, and a missing `use=` or `at=` are `E_INVALID_MEMBER`, and a def above walls that
-  build nothing is `W_DEFERRED_MEMBER`.
+  build nothing is `W_DEFERRED_MEMBER`. `theme=`, `east_of=`, `north_of=` and `gap=` on a body's
+  `place` are `W_IGNORED_ARGUMENT`.
 - *(core)* The compiler ships a furniture library: `table`, `chair`, `fireplace`, `bookcase`,
   `crafting_table`, `furnace`, `barrel`, `lectern`, `wall_torch` and `lantern`, with a theme of
   its own that builds any slot the body's theme leaves unbound. A body's `use=` names one when the

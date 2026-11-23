@@ -4,8 +4,8 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
-use crate::furniture;
-use crate::intent::{IntentModule, Member, MemberRole};
+use crate::furniture::{self, Placed};
+use crate::intent::{DefIr, IntentModule, Member, MemberRole};
 
 use super::unresolved_ref::unresolved_ref_diag;
 
@@ -38,39 +38,40 @@ fn walk(
             continue;
         }
         // A missing or mistyped `use=` is the painter's or `check::type_mismatch`'s to report.
-        let Some(name) = member
-            .arguments
-            .get("use")
-            .and_then(|v| v.value.as_label_str())
-        else {
+        let Some(name) = member.used_def() else {
             continue;
         };
-        if ir.defs.iter().any(|def| def.name == name) {
-            used.insert(name.to_owned());
-        } else if furniture::def(name).is_none() {
-            let candidates = ir
-                .defs
-                .iter()
-                .chain(furniture::defs())
-                .map(|def| def.name.as_str());
-            let mut finding = unresolved_ref_diag(
-                DiagnosticCode::UnresolvedPlaceRef,
-                &format!(
-                    "`use={name}` names no def of this file and none of the furniture library"
-                ),
-                member.span.clone(),
-                name,
-                candidates,
-            );
-            let library: Vec<&str> = furniture::defs().iter().map(|d| d.name.as_str()).collect();
-            finding.notes.push(DiagnosticNote {
-                span: None,
-                message: format!(
-                    "declare a `def` of that name, or name one the furniture library ships: {}",
-                    library.join(", "),
-                ),
-            });
-            diagnostics.push(finding);
+        match furniture::placed(name, &ir.defs) {
+            Some(Placed::File(_)) => {
+                used.insert(name.to_owned());
+            }
+            Some(Placed::Library(_)) => {}
+            None => diagnostics.push(unresolved(member, name, &ir.defs)),
         }
     }
+}
+
+/// The `E_UNRESOLVED_PLACE_REF` on `member`, whose `use=` names `name`, a def neither of `defs` nor
+/// of the furniture library.
+fn unresolved(member: &Member, name: &str, defs: &[DefIr]) -> Diagnostic {
+    let candidates = defs
+        .iter()
+        .chain(furniture::defs())
+        .map(|def| def.name.as_str());
+    let mut finding = unresolved_ref_diag(
+        DiagnosticCode::UnresolvedPlaceRef,
+        &format!("`use={name}` names no def of this file and none of the furniture library"),
+        member.span.clone(),
+        name,
+        candidates,
+    );
+    let library: Vec<&str> = furniture::defs().iter().map(|d| d.name.as_str()).collect();
+    finding.notes.push(DiagnosticNote {
+        span: None,
+        message: format!(
+            "declare a `def` of that name, or name one the furniture library ships: {}",
+            library.join(", "),
+        ),
+    });
+    finding
 }

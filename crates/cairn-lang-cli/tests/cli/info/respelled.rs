@@ -249,3 +249,24 @@ fn json_lists_each_version_with_the_id_it_writes() {
         ]),
     );
 }
+
+#[test]
+fn a_library_def_a_body_places_is_named_at_its_place_line() {
+    let fixture = Fixture::new(
+        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x3\n  \
+         walls mat_slot=wall height=3\n  place use=fireplace at=1,1,1\n",
+    );
+    let run = info(&fixture, "java,bedrock", &[]);
+    assert_eq!(run.code, Some(0), "{}", run.stderr);
+    assert_eq!(
+        respelled_row(&run),
+        "Java: none   Bedrock: minecraft:bricks"
+    );
+    assert_eq!(
+        respelled_notes(&fixture, &run),
+        [
+            "note: s.crn:6:3: `minecraft:bricks` is written `minecraft:brick_block` at bedrock \
+             1.21.0, 1.21.40, 1.21.60, 1.26.60, per the registry pack's state map"
+        ],
+    );
+}

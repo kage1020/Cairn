@@ -668,10 +668,12 @@ pub fn resolve_block_state(
 /// block state it spells.
 #[must_use]
 pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)> {
+    // A def a body's `place` builds is resolved under that body, one level down.
     let bindings = || {
         resolution
             .scopes
             .values()
+            .flat_map(|scope| std::iter::once(scope).chain(scope.placed.values()))
             .flat_map(|scope| scope.members.values())
     };
     let slots = bindings().filter_map(|binding| binding.slot_value.as_ref());
@@ -693,8 +695,19 @@ pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)
         )
         .collect();
     tokens.sort_by_key(|(span, _)| span.start);
-    tokens.dedup_by_key(|(span, _)| span.start);
-    tokens
+    // The library's slots are all written at the `place` line that reads them.
+    let mut kept: Vec<(Span, BlockState)> = Vec::with_capacity(tokens.len());
+    for token in tokens {
+        let written = kept
+            .iter()
+            .rev()
+            .take_while(|(span, _)| span.start == token.0.start)
+            .any(|(_, state)| *state == token.1);
+        if !written {
+            kept.push(token);
+        }
+    }
+    kept
 }
 
 /// [`validated_id`] for a canonical token, which the target may spell another way.

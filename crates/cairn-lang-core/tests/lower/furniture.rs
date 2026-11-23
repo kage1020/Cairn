@@ -33,15 +33,13 @@ fn stood(members: &str) -> Vec<Placed> {
     stood_in(&hall_under(THEME, members))
 }
 
-/// The findings `members` raises in the hall under `theme`, which builds nothing else.
-fn refused_under(theme: &str, members: &str) -> Vec<(DiagnosticCode, String, String, Vec<String>)> {
-    let src = hall_under(theme, members);
-    let out = lowered(&src);
-    let placed = blocks_where(only_structure(&out), |id| {
-        !matches!(id, "minecraft:cobblestone" | "minecraft:air")
-    });
-    assert_eq!(placed, [], "{members}");
-    findings(&src, &out)
+/// A finding as `(code, the text it spans, primary, notes)`.
+type Owned = (DiagnosticCode, String, String, Vec<String>);
+
+/// Every finding lowering `src` raises.
+fn found(src: &str) -> Vec<Owned> {
+    let out = lowered(src);
+    findings(src, &out)
         .into_iter()
         .map(|(code, at, primary, notes)| {
             (
@@ -54,8 +52,28 @@ fn refused_under(theme: &str, members: &str) -> Vec<(DiagnosticCode, String, Str
         .collect()
 }
 
+/// The findings `members` raises in the hall under `theme`, which builds nothing else.
+fn refused_under(theme: &str, members: &str) -> Vec<Owned> {
+    let src = hall_under(theme, members);
+    let placed = blocks_where(only_structure(&lowered(&src)), |id| {
+        !matches!(id, "minecraft:cobblestone" | "minecraft:air")
+    });
+    assert_eq!(placed, [], "{members}");
+    found(&src)
+}
+
+/// One `E_INVALID_MEMBER` on `line` with `primary` and `notes`.
+fn invalid(line: &str, primary: &str, notes: &[&str]) -> Vec<Owned> {
+    vec![(
+        DiagnosticCode::InvalidMember,
+        line.to_owned(),
+        primary.to_owned(),
+        notes.iter().map(|note| (*note).to_owned()).collect(),
+    )]
+}
+
 /// [`refused_under`] [`THEME`].
-fn refused(members: &str) -> Vec<(DiagnosticCode, String, String, Vec<String>)> {
+fn refused(members: &str) -> Vec<Owned> {
     refused_under(THEME, members)
 }
 
@@ -125,7 +143,7 @@ fn a_fireplace_spans_three_columns_of_its_wall() {
             at((2, 1, 3), hearth),
             at((2, 2, 3), hearth),
             at((2, 3, 3), hearth),
-            at((3, 1, 3), "minecraft:campfire"),
+            at((3, 1, 3), "minecraft:campfire[facing=north]"),
             at((3, 3, 3), hearth),
             at((4, 1, 3), hearth),
             at((4, 2, 3), hearth),
@@ -154,8 +172,7 @@ fn a_def_of_the_file_turns_its_cells_and_their_axes() {
 
 #[test]
 fn the_body_theme_rebinds_a_library_slot() {
-    let theme =
-        "theme t:\n  slot wall -> @cobblestone\n  slot chair -> @spruce_stairs[facing=north]\n\n";
+    let theme = "theme t:\n  slot wall -> @cobblestone\n  slot chair_seat -> @spruce_stairs[facing=north]\n\n";
     assert_eq!(
         stood_in(&hall_under(theme, "place use=chair at=3,1,2 facing=west")),
         [at((3, 1, 2), "minecraft:spruce_stairs[facing=east]")],
@@ -321,19 +338,17 @@ fn a_def_above_walls_that_build_nothing_is_deferred() {
         "{THEME}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=shell height=3\n  \
          place use=table at=3,1,2\n"
     );
-    let out = lowered(&src);
     assert_eq!(
-        findings(&src, &out)
-            .into_iter()
-            .filter(|(code, ..)| *code == DiagnosticCode::DeferredMember)
-            .collect::<Vec<_>>(),
+        found(&src),
         [(
             DiagnosticCode::DeferredMember,
-            "place use=table at=3,1,2",
-            "def `table` placed here reaches row 2, which does not fit in the struct (dims.y=1)",
+            "place use=table at=3,1,2".to_owned(),
+            "def `table` placed here reaches row 2, which does not fit in the struct (dims.y=1)"
+                .to_owned(),
             vec![
                 "a `walls` member that would reach these rows paints nothing; the def is built \
-                 once that member's material resolves to a block",
+                 once that member's material resolves to a block"
+                    .to_owned(),
             ],
         )],
     );
@@ -362,40 +377,338 @@ fn a_def_a_body_cannot_build_is_refused_at_its_line() {
         "def booth size=2x2:\n  walls mat_slot=wall height=2\n\n{}",
         hall_under(THEME, "place use=booth at=2,1,1"),
     );
-    let out = lowered(&src);
-    let found: Vec<_> = findings(&src, &out)
-        .into_iter()
-        .filter(|(code, ..)| *code == DiagnosticCode::InvalidMember)
-        .collect();
     assert_eq!(
-        found,
-        [(
-            DiagnosticCode::InvalidMember,
+        found(&src),
+        invalid(
             "place use=booth at=2,1,1",
             "def `booth` holds a `walls` line, which a def placed in a body cannot build",
-            vec![
-                "a def placed in a body is built from `fill` lines that each write a \
-                 `mat_slot=` and a box inside its footprint; a def of any other line is placed \
-                 from a `site`",
-                "the line it cannot build",
-            ],
-        )],
+            &[UNBUILDABLE, "the line it cannot build"],
+        ),
     );
     let sizeless = format!(
         "def stool:\n  fill mat_slot=post from=0,0,0 to=0,0,0\n\n{}",
         hall_under(THEME, "place use=stool at=2,1,1"),
     );
-    let out = lowered(&sizeless);
     assert_eq!(
-        findings(&sizeless, &out)
-            .into_iter()
-            .filter(|(code, ..)| *code == DiagnosticCode::InvalidMember)
-            .collect::<Vec<_>>(),
-        [(
-            DiagnosticCode::InvalidMember,
+        found(&sizeless),
+        invalid(
             "place use=stool at=2,1,1",
             "def `stool` declares no `size=`, so nothing says how much floor it takes",
-            vec!["give it a footprint, as in `def stool size=1x1:`"],
-        )],
+            &["give it a footprint, as in `def stool size=1x1:`"],
+        ),
+    );
+}
+
+/// The note on a def a body cannot build, saying what one is built from.
+const UNBUILDABLE: &str = "a def placed in a body is built from `fill` lines that each write a \
+                           `mat_slot=` and a box inside its footprint; a def of any other line \
+                           is placed from a `site`";
+
+/// A theme binding four planks, one to each of the slots `a` to `d`.
+const FOUR: &str = "theme t:\n  slot wall -> @cobblestone\n  slot a -> @oak_planks\n  \
+                    slot b -> @spruce_planks\n  slot c -> @birch_planks\n  \
+                    slot d -> @jungle_planks\n\n";
+
+/// The blocks a def of the file `def` builds, placed by `place` in the hall under [`FOUR`].
+fn four_placed(def: &str, place: &str) -> Vec<Placed> {
+    stood_in(&format!("{FOUR}{def}\n\n{}", hall_under("", place)))
+}
+
+#[test]
+fn a_deep_def_at_a_cell_turns_both_its_extents() {
+    let quad = "def quad size=2x2:\n  fill mat_slot=a from=0,0,0 to=0,0,0\n  \
+                fill mat_slot=b from=1,0,0 to=1,0,0\n  fill mat_slot=c from=0,0,1 to=0,0,1\n  \
+                fill mat_slot=d from=1,0,1 to=1,0,1";
+    let faced =
+        |facing: &str| four_placed(quad, &format!("place use=quad at=2,1,1 facing={facing}"));
+    let planks = |[low, near, far, high]: [&str; 4]| {
+        vec![
+            at((2, 1, 1), &format!("minecraft:{low}_planks")),
+            at((2, 1, 2), &format!("minecraft:{near}_planks")),
+            at((3, 1, 1), &format!("minecraft:{far}_planks")),
+            at((3, 1, 2), &format!("minecraft:{high}_planks")),
+        ]
+    };
+    assert_eq!(faced("south"), planks(["oak", "birch", "spruce", "jungle"]));
+    assert_eq!(faced("west"), planks(["birch", "jungle", "oak", "spruce"]));
+    assert_eq!(faced("north"), planks(["jungle", "spruce", "birch", "oak"]));
+    assert_eq!(faced("east"), planks(["spruce", "oak", "jungle", "birch"]));
+}
+
+#[test]
+fn a_deep_def_by_each_wall_stands_its_back_row_against_it() {
+    let shelf = "def shelf size=1x2:\n  fill mat_slot=a from=0,0,0 to=0,0,0\n  \
+                 fill mat_slot=b from=0,0,1 to=0,0,1";
+    let by = |side: &str| {
+        four_placed(
+            shelf,
+            &format!("place use=shelf at=inside.{side} offset=2 y=1"),
+        )
+    };
+    let (back, front) = ("minecraft:oak_planks", "minecraft:spruce_planks");
+    assert_eq!(by("back"), [at((4, 1, 1), back), at((4, 1, 2), front)]);
+    assert_eq!(by("front"), [at((2, 1, 2), front), at((2, 1, 3), back)]);
+    assert_eq!(by("left"), [at((1, 1, 2), back), at((2, 1, 2), front)]);
+    assert_eq!(by("right"), [at((4, 1, 2), front), at((5, 1, 2), back)]);
+}
+
+#[test]
+fn the_library_s_blocks_turn_with_the_def_and_its_cubes_do_not() {
+    let faced = |piece: &str, x: u32| format!("place use={piece} at={x},1,1 facing=west");
+    let members = [
+        faced("furnace", 1),
+        faced("lectern", 2),
+        faced("barrel", 3),
+        faced("crafting_table", 4),
+        faced("wall_torch", 5),
+    ]
+    .join("\n  ");
+    assert_eq!(
+        stood(&members),
+        [
+            at((1, 1, 1), "minecraft:furnace[facing=west]"),
+            at((2, 1, 1), "minecraft:lectern[facing=west]"),
+            at((3, 1, 1), "minecraft:barrel[facing=up]"),
+            at((4, 1, 1), "minecraft:crafting_table"),
+            at((5, 1, 1), "minecraft:wall_torch[facing=west]"),
+        ],
+    );
+}
+
+#[test]
+fn an_overhang_moves_a_placed_def_with_the_footprint() {
+    let src = format!(
+        "{THEME}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         roof kind=flat mat_slot=wall overhang=1\n  place use=table at=3,1,2\n  \
+         place use=chair at=inside.back offset=2 y=1\n"
+    );
+    assert_eq!(
+        stood_in(&src),
+        [
+            at((4, 1, 3), "minecraft:oak_fence"),
+            at((4, 2, 3), "minecraft:oak_pressure_plate"),
+            at((5, 1, 2), "minecraft:oak_stairs[facing=north]"),
+        ],
+    );
+}
+
+#[test]
+fn a_place_under_a_level_stands_on_the_level_s_row() {
+    let src = format!(
+        "{THEME}struct s size=7x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=5\n  \
+         level id=upper y=2\n    place use=table at=3,0,2\n    \
+         place use=chair at=inside.back offset=2 y=1\n"
+    );
+    assert_eq!(
+        stood_in(&src),
+        [
+            at((3, 2, 2), "minecraft:oak_fence"),
+            at((3, 3, 2), "minecraft:oak_pressure_plate"),
+            at((4, 3, 1), "minecraft:oak_stairs[facing=north]"),
+        ],
+    );
+}
+
+#[test]
+fn a_place_that_takes_a_cell_from_another_of_its_phase_conflicts() {
+    let conflict = |line: &str, earlier: &str| {
+        vec![(
+            DiagnosticCode::PhaseConflict,
+            line.to_owned(),
+            format!(
+                "`place` overwrites 1 voxel that `{earlier}` painted in the same phase, so which \
+                 block the build keeps is decided by the order the two lines are written in"
+            ),
+            vec![
+                "overwritten member declared here".to_owned(),
+                "If the override is deliberate this is the local-override rule of \
+                 spec/compilation \"Phase evaluation\" and the later line wins as written. If it \
+                 is not, move one of the two so their footprints do not meet."
+                    .to_owned(),
+                "Members in different phases may overlap freely — a `door` cut through a `walls` \
+                 is the evaluation model working — so this is only reported for two members the \
+                 same phase evaluates."
+                    .to_owned(),
+            ],
+        )]
+    };
+    let chair = "place use=chair at=3,1,2";
+    let src = hall_under(THEME, &format!("place use=table at=3,1,2\n  {chair}"));
+    assert_eq!(found(&src), conflict(chair, "place"));
+    let chair = "place use=chair at=inside.back offset=2 y=1";
+    let src = hall_under(
+        THEME,
+        &format!("chest at=inside.back offset=2 y=1\n  {chair}"),
+    );
+    assert_eq!(found(&src), conflict(chair, "chest"));
+}
+
+#[test]
+fn a_tall_def_is_refused_before_its_cells_are_listed() {
+    let src = format!(
+        "def tall size=1x1:\n  fill mat_slot=post from=0,0,0 to=0,4000000000,0\n\n{}",
+        hall_under(THEME, "place use=tall at=2,1,2"),
+    );
+    assert_eq!(
+        found(&src),
+        invalid(
+            "place use=tall at=2,1,2",
+            "def `tall` placed here reaches row 4000000001, which does not fit in the struct \
+             (dims.y=4)",
+            &[
+                "the struct's top row is 3",
+                "stand the def lower, or raise the `walls` to reach its rows",
+            ],
+        ),
+    );
+}
+
+#[test]
+fn a_def_on_a_cell_of_an_opening_is_refused() {
+    let door = "door side=front at=center";
+    let window = "window side=back offset=3 y=2 size=1x1 mat_slot=wall";
+    for (opening, place, keyword) in [
+        (door, "place use=bookcase at=3,1,4", "door"),
+        (window, "place use=bookcase at=3,1,0", "window"),
+    ] {
+        let src = hall_under(THEME, &format!("{opening}\n  {place}"));
+        assert_eq!(
+            found(&src),
+            invalid(
+                place,
+                &format!(
+                    "def `bookcase` placed here takes a cell the `{keyword}` holds, and would \
+                     erase it"
+                ),
+                &[
+                    &format!("the `{keyword}` whose cell it takes"),
+                    "stand the def clear of every `door`, `window` and `arch`",
+                ],
+            ),
+            "{opening}",
+        );
+        let bookshelves = blocks_where(only_structure(&lowered(&src)), |id| {
+            id == "minecraft:bookshelf"
+        });
+        assert_eq!(bookshelves, [], "{opening}");
+    }
+}
+
+#[test]
+fn a_def_a_body_cannot_build_is_refused_for_each_kind_of_line() {
+    let refusal = |def: &str, what: &str| {
+        let src = format!("{def}\n\n{}", hall_under(THEME, "place use=odd at=2,1,1"));
+        assert_eq!(
+            found(&src),
+            invalid(
+                "place use=odd at=2,1,1",
+                &format!("def `odd` holds {what}, which a def placed in a body cannot build"),
+                &[UNBUILDABLE, "the line it cannot build"],
+            ),
+            "{def}",
+        );
+    };
+    refusal(
+        "def odd size=1x1:\n  fill mat_slot=post from=0,0,0 to=1,0,0",
+        "a `fill` reaching past its 1x1 footprint",
+    );
+    refusal(
+        "def odd size=1x1:\n  fill mat_slot=post from=0,0,0 to=up",
+        "a `fill` whose `from=` and `to=` are not two coordinate triples",
+    );
+    refusal(
+        "def odd size=1x1:\n  fill fluid=water from=0,0,0 to=0,0,0",
+        "a water `fill`",
+    );
+    refusal(
+        "def odd size=1x1:\n  fill from=0,0,0 to=0,0,0",
+        "a `fill` with no `mat_slot=`",
+    );
+    refusal(
+        "def odd size=1x1:\n  place use=table at=0,0,0",
+        "a `place` line",
+    );
+}
+
+#[test]
+fn a_place_that_stands_its_def_nowhere_is_refused() {
+    assert_eq!(
+        refused("place at=3,1,2"),
+        invalid(
+            "place at=3,1,2",
+            "place has no `use=`, so nothing says which def it builds",
+            &["name a def of this file or of the furniture library, as in `use=table`"],
+        ),
+    );
+    assert_eq!(
+        refused("place use=table at=origin"),
+        invalid(
+            "place use=table at=origin",
+            "place `at=` must be `inside.<side>` or a coordinate triple, not identifier `origin`",
+            &[AT_FORMS],
+        ),
+    );
+    assert_eq!(
+        refused("place use=table at=inside.top"),
+        invalid(
+            "place use=table at=inside.top",
+            "place `at=inside.top`: `top` is not a wall side",
+            &["a side is one of front, back, left, right, as in `at=inside.front`"],
+        ),
+    );
+    assert_eq!(
+        refused("place use=table at=inside.back offset=wide y=1"),
+        invalid(
+            "place use=table at=inside.back offset=wide y=1",
+            "place `offset=` must be a non-negative integer that fits in u32, not identifier \
+             `wide`",
+            &["`offset=` counts cells along the wall from 0, its left end seen from outside"],
+        ),
+    );
+    assert_eq!(
+        refused("place use=table at=inside.back offset=2 y=high"),
+        invalid(
+            "place use=table at=inside.back offset=2 y=high",
+            "place `y=` must be a non-negative integer that fits in u32, not identifier `high`",
+            &["`y=` counts rows up from 0, the base row of the struct or of the def's `level`"],
+        ),
+    );
+}
+
+#[test]
+fn a_misspelt_anchor_is_offered_only_the_inside_of_a_wall() {
+    assert_eq!(
+        refused("place use=table at=insde.back offset=2 y=1"),
+        invalid(
+            "place use=table at=insde.back offset=2 y=1",
+            "place `at=insde.back` is not an anchor",
+            &[AT_FORMS, "did you mean `at=inside.back`?"],
+        ),
+    );
+    assert_eq!(
+        refused("place use=table at=bakc.outside offset=2 y=1"),
+        invalid(
+            "place use=table at=bakc.outside offset=2 y=1",
+            "place `at=bakc.outside`: `bakc` is not a wall side",
+            &[
+                "a side is one of front, back, left, right, as in `at=inside.front`",
+                "did you mean `at=inside.back`?",
+            ],
+        ),
+    );
+}
+
+#[test]
+fn a_slot_of_the_file_named_like_a_library_part_leaves_the_library_alone() {
+    let theme = "theme t:\n  slot wall -> @cobblestone\n  slot torch -> @torch\n\n";
+    assert_eq!(
+        stood_in(&hall_under(
+            theme,
+            "fill mat_slot=torch from=1,1,1 to=1,1,1\n  place use=wall_torch at=inside.back offset=3 y=2",
+        )),
+        [
+            at((1, 1, 1), "minecraft:torch"),
+            at((3, 2, 1), "minecraft:wall_torch[facing=south]"),
+        ],
     );
 }
