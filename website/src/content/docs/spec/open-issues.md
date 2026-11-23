@@ -57,6 +57,8 @@ become semantic primitives. The decision rests on experimental data from the [Ev
 Framework](/spec/evaluation/): the prompt set's columns and arches topic and its edit prompts
 measure how a model builds with the primitives there are.
 
-**Interiors.** Whether the `inside.front` prefix suffices or a higher-level `room` concept is
-needed, and whether furniture can be served by a `def` library. The prompt set's interiors topic
-and its edit prompts measure how a model builds them today.
+**Interiors.** Furniture is served by a `def` library, which a body's `place` builds against a
+wall or at a cell ([Components, Editing, and Multi-building
+§9.1.2](/spec/components-editing-sites/#912-the-furniture-library)). Whether the `inside.front`
+prefix suffices to lay a room out, or a higher-level `room` concept is needed, stays open. The
+prompt set's interiors topic and its edit prompts measure how a model builds them.

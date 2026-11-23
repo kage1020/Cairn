@@ -59,10 +59,7 @@ pub(super) fn resolve_site_placements(
         }
 
         // Recorded before any refusal of the row, so its `def` does not also earn `W_UNUSED_DEF`.
-        let use_target = member
-            .arguments
-            .get("use")
-            .and_then(|v| v.value.as_label_str());
+        let use_target = member.used_def();
         let use_def = use_target.and_then(|name| defs.iter().find(|d| d.name == name));
         if let Some(def) = use_def {
             used_defs.insert(def.name.clone());
@@ -241,7 +238,8 @@ pub(super) fn check_unused_defs(
             ),
             notes: vec![DiagnosticNote {
                 span: None,
-                message: "remove the def, or place an instance via `site ... place use=...`"
+                message: "remove the def, or place an instance via `site ... place use=...`, \
+                          or build one inside a body with `place use=...` there"
                     .to_owned(),
             }],
             data: None,

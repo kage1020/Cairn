@@ -10,7 +10,7 @@ use crate::block_array::Bbox;
 use crate::block_array::args::{diag_deferred_member_noted, diag_invalid_member};
 pub(super) use crate::block_array::geometry::Cell;
 
-use super::members::{StructCtx, unplaced_walls_note};
+use super::members::{RowFit, StructCtx};
 use super::repeat::Repeat;
 
 /// A corner as its line writes it, measured from the footprint's low corner.
@@ -116,6 +116,14 @@ pub(super) struct CellBox {
 }
 
 impl CellBox {
+    /// The box with corners `a` and `b`, in either order.
+    pub(super) fn spanning(a: Cell, b: Cell) -> Self {
+        Self {
+            low: (a.0.min(b.0), a.1.min(b.1), a.2.min(b.2)),
+            high: (a.0.max(b.0), a.1.max(b.1), a.2.max(b.2)),
+        }
+    }
+
     /// The box moved by `by`, which must keep it inside the block array.
     pub(super) fn shifted(self, by: Cell) -> Self {
         let add = |c: Cell| (c.0 + by.0, c.1 + by.1, c.2 + by.2);
@@ -193,32 +201,17 @@ pub(super) fn repeated_cells(
         .max_by_key(|(_, at)| at.1)
         .expect("a shape names at least one corner");
     let top = Top::of(key, highest, repeat, y_offset, shape.rise());
-    let written = &ctx.written;
-    let above_written = top.row >= u64::from(written.height);
-    if above_written && !written.unplaced_walls && top.row >= u64::from(written.reach) {
-        return Err(Box::new(above_the_struct(member, shape, top, ctx)));
-    }
-    // From here the repair is on another member, so the line only defers.
-    let deferral = if above_written && written.unplaced_walls {
-        Some(unplaced_walls_note(shape.rows(), shape.built()))
-    } else if above_written {
-        Some(format!(
-            "a `roof` whose `kind=` or `slope_to=` does not read may rise to {}; {} once that \
-             roof draws",
-            shape.rows(),
-            shape.built(),
-        ))
-    } else if top.row >= u64::from(ctx.dims.y) {
-        Some(ctx.shortfall().note(shape.rows(), shape.built()))
-    } else {
-        None
-    };
-    if let Some(note) = deferral {
-        return Err(Box::new(diag_deferred_member_noted(
-            member,
-            &past_the_struct(member, top, ctx),
-            &note,
-        )));
+    match ctx.row_fit(top.row, shape.rows(), shape.built()) {
+        RowFit::Fits => {}
+        RowFit::Above => return Err(Box::new(above_the_struct(member, shape, top, ctx))),
+        // The repair is on another member, so the line only defers.
+        RowFit::Waits(note) => {
+            return Err(Box::new(diag_deferred_member_noted(
+                member,
+                &past_the_struct(member, top, ctx),
+                &note,
+            )));
+        }
     }
     // The footprint and row checks above bound every component to the array.
     let cell = |(x, y, z): Corner| {

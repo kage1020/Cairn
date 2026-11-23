@@ -32,7 +32,7 @@ theme medieval:
 
 **スロットはマテリアルかメンバーの形を束縛します。** `slot` の行は、メンバーがそのブロックとして組み上げる正規トークンか抽象マテリアルトークンを束縛し、その後には何も書けません。そこに `key=value` を書くと `E_PARSE` です。代わりにメンバーの形を束縛することもできます。`hologram` を何として組み上げるかを示す名前だけの語 `text_display` か `sign` で、その後にその形が取るキーを書きます。テキストの display なら `billboard=` と `scale=`、看板なら `glowing=` で、`slot floating_text -> text_display scale=2.0` のように書きます ([バージョンとエディション §10.7](/ja/spec/versioning-editions/#代替を書くとき))。メンバーの形として組み上げるのは `hologram` だけなので、スロットがメンバーの形を束縛するほかのキーワードのメンバーは `E_INVALID_MEMBER` で、スロットがトークンを束縛する hologram も同じです。形が取らないキーは `E_UNKNOWN_ARGUMENT` で、ほかの語は `E_UNKNOWN_SLOT_TARGET` です。
 
-`def`、`theme`、`site` は、どれも同じ「スロットを持つコンポーネント」の仕組みで統一されています ([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。
+`def`、`theme`、`site` は、どれも同じ「スロットを持つコンポーネント」の仕組みで統一されています ([コンポーネント・編集・複数建築](/ja/spec/components-editing-sites/))。本体に置いた `def` はその本体のテーマに対して解決し、家具ライブラリの `def` は、そのテーマが束縛しないスロットをライブラリ自身のテーマで解決します ([コンポーネント・編集・複数建築 §9.1.2](/ja/spec/components-editing-sites/#912-家具ライブラリ))。
 
 ### セレクタのバインディング
 

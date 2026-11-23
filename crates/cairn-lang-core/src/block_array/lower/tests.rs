@@ -1472,7 +1472,7 @@ const SLOT_IGNORERS: &[(&str, &str)] = &[
     ),
     (
         "place",
-        "struct s size=3x3\n  place id=a use=hut theme=t at=origin mat_slot=d\n",
+        "struct s size=3x3\n  place id=a use=table at=1,0,1 mat_slot=d\n",
     ),
     (
         "connect",

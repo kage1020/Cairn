@@ -67,6 +67,14 @@ impl Member {
             .map(|slot| slot.name.as_str())
     }
 
+    /// The def name this line's `use=` writes, or `None` when it writes none or no label.
+    #[must_use]
+    pub fn used_def(&self) -> Option<&str> {
+        self.arguments
+            .get("use")
+            .and_then(|written| written.value.as_label_str())
+    }
+
     /// The value the line writes for `key=`, blockstate or not; a hoisted key is not here.
     #[must_use]
     pub fn written(&self, key: &str) -> Option<&ValueWithSpan> {
@@ -192,10 +200,11 @@ impl MemberRole {
                 | Self::Circuit
                 | Self::RawBlock
                 | Self::RawFill
-                | Self::RawRepeat,
+                | Self::RawRepeat
+                | Self::Place,
             )
             | (BodyKind::Site, Self::Place | Self::Connect) => true,
-            (BodyKind::Geometry, Self::Place | Self::Connect)
+            (BodyKind::Geometry, Self::Connect)
             | (
                 BodyKind::Site,
                 Self::Floor

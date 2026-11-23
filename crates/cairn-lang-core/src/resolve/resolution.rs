@@ -95,6 +95,24 @@ pub struct ScopeResolution {
     pub bound_theme: Option<String>,
     /// Per-member resolved binding, keyed by `member.span.start`.
     pub members: IndexMap<usize, ResolvedMemberBinding>,
+    /// The members of the `def` each `place` line of the body builds, resolved under this scope's
+    /// theme, keyed by that line's `span.start`.
+    #[serde(skip_serializing_if = "IndexMap::is_empty")]
+    pub placed: IndexMap<usize, ScopeResolution>,
+}
+
+impl ScopeResolution {
+    /// Whether an error refuses the `mat_slot=` of the member whose line starts at `start`, or of
+    /// a line of the def a `place` there builds.
+    pub(crate) fn refuses(&self, start: usize) -> bool {
+        self.members
+            .get(&start)
+            .is_some_and(|binding| binding.refused)
+            || self
+                .placed
+                .get(&start)
+                .is_some_and(|placed| placed.members.values().any(|binding| binding.refused))
+    }
 }
 
 /// Resolved data attached to a single [`Member`](crate::intent::Member).

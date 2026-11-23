@@ -10,6 +10,7 @@ use crate::edition::Edition;
 use crate::intent::{DefIr, IntentModule, ThemeIr};
 
 use super::binding::{SelectorMatch, ThemeBinding};
+use super::body_place::resolve_body_places;
 use super::output_names::check_output_names;
 use super::resolution::{Resolution, ScopeResolution, ValidatedConnect, struct_key};
 use super::scope::{ResolveCtx, resolve_struct_or_def};
@@ -82,6 +83,7 @@ fn resolve_branch(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
     };
 
     let mut ctx = ResolveCtx {
+        defs: &ir.defs,
         themes: &mut themes,
         applied_themes: &mut applied_themes,
         diagnostics: &mut diagnostics,
@@ -114,6 +116,7 @@ fn resolve_branch(ir: &IntentModule, edition: Option<Edition>) -> Resolution {
             &mut ctx,
         );
     }
+    resolve_body_places(ir, &mut used_defs, &mut diagnostics);
     check_unused_defs(&ir.defs, &used_defs, &mut diagnostics);
     check_output_names(ir, &scopes, &connects, &mut diagnostics);
 

@@ -14,10 +14,10 @@ use crate::block_array::joins::Face;
 use crate::block_array::openings::{WallSide, wall_length, wall_local_to_grid};
 
 use super::circuit::names_a_signal;
-use super::members::{StructCtx, side_name, unplaced_walls_note};
+use super::members::{RowFit, StructCtx, side_name};
 use super::stair::shift_outward;
 
-/// A one-cell member set against a wall, as its findings name it.
+/// A member set against a wall, as its findings name it.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct Fixture {
     /// Its keyword, such as `pressure_plate`.
@@ -215,9 +215,21 @@ pub(super) fn written_facing(
     )))
 }
 
-/// The note on an `at=` that names no anchor, saying what one is.
-const ANCHOR_FORMS: &str = "write `at=<side>.outside` to sit outside a wall or `at=inside.<side>` \
-                            to sit inside it, where `<side>` is front, back, left or right";
+/// The anchors a fixture's `at=` may name, and the note saying how to write one.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct AnchorForms {
+    /// Whether `<side>.outside` is one; a suggestion offers it only then.
+    pub(super) outside: bool,
+    /// The note on an `at=` that names none.
+    pub(super) note: &'static str,
+}
+
+/// Both anchors, by a wall's outer face and its inner one.
+const ANCHORS: AnchorForms = AnchorForms {
+    outside: true,
+    note: "write `at=<side>.outside` to sit outside a wall or `at=inside.<side>` to sit inside \
+           it, where `<side>` is front, back, left or right",
+};
 
 /// The note on an `at=inside.<side>` fixture on a struct with no interior.
 const INTERIOR_NEEDS: &str = "an interior needs a size of at least 3 on both axes";
@@ -259,13 +271,22 @@ impl Anchor {
 }
 
 /// Parse a fixture's `at=` value, or the refusal of any other shape.
-fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
+pub(super) fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
+    anchor_in(fixture, member, ANCHORS)
+}
+
+/// [`anchor_of`] for a fixture whose `at=` takes `forms`, which its findings suggest.
+pub(super) fn anchor_in(
+    fixture: Fixture,
+    member: &Member,
+    forms: AnchorForms,
+) -> Result<Anchor, Refusal> {
     let keyword = fixture.keyword;
     let refuse = |primary: String| {
         Box::new(diag_invalid_member(
             member,
             primary,
-            vec![ANCHOR_FORMS.to_owned()],
+            vec![forms.note.to_owned()],
         ))
     };
     let Some(raw) = member.arguments.get("at") else {
@@ -281,9 +302,14 @@ fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
         if let ValueKind::Ident(word) = &raw.value.kind
             && let Some(side) = known_or_nearest(word, &SIDE_NAMES)
         {
+            let message = if forms.outside {
+                format!("did you mean `at={side}.outside` or `at=inside.{side}`?")
+            } else {
+                format!("did you mean `at=inside.{side}`?")
+            };
             refusal.notes.push(DiagnosticNote {
                 span: None,
-                message: format!("did you mean `at={side}.outside` or `at=inside.{side}`?"),
+                message,
             });
         }
         return Err(refusal);
@@ -298,7 +324,7 @@ fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
     let (head, tail) = (segments[0].as_str(), segments[1].as_str());
     let refuse_with_suggestion = |primary: String, note: String| {
         let mut notes = vec![note];
-        notes.extend(intended_anchor(head, tail).map(|anchor| did_you_mean(&anchor)));
+        notes.extend(intended_anchor(head, tail, forms).map(|anchor| did_you_mean(&anchor)));
         Box::new(diag_invalid_member(member, primary, notes))
     };
     let not_a_side = |name: &str, example: &str| {
@@ -308,9 +334,14 @@ fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
         )
     };
     if tail == "outside" {
+        let example = if forms.outside {
+            "front.outside"
+        } else {
+            "inside.front"
+        };
         return WallSide::from_ident(head)
             .map(Anchor::Outside)
-            .ok_or_else(|| not_a_side(head, "front.outside"));
+            .ok_or_else(|| not_a_side(head, example));
     }
     if head == "inside" {
         return WallSide::from_ident(tail)
@@ -319,7 +350,7 @@ fn anchor_of(fixture: Fixture, member: &Member) -> Result<Anchor, Refusal> {
     }
     Err(refuse_with_suggestion(
         format!("{keyword} `at={dotref}` is not an anchor"),
-        ANCHOR_FORMS.to_owned(),
+        forms.note.to_owned(),
     ))
 }
 
@@ -332,9 +363,9 @@ fn known_or_nearest(word: &str, vocabulary: &[&'static str]) -> Option<&'static 
         .or_else(|| nearest_match(word, vocabulary.iter().copied()))
 }
 
-/// The `at=` anchor `head.tail` was likely meant as, when a segment is misspelled or the two are
-/// swapped.
-fn intended_anchor(head: &str, tail: &str) -> Option<String> {
+/// The `at=` anchor among `forms` that `head.tail` was likely meant as, when a segment is
+/// misspelled or the two are swapped.
+fn intended_anchor(head: &str, tail: &str, forms: AnchorForms) -> Option<String> {
     let (side, place) = match (
         known_or_nearest(head, &SIDE_NAMES),
         known_or_nearest(tail, &PLACE_NAMES),
@@ -345,7 +376,7 @@ fn intended_anchor(head: &str, tail: &str) -> Option<String> {
             known_or_nearest(head, &PLACE_NAMES)?,
         ),
     };
-    Some(if place == "outside" {
+    Some(if place == "outside" && forms.outside {
         format!("at={side}.outside")
     } else {
         format!("at=inside.{side}")
@@ -353,7 +384,12 @@ fn intended_anchor(head: &str, tail: &str) -> Option<String> {
 }
 
 /// Read a fixture's `key=` as a non-negative integer, `0` when absent.
-fn coordinate(fixture: Fixture, member: &Member, key: &str, counts: &str) -> Result<u32, Refusal> {
+pub(super) fn coordinate(
+    fixture: Fixture,
+    member: &Member,
+    key: &str,
+    counts: &str,
+) -> Result<u32, Refusal> {
     let Some(raw) = member.written(key) else {
         return Ok(0);
     };
@@ -415,21 +451,24 @@ pub(super) fn fixture_cell(
     {
         return Err(Box::new(diag_invalid_member(member, primary, notes)));
     }
-    let written = &ctx.written;
-    let above_written = y_world >= written.height;
-    if above_written && !written.unplaced_walls && y_world >= written.reach {
+    let fit = ctx.row_fit(
+        u64::from(y_world),
+        "this row",
+        &format!("the {} fits", fixture.noun),
+    );
+    if fit == RowFit::Above {
         return Err(Box::new(above_the_struct(
             fixture, member, anchor, row, ctx,
         )));
     }
     let outside = matches!(anchor, Anchor::Outside(_));
-    if outside && written.overhang == 0 {
+    if outside && ctx.written.overhang == 0 {
         return Err(Box::new(no_exterior_voxel(
             fixture, member, side, length, row, ctx,
         )));
     }
     // From here the repair is on another member, so the fixture only defers.
-    if let Some((primary, note)) = displaced(fixture, side, row, outside, ctx) {
+    if let Some((primary, note)) = displaced(fixture, side, row, outside, fit, ctx) {
         return Err(Box::new(diag_deferred_member_noted(
             member, &primary, &note,
         )));
@@ -463,36 +502,17 @@ pub(super) fn fixture_cell(
 }
 
 /// The primary and note of the deferral that leaves a fixture unplaced until another member is
-/// repaired, or `None` when nothing displaces it.
+/// repaired, or `None` when nothing displaces it; `fit` is how its row fits the body.
 fn displaced(
     fixture: Fixture,
     side: WallSide,
     row: Row,
     outside: bool,
+    fit: RowFit,
     ctx: &StructCtx<'_>,
 ) -> Option<(String, String)> {
-    let written = &ctx.written;
-    let y_world = row.world();
-    let above_written = y_world >= written.height;
-    let fits = format!("the {} fits", fixture.noun);
-    if above_written && written.unplaced_walls {
-        Some((
-            row_past_the_struct(fixture, row, ctx),
-            unplaced_walls_note("this row", &fits),
-        ))
-    } else if above_written {
-        Some((
-            row_past_the_struct(fixture, row, ctx),
-            format!(
-                "a `roof` whose `kind=` or `slope_to=` does not read may rise to this row; {fits} \
-                 once that roof draws"
-            ),
-        ))
-    } else if y_world >= ctx.dims.y {
-        Some((
-            row_past_the_struct(fixture, row, ctx),
-            ctx.shortfall().note("this row", &fits),
-        ))
+    if let RowFit::Waits(note) = fit {
+        Some((row_past_the_struct(fixture, row, ctx), note))
     } else if outside && ctx.overhang == 0 {
         // An overhang a roof is written with and does not draw is the roof's to repair.
         Some((

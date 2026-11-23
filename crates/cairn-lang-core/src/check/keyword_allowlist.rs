@@ -1,6 +1,6 @@
 //! The `keyword_allowlist` pass: a member, theme selector or `edit` whose keyword is unknown. A
-//! member's suggestions come from its own body's keywords, so `plce` in a `struct` is not offered
-//! `place`, and an edit's from those of `struct` and `def` bodies, the only ones it reaches.
+//! member's suggestions come from its own body's keywords, so `conect` in a `struct` is not offered
+//! `connect`, and an edit's from those of `struct` and `def` bodies, the only ones it reaches.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::intent::{BodyKind, IntentModule, Member, MemberRole, known_keywords, role_of};

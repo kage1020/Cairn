@@ -78,6 +78,9 @@ Evolving surfaces:
   passed ([Lint §11.4](/spec/lint/#114-constraint-catalog)).
 - The tier-2 material vocabulary: the block each tier-1 token resolves to at a target
   ([§7.2](/spec/materials-themes/#tier-1-tokens)).
+- The block the furniture library's theme binds each of its slots to
+  ([§9.1.2](/spec/components-editing-sites/#912-the-furniture-library)). Its defs, their sizes and
+  the slots they read are `.crn` syntax, at that row's tier.
 - Canonical block tokens: the names a target accepts, which follow its registry pack, and the
   block each names there ([§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)).
 - The CLI's human-readable diagnostic format and prose (the *codes* are Stable; the *prose*

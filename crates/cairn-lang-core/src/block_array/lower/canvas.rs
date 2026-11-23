@@ -407,6 +407,13 @@ impl MemberCanvas<'_> {
         self.member
     }
 
+    /// The member of the flattened paint list whose opening holds `pos`, its cut or the frame
+    /// around it, or `None`.
+    pub(super) fn opening_at(&self, pos: (u32, u32, u32)) -> Option<u32> {
+        let owner = self.canvas.owner_at(pos)?;
+        (self.canvas.phase_of(owner) == Some(Phase::Openings)).then_some(owner)
+    }
+
     /// Record what this member's line declares.
     pub(super) fn declare(&mut self, declared: Declared) {
         let member = self.member;

@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::diagnostic::Diagnostic;
-use crate::intent::{BindingKey, Member, MemberRole, ValueWithSpan};
+use crate::intent::{BindingKey, DefIr, Member, MemberRole, ValueWithSpan};
 use crate::resolve::{ScopeResolution, form_word, member_form};
 
 use crate::block_array::args::{
@@ -31,6 +31,8 @@ use super::written::Written;
 pub(super) struct StructCtx<'a> {
     pub(super) scope: Option<&'a ScopeResolution>,
     pub(super) registry: Option<&'a dyn TargetRegistry>,
+    /// The file's defs, which a `place` line builds ahead of the furniture library's.
+    pub(super) defs: &'a [DefIr],
     pub(super) theme_missing: bool,
     pub(super) dims: Dims,
     pub(super) overhang: u32,
@@ -55,6 +57,8 @@ pub(super) struct StructCtx<'a> {
     pub(super) openings: Vec<(u32, &'a Member)>,
     /// Every `villager` of the paint set, for a `trade` to name.
     pub(super) villagers: Vec<&'a Member>,
+    /// The flattened paint list, in the order a canvas numbers its members.
+    pub(super) paint_set: Vec<&'a Member>,
 }
 
 impl StructCtx<'_> {
@@ -97,6 +101,40 @@ impl StructCtx<'_> {
             roof: self.written.rise > self.rise,
         }
     }
+
+    /// How a member whose top row is `top` fits the body; a wait's note says of `rows` that
+    /// `outcome` happens once the member it waits on builds.
+    pub(super) fn row_fit(&self, top: u64, rows: &str, outcome: &str) -> RowFit {
+        let written = &self.written;
+        let above_written = top >= u64::from(written.height);
+        if above_written && !written.unplaced_walls && top >= u64::from(written.reach) {
+            return RowFit::Above;
+        }
+        let note = if above_written && written.unplaced_walls {
+            unplaced_walls_note(rows, outcome)
+        } else if above_written {
+            format!(
+                "a `roof` whose `kind=` or `slope_to=` does not read may rise to {rows}; \
+                 {outcome} once that roof draws"
+            )
+        } else if top >= u64::from(self.dims.y) {
+            self.shortfall().note(rows, outcome)
+        } else {
+            return RowFit::Fits;
+        };
+        RowFit::Waits(note)
+    }
+}
+
+/// How a member's top row stands against the rows of its body.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum RowFit {
+    /// The body holds it.
+    Fits,
+    /// It is above every row the struct as written reaches.
+    Above,
+    /// It is above the body as built until another member builds, as the note says.
+    Waits(String),
 }
 
 /// Which members keep the struct built below the struct as written.
@@ -195,12 +233,11 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Repeater
         | MemberRole::Comparator
         | MemberRole::RedstoneTorch
-        | MemberRole::RedstoneDust => MemberDisposition::Paints(Phase::Fixtures),
+        | MemberRole::RedstoneDust
+        | MemberRole::Place => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::RawBlock | MemberRole::RawFill => MemberDisposition::Paints(Phase::Raw),
         MemberRole::Circuit => MemberDisposition::Reserves,
-        MemberRole::Place | MemberRole::Connect | MemberRole::Other(_) => {
-            MemberDisposition::NotLowered
-        }
+        MemberRole::Connect | MemberRole::Other(_) => MemberDisposition::NotLowered,
         MemberRole::Level | MemberRole::RawRepeat => unreachable!(
             "`{}` members must be flattened before phase-bucketing (see `flatten_members`)",
             member.role.keyword(),

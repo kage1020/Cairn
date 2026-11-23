@@ -64,7 +64,8 @@ fn an_edit_that_selects_nothing_is_refused_with_what_it_could_name() {
         "edit window@back[0] set y=2\n\
          edit window[class=vent] set y=2\n\
          edit door@front[0] set at=left\n\
-         edit place[id=a] set gap=1\n",
+         edit place[id=a] set gap=1\n\
+         edit connect[class=road] set path=@gravel\n",
     );
     assert_eq!(
         found(&src),
@@ -92,10 +93,19 @@ fn an_edit_that_selects_nothing_is_refused_with_what_it_could_name() {
                 "place[id=a]",
                 "`edit place[id=a]` selects no member, so it changes nothing",
                 &[
-                    "a `place` line stands in a `site` body, and an edit reaches only the \
-                     members of `struct` and `def` bodies",
                     SELECTOR_NOTE,
                     "no `place` member stands in a `struct` or `def` body",
+                ],
+            ),
+            finding(
+                "E_EDIT_UNMATCHED",
+                "connect[class=road]",
+                "`edit connect[class=road]` selects no member, so it changes nothing",
+                &[
+                    "a `connect` line stands in a `site` body, and an edit reaches only the \
+                     members of `struct` and `def` bodies",
+                    SELECTOR_NOTE,
+                    "no `connect` member stands in a `struct` or `def` body",
                 ],
             ),
         ],

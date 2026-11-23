@@ -67,6 +67,73 @@ fn the_header_and_the_parts_are_folded_together() {
 }
 
 #[test]
+fn a_struct_s_place_inherits_the_floor_of_the_def_it_builds() {
+    let source = "\
+def blob size=1x1:
+  requires version>=1.21.4
+  fill mat_slot=a from=0,0,0 to=0,0,0
+
+struct s size=5x5
+  walls mat_slot=a height=3
+  place use=blob at=1,1,1
+";
+    assert_eq!(
+        floors(source, Edition::Java),
+        vec![("1.21.4".to_owned(), FloorOrigin::Def("blob".to_owned()))],
+    );
+}
+
+#[test]
+fn a_def_placed_in_a_placed_def_lends_its_floor_and_one_in_an_unplaced_def_does_not() {
+    let source = "\
+theme medieval:
+  slot wall -> @oak_planks
+
+def blob size=1x1:
+  requires version>=1.21.4
+  fill mat_slot=wall from=0,0,0 to=0,0,0
+
+def cottage size=5x5:
+  walls mat_slot=wall height=3
+  place use=blob at=1,1,1
+
+def shed size=5x5:
+  walls mat_slot=wall height=3
+  place use=blob at=1,1,1
+
+site hamlet:
+  place id=a use=cottage theme=medieval at=origin
+";
+    assert_eq!(
+        floors(source, Edition::Java),
+        vec![("1.21.4".to_owned(), FloorOrigin::Def("blob".to_owned()))],
+    );
+    // Only `shed`, which no site places, places `blob` now.
+    let unplaced = source.replacen("  place use=blob at=1,1,1\n", "", 1);
+    assert_eq!(floors(&unplaced, Edition::Java), vec![]);
+}
+
+#[test]
+fn a_struct_s_place_binds_no_theme_by_its_theme_argument() {
+    let source = "\
+theme oak:
+  slot wall -> @oak_planks
+
+theme fancy:
+  requires version>=1.21.4
+  slot wall -> @cherry_planks
+
+def blob size=1x1:
+  fill mat_slot=wall from=0,0,0 to=0,0,0
+
+struct s size=5x5
+  walls mat_slot=wall height=3
+  place use=blob theme=fancy at=1,1,1
+";
+    assert_eq!(floors(source, Edition::Java), vec![]);
+}
+
+#[test]
 fn a_def_nobody_places_contributes_no_floor() {
     let source = "\
 def cottage size=5x5:

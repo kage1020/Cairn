@@ -35,6 +35,7 @@ mod overlap;
 mod paint;
 mod part;
 mod phase;
+mod place;
 mod plate;
 mod raw;
 mod repeat;
@@ -49,6 +50,7 @@ mod stand;
 mod standing;
 mod token_diag;
 mod trapdoor;
+mod turn;
 mod waterlogged;
 mod window;
 mod without_target;
@@ -111,6 +113,7 @@ fn lower_to_block_array_within(
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let bodies = BodyInputs {
         registry,
+        defs: &intent.defs,
         palette_capacity,
     };
 
@@ -249,10 +252,7 @@ fn lower_site<'a>(
             continue;
         };
 
-        let use_name = member
-            .arguments
-            .get("use")
-            .and_then(|v| v.value.as_label_str());
+        let use_name = member.used_def();
         let theme_name = member
             .arguments
             .get("theme")

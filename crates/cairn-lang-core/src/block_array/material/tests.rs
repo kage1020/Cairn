@@ -550,3 +550,43 @@ fn a_part_a_selector_row_lays_is_a_bound_canonical_token_once_per_row() {
         ],
     );
 }
+
+#[test]
+fn a_library_def_a_body_places_binds_its_tokens_at_the_place_line() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n  \
+                  slot chair_seat -> @spruce_stairs[facing=north]\n\nstruct s size=5x5\n  \
+                  walls mat_slot=wall height=3\n  place use=fireplace at=1,1,1\n  \
+                  place use=chair at=1,1,3\n";
+    let module = crate::parse(source).expect("the source parses");
+    let ir = crate::lower(&module);
+    let resolution = crate::resolve(&ir, None);
+    let tokens: Vec<(&str, BlockState)> = bound_canonical_tokens(&resolution)
+        .into_iter()
+        .map(|(span, state)| (&source[span], state))
+        .collect();
+    let faced = |id: &str, facing: &str| {
+        let mut state = BlockState::bare(id);
+        state
+            .properties
+            .insert("facing".to_owned(), facing.to_owned());
+        state
+    };
+    assert_eq!(
+        tokens,
+        [
+            ("@cobblestone", BlockState::bare("minecraft:cobblestone")),
+            (
+                "@spruce_stairs[facing=north]",
+                faced("minecraft:spruce_stairs", "north")
+            ),
+            (
+                "place use=fireplace at=1,1,1",
+                BlockState::bare("minecraft:bricks")
+            ),
+            (
+                "place use=fireplace at=1,1,1",
+                faced("minecraft:campfire", "south")
+            ),
+        ],
+    );
+}

@@ -1,5 +1,5 @@
-//! `E_MISPLACED_MEMBER`: a keyword in a body with no reader for its role, such as a `place` in a
-//! `def`, is an error at the row.
+//! `E_MISPLACED_MEMBER`: a keyword in a body with no reader for its role, such as a `connect` in
+//! a `def`, is an error at the row.
 
 use cairn_lang_core::{DiagnosticCode, Severity};
 
@@ -51,10 +51,10 @@ const GEOMETRY_ROWS: &[&str] = &[
     "raw_repeat count=2 step=1,0,0",
 ];
 
-const SITE_ROWS: &[&str] = &[
-    "place id=extra use=hut theme=plain at=origin",
-    "connect anchor.entry to peer.entry path=@gravel",
-];
+/// The row a `site` body reads and a `struct` or `def` body does not.
+const CONNECT_ROW: &str = "connect anchor.entry to peer.entry path=@gravel";
+
+const SITE_ROWS: &[&str] = &["place id=extra use=hut theme=plain at=origin", CONNECT_ROW];
 
 fn site_with(row: &str) -> String {
     format!(
@@ -64,18 +64,23 @@ fn site_with(row: &str) -> String {
 }
 
 #[test]
-fn a_site_row_in_a_geometry_body_is_an_error() {
-    for row in SITE_ROWS {
-        for src in [struct_with(row), def_with(row)] {
-            let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
-            assert_eq!(d.severity(), Severity::Error, "for `{row}`");
-            assert!(
-                d.primary
-                    .starts_with("nothing in a `struct` or `def` body lowers `"),
-                "for `{row}`, got {:?}",
-                d.primary,
-            );
-        }
+fn a_connect_in_a_geometry_body_is_an_error() {
+    for src in [struct_with(CONNECT_ROW), def_with(CONNECT_ROW)] {
+        let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
+        assert_eq!(d.severity(), Severity::Error);
+        assert_eq!(
+            d.primary,
+            "nothing in a `struct` or `def` body lowers `connect`: this member produces no \
+             blocks, no placement, and no walkway",
+        );
+    }
+}
+
+#[test]
+fn a_place_is_read_in_every_body() {
+    let row = "place use=table at=1,0,1";
+    for src in [struct_with(row), def_with(row), site_with(row)] {
+        assert_eq!(of_code(&src, DiagnosticCode::MisplacedMember), [], "{src}");
     }
 }
 
@@ -117,11 +122,14 @@ fn a_row_the_body_reads_is_not_reported() {
 #[test]
 fn the_body_kind_carries_through_a_level() {
     let src = format!(
-        "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  level y=0\n    \
-         place id=extra use=hut theme=plain at=origin\n"
+        "{PRELUDE}struct s size=5x5\n  floor mat_slot=floor\n  level y=0\n    {CONNECT_ROW}\n"
     );
     let d = one_of_code(&src, DiagnosticCode::MisplacedMember);
-    assert!(d.primary.contains("lowers `place`"), "got {:?}", d.primary);
+    assert!(
+        d.primary.contains("lowers `connect`"),
+        "got {:?}",
+        d.primary
+    );
 }
 
 #[test]
@@ -214,17 +222,14 @@ fn a_level_in_a_site_body_says_dedent_rather_than_relocate() {
 
 #[test]
 fn the_candidate_list_is_scoped_to_the_body() {
-    let geometry = one_of_code(
-        &struct_with("place id=extra use=hut theme=plain at=origin"),
-        DiagnosticCode::MisplacedMember,
-    );
+    let geometry = one_of_code(&struct_with(CONNECT_ROW), DiagnosticCode::MisplacedMember);
     assert!(
         notes(&geometry).contains(
             &"expected one of: floor, walls, fill, door, window, roof, stair, beam, column, arch, \
              level, pressure_plate, lever, button, daylight, observer, lamp, piston, dispenser, chest, \
              trapdoor, note_block, sign, bed, painting, item_frame, armor_stand, villager, trade, \
              text_display, block_display, item_display, hologram, spawn, repeater, comparator, \
-             redstone_torch, redstone_dust, circuit, raw_block, raw_fill, raw_repeat"
+             redstone_torch, redstone_dust, circuit, raw_block, raw_fill, raw_repeat, place"
         ),
         "got {:#?}",
         notes(&geometry),
@@ -249,13 +254,10 @@ fn the_span_underlines_the_offending_row() {
 
 #[test]
 fn the_def_loop_is_walked() {
-    let d = one_of_code(
-        &def_with("place id=extra use=hut theme=plain at=origin"),
-        DiagnosticCode::MisplacedMember,
-    );
+    let d = one_of_code(&def_with(CONNECT_ROW), DiagnosticCode::MisplacedMember);
     assert!(
         d.primary
-            .starts_with("nothing in a `struct` or `def` body lowers `place`"),
+            .starts_with("nothing in a `struct` or `def` body lowers `connect`"),
         "got {:?}",
         d.primary,
     );

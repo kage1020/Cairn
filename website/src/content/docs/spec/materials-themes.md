@@ -63,7 +63,10 @@ text display and `glowing=` for a sign, as `slot floating_text -> text_display s
 `E_UNKNOWN_ARGUMENT`, and any other word is `E_UNKNOWN_SLOT_TARGET`.
 
 `def`, `theme`, and `site` are unified by the same slot-bearing Component mechanism
-([Components, Editing, and Multi-building](/spec/components-editing-sites/)).
+([Components, Editing, and Multi-building](/spec/components-editing-sites/)). A `def` placed in a
+body is resolved against that body's theme, and one of the furniture library falls back on the
+library's own theme for a slot that theme does not bind ([Components, Editing, and Multi-building
+§9.1.2](/spec/components-editing-sites/#912-the-furniture-library)).
 
 ### Selector bindings
 

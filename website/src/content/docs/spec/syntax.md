@@ -301,12 +301,15 @@ building's geometry: `floor`, `walls`, `fill`, `door`, `window`, `roof`, `stair`
 `dispenser`, `chest`, `trapdoor`, `note_block`, `sign`, `bed`, `painting`, `item_frame`,
 `armor_stand`, `villager`, `trade`, `text_display`, `block_display`, `item_display`, `hologram`,
 `spawn`, `repeater`, `comparator`, `redstone_torch`, `redstone_dust`, `circuit`, `raw_block`,
-`raw_fill`, `raw_repeat`. A `site` body describes a layout: `place`, `connect`. The keyword table is
-global, so writing one in the other body parses and classifies and then reaches nothing. That is
-`E_MISPLACED_MEMBER`, reported once at the offending row, taking anything indented under it along. A
-`level` groups the other members of a `struct` / `def` body, but not a `circuit` line, whose
-reservation spans the whole scope: a `circuit` line under a `level` reaches nothing either, and is
-`E_MISPLACED_MEMBER` on that line ([Redstone §14.5](/spec/redstone/#145-place-and-route)).
+`raw_fill`, `raw_repeat`, `place`. A `site` body describes a layout: `place`, `connect`. `place` is
+read in both, and in a `struct` / `def` body builds a `def` inside it ([Components, Editing, and
+Multi-building §9.1.1](/spec/components-editing-sites/#911-a-def-placed-in-a-body)). The keyword
+table is global, so any other keyword written in the other body parses and classifies and then
+reaches nothing. That is `E_MISPLACED_MEMBER`, reported once at the offending row, taking anything
+indented under it along. A `level` groups the other members of a `struct` / `def` body, but not a
+`circuit` line, whose reservation spans the whole scope: a `circuit` line under a `level` reaches
+nothing either, and is `E_MISPLACED_MEMBER` on that line ([Redstone
+§14.5](/spec/redstone/#145-place-and-route)).
 
 `logic` and `assert` lines are not members, so the rule does not reach them. A `logic` line is read
 by redstone synthesis from either body. An `assert` is checked for its own shape and its names:
@@ -571,9 +574,9 @@ language server shows the entry's own line on hover.
 
 - **`struct`.** One building, built from its body over the `size=WxH` footprint its line declares.
   See [Compilation Model §4.7](/spec/compilation/#47-level-grouping-and-volume-derivation).
-- **`def`.** A reusable building with slots, which the `place` rows of a `site` put down. See
-  [Components, Editing, and Multi-building
-  §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
+- **`def`.** A reusable building, or a piece of one, with slots, which the `place` rows of a
+  `site` put down and a body's `place` lines build inside it. See [Components, Editing, and
+  Multi-building §9.1](/spec/components-editing-sites/#91-def-the-component-construct).
 - **`theme`.** Binds each slot name to a material token, and through a selector row the block of a
   part of each member it selects. See
   [Materials and Themes §7.1](/spec/materials-themes/#71-slots-as-dependency-injection).
@@ -916,14 +919,20 @@ language server shows the entry's own line on hover.
   [Materials and Themes §7.4](/spec/materials-themes/#74-raw-blocks).
   - **`count=`.** How many copies are written, a positive integer.
   - **`step=`.** How far each copy lies from the one before, a coordinate triple.
-- **`place`.** Places a `def` in a `site`. See [Components, Editing, and Multi-building
-  §9.3.2](/spec/components-editing-sites/#932-origin-selectors).
-  - **`use=`.** The `def` it places.
-  - **`theme=`.** The theme the `def` is built with.
-  - **`at=`.** `origin`, which anchors it at world `(0, 0, 0)`.
-  - **`east_of=`.** The earlier place it stands east of.
-  - **`north_of=`.** The earlier place it stands north of.
-  - **`gap=`.** How many cells it leaves between itself and the place it stands beside.
+- **`place`.** Places a `def` in a `site`, or builds one inside a `struct` or `def` body. See
+  [Components, Editing, and Multi-building
+  §9.3.2](/spec/components-editing-sites/#932-origin-selectors) and
+  [§9.1.1](/spec/components-editing-sites/#911-a-def-placed-in-a-body).
+  - **`use=`.** The `def` it places, in a body one of the file's or of the furniture library.
+  - **`theme=`.** In a site, the theme the `def` is built with.
+  - **`at=`.** In a site `origin`, which anchors it at world `(0, 0, 0)`, and in a body a wall face,
+    `inside.<side>`, or a coordinate triple.
+  - **`east_of=`.** In a site, the earlier place it stands east of.
+  - **`north_of=`.** In a site, the earlier place it stands north of.
+  - **`gap=`.** In a site, how many cells it leaves between itself and the place it stands beside.
+  - **`offset=`.** By a wall, the wall column its back row starts at.
+  - **`y=`.** By a wall, the row its lowest cells stand in.
+  - **`facing=`.** At a triple, the compass word its front looks toward, in place of `south`.
 - **`connect`.** A walkway between two ports, `FROM.PORT to TO.PORT`. See [Components, Editing,
   and Multi-building §9.3.5](/spec/components-editing-sites/#935-ports-and-connect).
   - **`path=`.** The material token the walkway is laid with.

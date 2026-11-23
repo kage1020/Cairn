@@ -98,9 +98,7 @@ fn output_artifacts(
                     let key = place_scope_key(&site.name, id);
                     // The lookup lowering makes before it skips the placement with `W_DEF_NO_SIZE`.
                     let sized = m
-                        .arguments
-                        .get("use")
-                        .and_then(|v| v.value.as_label_str())
+                        .used_def()
                         .and_then(|name| ir.defs.iter().find(|d| d.name == name))
                         .is_some_and(|d| d.size.is_some());
                     (sized && scopes.contains_key(&key)).then(|| OutputArtifact {

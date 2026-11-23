@@ -508,3 +508,23 @@ fn a_member_the_resolver_refuses_leaves_its_body_unjudged() {
         .collect();
     assert_eq!(codes, [(DiagnosticCode::UnknownSlotTarget, "5")]);
 }
+
+#[test]
+fn a_line_of_a_placed_def_the_resolver_refuses_leaves_its_body_unjudged() {
+    let source = format!(
+        "def lump size=1x1:\n  fill mat_slot=nope from=0,0,0 to=0,0,0\n\n{}",
+        floored("place use=lump at=2,1,1\n  raw_block mat=minecraft:torch at=2,2,1"),
+    );
+    let out = judged(&source, &Catalog);
+    let codes: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
+        .into_iter()
+        .map(|(code, span, ..)| (code, span))
+        .collect();
+    assert_eq!(
+        codes,
+        [(
+            DiagnosticCode::UnresolvedSlot,
+            "fill mat_slot=nope from=0,0,0 to=0,0,0"
+        )],
+    );
+}
