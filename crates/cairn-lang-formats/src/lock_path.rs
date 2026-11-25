@@ -20,11 +20,12 @@ pub fn default_lock_path(source: &Path) -> PathBuf {
 pub enum LockPathRefusal {
     /// The lock would be written through a path that reaches the source's file.
     Source(Reached),
-    /// The path's file name ends in `.crn`, as a source's does.
+    /// The path's file name ends in `.crn`, in any letter case, past any trailing dots or spaces.
     SourceName,
 }
 
-/// Why `cairn compile` refuses `--lock lock` for `source`, or `None` when it writes there.
+/// Why `cairn compile` refuses `--lock lock` for `source`, or `None` when neither the source nor a
+/// `.crn` name stands in the way.
 ///
 /// # Errors
 ///

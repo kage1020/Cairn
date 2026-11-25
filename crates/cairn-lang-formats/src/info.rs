@@ -254,7 +254,7 @@ pub fn info(request: &InfoRequest<'_>, sink: &mut dyn InfoSink) -> Result<InfoDo
 enum LockWriter {
     /// `cairn compile`, for `<source>.lock`.
     Plain,
-    /// `cairn compile --lock <path>`, since a compile without the flag leaves that path alone.
+    /// `cairn compile --lock <path>`, since a compile without the flag writes only `<source>.lock`.
     Flagged,
     /// None: `cairn compile` would write `<source>.lock` through this path, a link to the source.
     DefaultRefused(WritePath),
