@@ -31,18 +31,6 @@ struct Written<'a> {
     scopes: Vec<&'a str>,
 }
 
-/// The version an example is built at for `edition`: `latest` when its floors admit it, else the
-/// newest they do.
-fn version_for(source: &str, edition: Edition) -> Option<String> {
-    let admitted = admitted_versions(builtin_pack(edition), source, edition);
-    let latest = latest(edition).to_owned();
-    if admitted.contains(&latest) {
-        Some(latest)
-    } else {
-        admitted.last().cloned()
-    }
-}
-
 /// What a file saved at `version` says of it: its `DataVersion` on Java, its block version on
 /// Bedrock, which several releases share.
 fn stamp_key(edition: Edition, version: &str) -> Option<i32> {
@@ -274,146 +262,159 @@ fn block_entities_reported(import: &RawImport, file: &Written<'_>, format: Impor
 
 #[test]
 fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
-    let mut unbuilt: Vec<(String, Edition)> = Vec::new();
+    let mut unbuilt: Vec<(String, Edition, String)> = Vec::new();
+    let mut compared = 0;
     for (name, source) in examples() {
         for edition in [Edition::Java, Edition::Bedrock] {
-            let Some(version) = version_for(&source, edition) else {
-                unbuilt.push((name.clone(), edition));
-                continue;
-            };
-            let Ok(ir) = compile_source(&source, edition, &version) else {
-                unbuilt.push((name.clone(), edition));
-                continue;
-            };
-            let formats: &[ImportFormat] = match edition {
-                Edition::Java => &[
-                    ImportFormat::Nbt,
-                    ImportFormat::Litematic,
-                    ImportFormat::Schem,
-                ],
-                Edition::Bedrock => &[ImportFormat::Mcstructure],
-            };
-            for &format in formats {
-                for file in written(&ir, format, &version) {
-                    let import = imported(&file, format);
-                    let label = format!("{name} as {} at {edition} {version}", file.name);
-                    assert_eq!(
-                        stamp_key(edition, import.decoded.stamp.mc_version()),
-                        stamp_key(edition, &version),
-                        "{label}"
-                    );
-                    assert!(block_entities_reported(&import, &file, format), "{label}");
-                    let built = compile_source(&import.transliteration.source, edition, &version)
-                        .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
-                    let bodies = &import.transliteration.bodies;
-                    assert_eq!(bodies.len(), file.arrays.len(), "{label}");
-                    for (body, array) in bodies.iter().zip(&file.arrays) {
-                        let parts = rebuilt(&built, body);
-                        if edition == Edition::Java {
-                            let parts: Vec<_> = parts
-                                .iter()
-                                .map(|(part, at)| Part {
-                                    cells: states(part),
-                                    dims: part.dims,
-                                    at: *at,
-                                })
-                                .collect();
-                            assert_eq!(
-                                assembled(array.dims, &parts),
-                                states(array).into_iter().map(Some).collect::<Vec<_>>(),
-                                "{label}: `{}`",
-                                body.name
-                            );
-                        } else {
-                            let read = |array: &BlockArray| {
-                                let bytes = mcstructure_bytes(array, &version);
-                                read_mcstructure(bytes.as_slice()).expect("the file reads back")
-                            };
-                            let parts: Vec<_> = parts
-                                .iter()
-                                .map(|(part, at)| Part {
-                                    cells: bedrock_cells(&read(part).volume),
-                                    dims: part.dims,
-                                    at: *at,
-                                })
-                                .collect();
-                            assert_eq!(
-                                assembled(array.dims, &parts)
-                                    .into_iter()
-                                    .map(|cell| cell.map(frame_by_id))
-                                    .collect::<Vec<_>>(),
-                                bedrock_cells(&read(array).volume)
-                                    .into_iter()
-                                    .map(|cell| Some(frame_by_id(cell)))
-                                    .collect::<Vec<_>>(),
-                                "{label}: `{}`",
-                                body.name
-                            );
+            let versions = admitted_versions(builtin_pack(edition), &source, edition);
+            if versions.is_empty() {
+                unbuilt.push((name.clone(), edition, "no admitted version".to_owned()));
+            }
+            for version in versions {
+                let Ok(ir) = compile_source(&source, edition, &version) else {
+                    unbuilt.push((name.clone(), edition, version));
+                    continue;
+                };
+                let formats: &[ImportFormat] = match edition {
+                    Edition::Java => &[
+                        ImportFormat::Nbt,
+                        ImportFormat::Litematic,
+                        ImportFormat::Schem,
+                    ],
+                    Edition::Bedrock => &[ImportFormat::Mcstructure],
+                };
+                for &format in formats {
+                    for file in written(&ir, format, &version) {
+                        let import = imported(&file, format);
+                        let label = format!("{name} as {} at {edition} {version}", file.name);
+                        assert_eq!(
+                            stamp_key(edition, import.decoded.stamp.mc_version()),
+                            stamp_key(edition, &version),
+                            "{label}"
+                        );
+                        assert!(block_entities_reported(&import, &file, format), "{label}");
+                        let built =
+                            compile_source(&import.transliteration.source, edition, &version)
+                                .unwrap_or_else(|codes| {
+                                    panic!("{label}: the import refuses {codes:?}")
+                                });
+                        let bodies = &import.transliteration.bodies;
+                        assert_eq!(bodies.len(), file.arrays.len(), "{label}");
+                        compared += 1;
+                        for (body, array) in bodies.iter().zip(&file.arrays) {
+                            let parts = rebuilt(&built, body);
+                            if edition == Edition::Java {
+                                let parts: Vec<_> = parts
+                                    .iter()
+                                    .map(|(part, at)| Part {
+                                        cells: states(part),
+                                        dims: part.dims,
+                                        at: *at,
+                                    })
+                                    .collect();
+                                assert_eq!(
+                                    assembled(array.dims, &parts),
+                                    states(array).into_iter().map(Some).collect::<Vec<_>>(),
+                                    "{label}: `{}`",
+                                    body.name
+                                );
+                            } else {
+                                let read = |array: &BlockArray| {
+                                    let bytes = mcstructure_bytes(array, &version);
+                                    read_mcstructure(bytes.as_slice()).expect("the file reads back")
+                                };
+                                let parts: Vec<_> = parts
+                                    .iter()
+                                    .map(|(part, at)| Part {
+                                        cells: bedrock_cells(&read(part).volume),
+                                        dims: part.dims,
+                                        at: *at,
+                                    })
+                                    .collect();
+                                assert_eq!(
+                                    assembled(array.dims, &parts)
+                                        .into_iter()
+                                        .map(|cell| cell.map(frame_by_id))
+                                        .collect::<Vec<_>>(),
+                                    bedrock_cells(&read(array).volume)
+                                        .into_iter()
+                                        .map(|cell| Some(frame_by_id(cell)))
+                                        .collect::<Vec<_>>(),
+                                    "{label}: `{}`",
+                                    body.name
+                                );
+                            }
                         }
                     }
                 }
             }
         }
     }
-    assert_eq!(unbuilt, Vec::<(String, Edition)>::new());
+    assert_eq!(unbuilt, Vec::<(String, Edition, String)>::new());
+    assert!(compared > 0, "no file was compared");
 }
 
 #[test]
 fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_and_its_source() {
+    let mut compared = 0;
     for (name, source) in examples() {
         for edition in [Edition::Java, Edition::Bedrock] {
-            let Some(version) = version_for(&source, edition) else {
-                continue;
-            };
-            let Ok(ir) = compile_source(&source, edition, &version) else {
-                continue;
-            };
-            let formats: &[ImportFormat] = match edition {
-                Edition::Java => &[
-                    ImportFormat::Nbt,
-                    ImportFormat::Litematic,
-                    ImportFormat::Schem,
-                ],
-                Edition::Bedrock => &[ImportFormat::Mcstructure],
-            };
-            for &format in formats {
-                for file in written(&ir, format, &version) {
-                    let import = imported(&file, format);
-                    let label = format!("{name} as {} at {edition} {version}", file.name);
-                    let lifted = compile_source(&import.transliteration.source, edition, &version)
-                        .unwrap_or_else(|codes| panic!("{label}: the import refuses {codes:?}"));
-                    let counts = compare(import.decoded.bodies(), &lifted).counts;
-                    assert_eq!(
-                        counts.metrics(),
-                        Metrics {
-                            block_iou: 1.0,
-                            state_accuracy: 1.0,
-                            residual_ratio: 1.0,
-                        },
-                        "{label}: the import"
-                    );
-                    // A file holds one struct, one site or one of a site's arrays: one body.
-                    let mut held = ir.clone();
-                    held.structures
-                        .retain(|scope, _| file.scopes.contains(&scope.as_str()));
-                    if edition == Edition::Bedrock {
-                        held = frames_as_blocks(&held);
+            for version in admitted_versions(builtin_pack(edition), &source, edition) {
+                let Ok(ir) = compile_source(&source, edition, &version) else {
+                    continue;
+                };
+                let formats: &[ImportFormat] = match edition {
+                    Edition::Java => &[
+                        ImportFormat::Nbt,
+                        ImportFormat::Litematic,
+                        ImportFormat::Schem,
+                    ],
+                    Edition::Bedrock => &[ImportFormat::Mcstructure],
+                };
+                for &format in formats {
+                    for file in written(&ir, format, &version) {
+                        let import = imported(&file, format);
+                        let label = format!("{name} as {} at {edition} {version}", file.name);
+                        let lifted =
+                            compile_source(&import.transliteration.source, edition, &version)
+                                .unwrap_or_else(|codes| {
+                                    panic!("{label}: the import refuses {codes:?}")
+                                });
+                        let counts = compare(import.decoded.bodies(), &lifted).counts;
+                        assert_eq!(
+                            counts.metrics(),
+                            Metrics {
+                                block_iou: 1.0,
+                                state_accuracy: 1.0,
+                                residual_ratio: 1.0,
+                            },
+                            "{label}: the import"
+                        );
+                        // A file holds one struct, one site or one of a site's arrays: one body.
+                        let mut held = ir.clone();
+                        held.structures
+                            .retain(|scope, _| file.scopes.contains(&scope.as_str()));
+                        if edition == Edition::Bedrock {
+                            held = frames_as_blocks(&held);
+                        }
+                        let comparison = compare(import.decoded.bodies(), &held);
+                        let metrics = comparison.counts.metrics();
+                        assert_eq!(
+                            (
+                                comparison.bodies.len(),
+                                metrics.block_iou,
+                                metrics.state_accuracy
+                            ),
+                            (1, 1.0, 1.0),
+                            "{label}: the source"
+                        );
+                        compared += 1;
                     }
-                    let comparison = compare(import.decoded.bodies(), &held);
-                    let metrics = comparison.counts.metrics();
-                    assert_eq!(
-                        (
-                            comparison.bodies.len(),
-                            metrics.block_iou,
-                            metrics.state_accuracy
-                        ),
-                        (1, 1.0, 1.0),
-                        "{label}: the source"
-                    );
                 }
             }
         }
     }
+    assert!(compared > 0, "no file was compared");
 }
 
 #[test]

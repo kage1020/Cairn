@@ -209,8 +209,16 @@ target builds it:
   it out where no water stands.
 - A property STRUCTURE writes and the build leaves out, with no such default, is not compared. A
   game-saved file writes every property of a block, and a source writes only the ones it sets.
+- On Bedrock, a property a line must write, since a line that leaves it out is not built as
+  STRUCTURE's block ([§12.3.1](#1231-what-an-import-writes)), differs when the build leaves it out,
+  whatever default the state map gives it: bare `minecraft:redstone_torch` is not the wall torch
+  `facing=north` picks.
 - A property the build writes and STRUCTURE leaves out, with no such default, differs.
-- A property the target builds the same at any value is not compared.
+- A property the target builds the same at any value is not compared, but one a line must write
+  still differs when the build leaves it out. At 1.21.0, a floor head's `rotation`, which Bedrock
+  keeps in its block entity, is what tells `minecraft:skull` from a wall head, so a build of
+  `minecraft:skull[rotation=8]` agrees with the file's floor head and bare `minecraft:skull` does
+  not.
 
 Over every pair, the diff counts the cells STRUCTURE holds a block at, the cells FILE builds a block
 at, the cells both hold a block at, the cells where both hold the same id, which are *matched*, and
@@ -432,9 +440,15 @@ window id=front_windows side=front mat_slot=glass repeat=5 ...
   blocks beside it ([Blockstate Model §6.1](/spec/blockstate/#connections)), which `origin=imported`
   asks them to. On Bedrock a block is first read back as the canonical state its state map writes as
   it ([§12.4](#124-import-stamping-and-pitfalls)), and a state at the default the target builds, or
-  one the target builds the same at any value, is left out as well. A cell whose connection states
-  the rules would derive otherwise is written with every one of them, and the check is run again
-  until every cell agrees.
+  one the target builds the same at any value, is left out as well, unless the line that leaves it
+  out builds another block or none. One Bedrock block can be the form of several Java blocks, and
+  such a state picks which: a redstone wall torch facing north is
+  `minecraft:redstone_torch[facing=north]`, since bare `minecraft:redstone_torch` builds a standing
+  torch. A line keeps the fewest such states that build its block again, the first in the block's
+  order among as few. Of a block with more than twelve states it would leave out, only the first
+  4096 sets in that order are tried, and past them a line keeps every one. A cell whose connection
+  states the rules would derive otherwise is written with every one of them, and the check is run
+  again until every cell agrees.
 - **Chunks.** A body wider or deeper than 48 blocks is a `site` of `def`s rather than a `struct`:
   columns of at most 48 by 48 at the body's full height, named `<body>_x<i>_z<j>` by their place
   along `x` and `z`. The `site` places them edge to edge, each where it stood, with `east_of=`,

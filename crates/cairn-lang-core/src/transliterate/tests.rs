@@ -247,6 +247,7 @@ fn a_state_at_its_default_or_one_the_target_does_not_read_is_left_out() {
         state: state("minecraft:oak_log[axis=y,lit=false]"),
         defaults: IndexMap::from([("axis".to_owned(), "y".to_owned())]),
         unread: vec!["lit".to_owned()],
+        needed: Vec::new(),
     };
     let tilted = GridEntry {
         state: state("minecraft:oak_log[axis=x,lit=true]"),
@@ -265,6 +266,28 @@ fn a_state_at_its_default_or_one_the_target_does_not_read_is_left_out() {
         "struct logs size=2x1\n  \
            raw_block mat=minecraft:oak_log at=0,0,0 origin=imported\n  \
            raw_block mat=minecraft:oak_log[axis=x] at=1,0,0 origin=imported\n"
+    );
+}
+
+#[test]
+fn a_state_the_target_needs_is_written_at_its_default() {
+    let log = GridEntry {
+        state: state("minecraft:oak_log[axis=y,lit=false]"),
+        defaults: IndexMap::from([
+            ("axis".to_owned(), "y".to_owned()),
+            ("lit".to_owned(), "false".to_owned()),
+        ]),
+        unread: Vec::new(),
+        needed: vec!["axis".to_owned()],
+    };
+    let out = written(&[unit(
+        "log",
+        grid(Dims { x: 1, y: 1, z: 1 }, "l", &[('l', log)]),
+    )]);
+    assert_eq!(
+        body(&out),
+        "struct log size=1x1\n  \
+           raw_block mat=minecraft:oak_log[axis=y] at=0,0,0 origin=imported\n"
     );
 }
 

@@ -7,9 +7,11 @@ use cairn_lang_core::block_array::{
     PaletteIndex, lower_to_block_array,
 };
 use cairn_lang_core::resolve::{DroppedIntent, declared_version_floors, versions_satisfying};
-use cairn_lang_core::{Edition, Severity, check, lower, parse, resolve};
+use cairn_lang_core::{Edition, Severity, lower, parse, resolve};
 use cairn_lang_formats::bedrock_structure::{BedrockVolume, ParityNote};
-use cairn_lang_formats::data_version::{BedrockTarget, JavaTarget};
+use cairn_lang_formats::build::finding::Finding;
+use cairn_lang_formats::build::lowering::{BuildRefusal, lower_for_target};
+use cairn_lang_formats::data_version::{BedrockTarget, JavaTarget, resolve_target};
 use cairn_lang_formats::java_structure::build_structure_tag;
 use cairn_lang_formats::registry::{RegistryPack, VersionStates, builtin_pack};
 use cairn_lang_formats::volume::{BlockVolume, StoredBlockEntity};
@@ -98,38 +100,51 @@ pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) ->
     )
 }
 
-/// The block-array IR `source` compiles to for `edition` at `mc_version`, as `cairn compile`
-/// checks and lowers it, or the codes of the errors that refuse it.
+/// The block-array IR `cairn compile` builds from `source` for `edition` at `mc_version`, its
+/// circuits laid, or what refuses the build.
 ///
 /// # Errors
 ///
-/// The codes, when a pass raises an error or `source` does not parse.
+/// The parse failure's message, else the refusing codes, `"a run-level refusal"` for one with none.
 pub fn compile_source(
     source: &str,
     edition: Edition,
     mc_version: &str,
 ) -> Result<BlockArrayIr, Vec<String>> {
     let module = parse(source).map_err(|err| vec![err.user_message()])?;
-    let ir = lower(&module);
-    let mut findings = check(&module, &ir, Some(edition));
-    let resolution = resolve(&ir, Some(edition));
-    findings.extend(resolution.diagnostics.iter().cloned());
-    let mut built = lower_to_block_array(
-        &ir,
-        &resolution,
-        Some(&builtin_pack(edition).view(Some(mc_version))),
-    );
-    findings.append(&mut built.diagnostics);
-    let errors: Vec<String> = findings
-        .iter()
-        .filter(|finding| finding.severity() == Severity::Error)
-        .map(|finding| finding.code.as_str().to_owned())
-        .collect();
-    if errors.is_empty() {
-        Ok(built)
-    } else {
-        Err(errors)
-    }
+    let lowered = lower_for_target(&module, edition, resolve_target(edition, mc_version));
+    let codes = match lowered.verdict() {
+        Ok(_) => return Ok(lowered.block_ir),
+        Err(BuildRefusal::Findings) => {
+            let core = lowered
+                .block_ir
+                .diagnostics
+                .iter()
+                .map(|d| d as &dyn Finding);
+            let circuits = lowered.circuits.iter().map(|d| d as &dyn Finding);
+            core.chain(circuits)
+                .filter(|finding| finding.severity() == Severity::Error)
+                .map(|finding| finding.code_str().to_owned())
+                .collect()
+        }
+        Err(BuildRefusal::Conflicts) => lowered
+            .conflicts
+            .iter()
+            .filter_map(|message| message.kind.code())
+            .map(str::to_owned)
+            .collect(),
+        Err(BuildRefusal::RunLevel(message)) => {
+            vec![
+                message
+                    .kind
+                    .code()
+                    .unwrap_or("a run-level refusal")
+                    .to_owned(),
+            ]
+        }
+        Err(BuildRefusal::Floor(finding)) => vec![finding.code.as_str().to_owned()],
+    };
+    Err(codes)
 }
 
 /// [`lower_source`] over the shipped example `name`.

@@ -1299,22 +1299,30 @@ fn several(id: &str, forms: &[&(String, usize)]) -> String {
     )
 }
 
+impl Rule {
+    /// The value the rule gives `full`, a whole state of its family's Java block, or `None` where a
+    /// lookup maps no value for the combination its reads hold there.
+    fn value(&self, full: &IndexMap<String, String>) -> Option<&StateValue> {
+        match self {
+            Self::Constant(value) => Some(value),
+            Self::Lookup { reads, map } => {
+                let joined: Vec<&str> = reads.iter().map(|k| full[k].as_str()).collect();
+                map.get(&joined.join(","))
+            }
+        }
+    }
+}
+
 impl Family {
     /// The Bedrock states the family writes for `full`, a whole state of the Java block it holds.
     fn bedrock_states(&self, full: &IndexMap<String, String>) -> Vec<(String, StateValue)> {
         self.states
             .iter()
             .map(|(name, rule)| {
-                let value = match rule {
-                    Rule::Constant(value) => value.clone(),
-                    Rule::Lookup { reads, map } => {
-                        let joined: Vec<&str> = reads.iter().map(|k| full[k].as_str()).collect();
-                        // INVARIANT(rules-cover-holds): the loader refuses a lookup that does not map
-                        // every combination its reads hold, and `full` is one of them.
-                        map[&joined.join(",")].clone()
-                    }
-                };
-                (name.clone(), value)
+                // INVARIANT(rules-cover-holds): the loader refuses a lookup that does not map every
+                // combination its reads hold, and `full` is one of them.
+                let value = rule.value(full).expect("a lookup maps what its reads hold");
+                (name.clone(), value.clone())
             })
             .collect()
     }
