@@ -14,6 +14,7 @@ const ARTIFACT_FIX: &str = "  note: compile with `--out` naming another director
                             source a name ending in `.crn`\n";
 
 /// The note under a refused `<source>.lock`.
+#[cfg(unix)]
 const LINKED_LOCK_FIX: &str =
     "  note: a link makes them one file; give `--lock` a `.lock` path elsewhere\n";
 
