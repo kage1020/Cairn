@@ -111,6 +111,9 @@ fn a_lock_path_ending_in_crn_is_refused_whatever_it_names() {
         "OTHER.CRN",
         ".crn",
         "no/such/dir/x.Crn",
+        "other.crn.",
+        "other.crn ",
+        "other.CRN. .",
     ] {
         assert_eq!(
             lock_path_refusal(&file, &dir.path().join(lock)).expect("identified"),
@@ -121,12 +124,28 @@ fn a_lock_path_ending_in_crn_is_refused_whatever_it_names() {
     for lock in [
         "other.crn.lock",
         "crn",
+        "crn.",
         "other.crnx",
         "other.crn.d/hut.lock",
     ] {
         assert_eq!(
             lock_path_refusal(&file, &dir.path().join(lock)).expect("identified"),
             None,
+            "{lock:?}"
+        );
+    }
+}
+
+#[test]
+fn a_lock_refused_by_name_is_offered_with_lock_added_and_no_trailing_dot_or_space() {
+    for (lock, suggested) in [
+        ("src/other.crn", "src/other.crn.lock"),
+        ("src/other.crn.", "src/other.crn.lock"),
+        ("src/other.CRN .", "src/other.CRN.lock"),
+    ] {
+        assert_eq!(
+            suggested_lock_path(Path::new(lock)),
+            Path::new(suggested),
             "{lock:?}"
         );
     }

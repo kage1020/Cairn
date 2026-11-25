@@ -56,9 +56,20 @@ pub fn default_lock_refusal(source: &Path) -> Result<Option<WritePath>, Unidenti
     Ok(reaching_source(source, &default_lock_path(source))?.map(|reached| reached.path))
 }
 
+/// The `.lock` path to give in place of a `--lock` refused as [`LockPathRefusal::SourceName`].
+#[must_use]
+pub fn suggested_lock_path(lock: &Path) -> PathBuf {
+    match lock.to_str() {
+        Some(text) => default_lock_path(Path::new(text.trim_end_matches(['.', ' ']))),
+        None => default_lock_path(lock),
+    }
+}
+
 /// Whether a file `name` ends in `.crn`, in any case.
 fn names_a_source(name: &OsStr) -> bool {
+    // Windows drops a name's trailing dots and spaces, so `other.crn.` opens `other.crn`.
     name.to_string_lossy()
+        .trim_end_matches(['.', ' '])
         .to_ascii_lowercase()
         .ends_with(".crn")
 }

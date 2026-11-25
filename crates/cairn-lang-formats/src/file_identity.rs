@@ -166,9 +166,12 @@ fn parent(path: &Path) -> &Path {
         .unwrap_or(Path::new("."))
 }
 
-/// `name` in lower case, so two spellings of one entry fold alike.
+/// `name` without the trailing dots and spaces Windows drops, in lower case, so two spellings of
+/// one entry fold alike.
 fn folded(name: &OsStr) -> String {
-    name.to_string_lossy().to_lowercase()
+    name.to_string_lossy()
+        .trim_end_matches(['.', ' '])
+        .to_lowercase()
 }
 
 #[cfg(test)]

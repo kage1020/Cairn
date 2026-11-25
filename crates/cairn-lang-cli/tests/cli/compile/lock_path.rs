@@ -135,6 +135,8 @@ fn a_lock_ending_in_crn_is_refused_whatever_it_names() {
         ("src/other.crn", "src/other.crn.lock"),
         ("src/missing.crn", "src/missing.crn.lock"),
         ("build/hut.CRN", "build/hut.CRN.lock"),
+        ("src/other.crn.", "src/other.crn.lock"),
+        ("src/other.crn ", "src/other.crn.lock"),
     ] {
         assert_refused(dir.path(), lock, &names_a_crn(lock, suggested));
     }

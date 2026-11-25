@@ -132,6 +132,18 @@ fn another_letter_case_reaches_the_file_by_name_only_where_the_directory_folds_c
     );
 }
 
+#[test]
+fn a_trailing_dot_or_space_reaches_the_file_by_name_only_on_windows() {
+    let (dir, file) = hut();
+    for name in ["hut.crn.", "hut.crn ", "hut.crn. ."] {
+        assert_eq!(
+            reach(&file, &dir.path().join(name)),
+            cfg!(windows).then_some(Reach::Name),
+            "{name:?}",
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn a_path_the_file_system_cannot_answer_for_is_unidentified_rather_than_absent() {

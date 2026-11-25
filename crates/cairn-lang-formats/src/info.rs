@@ -21,6 +21,7 @@ use crate::build::run_level::RunLevelMessage;
 use crate::file_identity::{Reach, Unidentified};
 use crate::lock_path::{
     LockPathRefusal, default_lock_path, default_lock_refusal, lock_path_refusal,
+    suggested_lock_path,
 };
 use crate::registry::builtin_pack;
 use crate::write_path::{Reached, WritePath};
@@ -408,7 +409,7 @@ fn refused_lock_note(file: &Path, lock: &Path, writer: &LockWriter) -> Option<St
             "which ends in `.crn` as a source does".to_owned(),
             format!(
                 "give `--lock` a `.lock` path, such as {}",
-                default_lock_path(lock).display(),
+                suggested_lock_path(lock).display(),
             ),
         ),
     };

@@ -1322,9 +1322,11 @@ elsewhere: a `.lock` path elsewhere for a lock, an `--out` naming another direct
 A note under a `--lock` offers leaving the flag out only when the compile would write
 `<source>.lock`.
 
-A `--lock` whose file name ends in `.crn`, in any case, is the same usage error, exit 2 before the
-source is read, whatever file it names or none: a lock is never a source, and `other.crn` is most
-likely `other.crn.lock` that a shell completed only as far as the source's name.
+A `--lock` whose file name ends in `.crn`, in any case and with any trailing dots and spaces, which
+Windows drops from a file name, is the same usage error, exit 2 before the source is read, whatever
+file it names or none: a lock is never a source, and `other.crn` is most likely `other.crn.lock`
+that a shell completed only as far as the source's name. Its note gives that path with the trailing
+dots and spaces dropped and `.lock` added.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell or placed an

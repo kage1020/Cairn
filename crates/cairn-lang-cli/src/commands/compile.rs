@@ -12,6 +12,7 @@ use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
 use cairn_lang_formats::file_identity::Reach;
 use cairn_lang_formats::lock_path::{
     LockPathRefusal, default_lock_path, default_lock_refusal, lock_path_refusal,
+    suggested_lock_path,
 };
 use cairn_lang_formats::write_path::WritePath;
 
@@ -133,7 +134,7 @@ fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) 
             );
             format!(
                 "give `--lock` a `.lock` path, such as `{}`",
-                default_lock_path(lock).display(),
+                suggested_lock_path(lock).display(),
             )
         }
     };
