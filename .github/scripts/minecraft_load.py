@@ -428,11 +428,19 @@ def server_jar(version: str, cache: Path) -> tuple[Path, int]:
     return jar, needs_java
 
 
-def run_tool(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """`command` run to completion, with its output captured as UTF-8."""
+def run_tool(
+    command: list[str], cwd: Path | None = None, timeout: float | None = None
+) -> subprocess.CompletedProcess:
+    """`command` run to completion, with its output captured as UTF-8; past `timeout` seconds it
+    is stopped and `subprocess.TimeoutExpired` raised."""
     try:
         return subprocess.run(
-            command, cwd=cwd, capture_output=True, encoding="utf-8", errors="replace"
+            command,
+            cwd=cwd,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
         )
     except OSError as problem:
         raise Refused(f"cannot run `{command[0]}`: {problem}") from None

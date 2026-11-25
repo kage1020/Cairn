@@ -57,6 +57,7 @@ import json
 import math
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import zipfile
@@ -1208,6 +1209,8 @@ PROBE_NAMES = (
     ("net.minecraft.world.level.EmptyBlockGetter", "INSTANCE", None),
     (BLOCK_POS, "ZERO", None),
 )
+# The seconds the probe may take to boot the game's registries and ask every state.
+PROBE_TIMEOUT = 600
 # One member line of Mojang's mappings: optional line numbers, the type, the name, a method's
 # parameters and the lines it was inlined from, then the obfuscated name.
 MAPPED_MEMBER = re.compile(r"(?:\d+:\d+:)?\S+ ([^\s(]+)(\(([^)]*)\))?(?::\d+(?::\d+)?)? -> (\S+)")
@@ -1311,29 +1314,36 @@ def probe_classpath(jar: Path, into: Path) -> list[Path]:
 
 def conducting_states(version: str, java: str, cache: Path, work: Path) -> tuple[str, dict]:
     """One `1` or `0` per block state of the `version` server, in global id order, for whether it
-    conducts redstone power, with the jars the answers came from."""
+    conducts redstone power, with the jars the answers came from. The answers are kept in `work`
+    under the jar's SHA-1, and the probe's log in `cache`, which outlives a refused run."""
     jar, _ = server_jar(version, cache)
+    download, _ = server_download(version, cache)
     mappings, mapped_by = server_mappings(version, cache)
     root = work / version / "probe"
-    out = root / "conductors.txt"
+    out = root / f"conductors-{download['sha1']}.txt"
     if not out.exists():
         root.mkdir(parents=True, exist_ok=True)
         classpath = probe_classpath(jar, root / "classpath")
-        log = root / "probe.log"
-        run = run_tool(
-            [
-                java, "-cp", os.pathsep.join(map(str, classpath)), str(PROBE), str(out),
-                *probe_arguments(mappings),
-            ],
-            cwd=root,
-        )
+        log = cache / f"conductor-probe-{version}.log"
+        try:
+            run = run_tool(
+                [
+                    java, "-cp", os.pathsep.join(map(str, classpath)), str(PROBE), str(out),
+                    *probe_arguments(mappings),
+                ],
+                cwd=root,
+                timeout=PROBE_TIMEOUT,
+            )
+        except subprocess.TimeoutExpired:
+            raise Refused(
+                f"the {version} conductor probe ran past {PROBE_TIMEOUT} s and was stopped"
+            ) from None
         log.write_text(run.stdout + run.stderr, encoding="utf-8")
         if run.returncode != 0 or not out.exists():
             tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-30:])
             raise Refused(
                 f"the {version} conductor probe failed (exit {run.returncode}, log in {log}):\n{tail}"
             )
-    download, _ = server_download(version, cache)
     source = {"mc_version": version, "server": {"url": download["url"], "sha1": download["sha1"]}}
     if mapped_by is not None:
         source["mappings"] = mapped_by

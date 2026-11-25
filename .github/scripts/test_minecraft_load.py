@@ -9,6 +9,7 @@ import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -371,6 +372,16 @@ class Refusals(unittest.TestCase):
                     f"{(run.stdout + run.stderr).strip()}",
                 )
                 self.assertEqual(log.read_text(encoding="utf-8"), run.stdout + run.stderr)
+
+
+class RunTool(unittest.TestCase):
+    def test_a_tool_that_finishes_gives_its_output(self) -> None:
+        run = load.run_tool([sys.executable, "-c", "print('done')"], timeout=60)
+        self.assertEqual((run.returncode, run.stdout), (0, "done\n"))
+
+    def test_a_tool_that_runs_past_its_timeout_is_stopped(self) -> None:
+        with self.assertRaises(subprocess.TimeoutExpired):
+            load.run_tool([sys.executable, "-c", "import time; time.sleep(60)"], timeout=0.5)
 
 
 class Main(unittest.TestCase):

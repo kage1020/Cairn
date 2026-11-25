@@ -1253,7 +1253,6 @@ class ConnectionsText(unittest.TestCase):
         )
 
 
-
 # --- the conductor table ------------------------------------------------------------------------
 
 # The probe's names as Mojang's mappings of an obfuscated server write them, with a field, an
@@ -1418,53 +1417,82 @@ class ConductingStates(Case):
 
     def setUp(self) -> None:
         self.work = self.temporary_folder()
-        self.runs: list[list[str]] = []
-        self.patch(registry, "server_jar", lambda version, cache: (self.work / "server.jar", 21))
+        self.cache = self.temporary_folder()
+        self.root = self.work / "1.21" / "probe"
+        self.runs: list[tuple[list[str], float | None]] = []
+        self.patch(registry, "server_jar", lambda version, cache: (cache / "server.jar", 21))
         self.patch(registry, "server_download", lambda version, cache: (self.SERVER, 21))
         self.patch(registry, "server_mappings", lambda version, cache: (MAPPINGS, self.MAPPED))
         self.patch(registry, "probe_classpath", lambda jar, into: [into / "a.jar", into / "b.jar"])
 
     def probe(self, returncode: int, answers: str | None) -> None:
-        def run_tool(command: list[str], cwd: Path | None = None):
-            self.runs.append(command)
+        def run_tool(command: list[str], cwd: Path | None = None, timeout: float | None = None):
+            self.runs.append((command, timeout))
             if answers is not None:
                 Path(command[4]).write_text(answers + "\n", encoding="utf-8")
             return mock.Mock(returncode=returncode, stdout="booted\n", stderr="")
 
         self.patch(registry, "run_tool", run_tool)
 
+    def states(self) -> tuple[str, dict]:
+        return registry.conducting_states("1.21", "java", self.cache, self.work)
+
     def test_the_probe_runs_from_its_source_with_the_servers_classes_and_its_names(self) -> None:
         self.probe(0, "0110")
-        root = self.work / "1.21" / "probe"
         self.assertEqual(
-            registry.conducting_states("1.21", "java", self.work, self.work),
-            (
-                "0110",
-                {"mc_version": "1.21", "server": self.SERVER, "mappings": self.MAPPED},
-            ),
+            self.states(),
+            ("0110", {"mc_version": "1.21", "server": self.SERVER, "mappings": self.MAPPED}),
         )
-        classpath = f"{root / 'classpath' / 'a.jar'}{registry.os.pathsep}{root / 'classpath' / 'b.jar'}"
+        classpath = (
+            f"{self.root / 'classpath' / 'a.jar'}{registry.os.pathsep}"
+            f"{self.root / 'classpath' / 'b.jar'}"
+        )
         self.assertEqual(
             self.runs,
             [
-                [
-                    "java",
-                    "-cp",
-                    classpath,
-                    str(registry.PROBE),
-                    str(root / "conductors.txt"),
-                    *registry.probe_arguments(MAPPINGS),
-                ]
+                (
+                    [
+                        "java",
+                        "-cp",
+                        classpath,
+                        str(registry.PROBE),
+                        str(self.root / f"conductors-{'0' * 40}.txt"),
+                        *registry.probe_arguments(MAPPINGS),
+                    ],
+                    registry.PROBE_TIMEOUT,
+                )
             ],
         )
 
-    def test_a_probe_that_fails_is_refused_with_its_log(self) -> None:
+    def test_a_probe_that_fails_is_refused_with_a_log_that_outlives_the_run(self) -> None:
         self.probe(1, None)
-        root = self.work / "1.21" / "probe"
+        log = self.cache / "conductor-probe-1.21.log"
         self.assertEqual(
-            self.refusal(registry.conducting_states, "1.21", "java", self.work, self.work),
-            f"the 1.21 conductor probe failed (exit 1, log in {root / 'probe.log'}):\nbooted",
+            self.refusal(self.states),
+            f"the 1.21 conductor probe failed (exit 1, log in {log}):\nbooted",
         )
+        self.assertEqual(log.read_text(encoding="utf-8"), "booted\n")
+
+    def test_a_probe_that_runs_past_its_time_is_stopped_and_refused(self) -> None:
+        def run_tool(command: list[str], cwd: Path | None = None, timeout: float | None = None):
+            raise registry.subprocess.TimeoutExpired(command, timeout)
+
+        self.patch(registry, "run_tool", run_tool)
+        self.assertEqual(
+            self.refusal(self.states),
+            f"the 1.21 conductor probe ran past {registry.PROBE_TIMEOUT} s and was stopped",
+        )
+
+    def test_the_answers_of_the_same_jar_are_read_again_and_another_jars_are_not(self) -> None:
+        self.root.mkdir(parents=True)
+        (self.root / f"conductors-{'0' * 40}.txt").write_text("01\n", encoding="utf-8")
+        (self.root / f"conductors-{'2' * 40}.txt").write_text("10\n", encoding="utf-8")
+        self.probe(0, "11")
+        self.assertEqual(self.states()[0], "01")
+        self.assertEqual(self.runs, [])
+        self.SERVER = {**self.SERVER, "sha1": "3" * 40}
+        self.assertEqual(self.states()[0], "11")
+        self.assertEqual(len(self.runs), 1)
 
 
 class ConductorTable(unittest.TestCase):
