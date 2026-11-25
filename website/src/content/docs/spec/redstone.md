@@ -420,16 +420,25 @@ power between it and the top layer:
 | `lamp`, `piston`, `dispenser` | `y = 0`, or `y = 1` over a block | the riser's upper torch, under it or under the block it stands on |
 
 A block **passes power** when the game makes it conduct redstone power: power given it whole, by the
-plate or observer on it or by the riser's torch under it, reaches what stands beside it. The game
-decides that for each state of each block, and the editions and their versions decide some blocks
-apart, so each edition's registry pack records it for each version in its `conductors` table
-([Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). On both
-editions `@stone`, `@oak_planks` and a double slab pass power, and glass, stained glass, leaves,
-glowstone, a slab that is not double and a stair pass none. A Bedrock honey block passes power where
-a Java one does not, and a Bedrock sea lantern stopped passing power at 1.21.30. A check that pins
-no version reads a block as every version that declares it agrees, and a block they disagree on,
-like one a pack without the table names, is taken to pass power, since such a check reports what
-every target raises ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+plate or observer on it or by the riser's torch under it, reaches each block next to it, above,
+below or at a side, so the dust under it and the door on it take it. The game decides that for each
+state of each block, and the editions and their versions decide some blocks apart, so each
+edition's registry pack records it for each version in its `conductors` table ([Versioning and
+Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). On both editions `@stone`,
+`@oak_planks` and a double slab pass power, whichever id spells it, `@oak_slab[type=double]` or
+Bedrock's `@oak_double_slab`, and glass, stained glass, leaves, glowstone, a slab that is not double
+and a stair pass none. A Bedrock honey block passes power where a Java one does not, and a Bedrock
+sea lantern stopped passing power at 1.21.30.
+
+Coupling refuses a component only over a block the target's table says passes no power. Where the
+table cannot say, the block is taken to pass power: in a pack without the table, for a block the
+table marks unsettled, such as Bedrock's mud, for a Bedrock block no canonical block is written as,
+and for a state the version does not give the block, which a check that pins it reports as
+`E_STATE_DOMAIN` instead. There the compiler rather than the source is the incomplete side, so no
+error is raised ([Lint §11.3](/spec/lint/#113-error-vs-warning)). A check that pins no version
+reads a block as every version that declares it agrees, and the table cannot say of a block one of
+them cannot say of or that they disagree on. So such a check refuses a component only where every
+target refuses it, since it reports what every target raises.
 
 A component anywhere else is `E_ROUTE_UNREACHABLE_COMPONENT` at its line: the message says where
 that kind of component reaches the layer under the floor, and the fix moves it there. So is a
@@ -641,11 +650,13 @@ checked against the structure as built for the edition:
   it and an `observer` into the cell behind it, or when it powers whole a block beside that cell: a
   `lever` or `button` the block it hangs on, a `pressure_plate` the block under it, and an
   `observer` the block behind it. A block passes that power on when the target's `conductors`
-  table says it conducts ([§14.5](#145-place-and-route)). Where the target cannot say, any block
-  but air, a sensor, a `piston` and a `door` is taken to, a `lamp` and a `dispenser` among them,
-  since a finding too many is safer here than a circuit that waits on update order unreported. A
-  piston takes no power through its front. The finding is at the actuator, with a note at
-  the sensor. Bedrock has no quasi-connectivity, so this is no finding there.
+  table says it conducts, read as [§14.5](#145-place-and-route) reads it, with a version pinned or
+  not. Where the table cannot say, this check leans the other way from coupling, toward a finding:
+  any block but air, a sensor, a `piston` and a `door` is taken to pass it, a `lamp` and a
+  `dispenser` among them, since a finding too many is safer here than a circuit that waits on
+  update order unreported. A piston takes no power through its front. The finding is at the
+  actuator, with a note at the sensor. Bedrock has no quasi-connectivity, so this is no finding
+  there.
 
 A [Tier 0 part](#tier-0-parts) and a raw member are the author's, so neither is checked, and a
 sensor that also powers the component directly is no dependence on order and is not reported.

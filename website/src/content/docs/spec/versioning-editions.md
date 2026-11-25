@@ -251,13 +251,13 @@ the method the game's own redstone asks, and `extracted` names the jar and, for 
 obfuscates its names, the mappings Mojang publishes for it. Neither Bedrock's block palette nor
 GeyserMC's mappings record conduction, so Bedrock's is written by hand. Its table at each version
 holds the blocks that conduct in the Java release its state map follows, of those the map names,
-less each block that a Bedrock source shows passes no power or whose Bedrock conduction no source
-settles, plus each block that a source shows Bedrock alone makes conduct. So a Bedrock honey block,
-bell and big dripleaf conduct; a sea lantern and a beacon conduct at 1.21.0 only, since 1.21.30 made
-both stop, and mangrove roots only from 1.21.40; and a block such as mud, a spawner or a command
-block, whose Bedrock conduction no source settles, is taken to pass none. `ids` names canonical
-blocks in both, and a block that conducts in some of its states only is a lookup over the fewest
-properties that decide it:
+less each block that a Bedrock source shows passes no power, plus each block that a source shows
+Bedrock alone makes conduct, and marks the rest of those Java conductors unsettled, since no source
+settles their Bedrock conduction. So a Bedrock honey block, bell and big dripleaf conduct; a sea
+lantern and a beacon conduct at 1.21.0 only, since 1.21.30 made both stop, and mangrove roots only
+from 1.21.40; and mud, a spawner and a command block are unsettled. `ids` names canonical blocks in
+both, and a block that conducts in some of its states only is a lookup over the fewest properties
+that decide it:
 
 ```json
 { "mc_versions": ["1.20.4", "1.21", "1.21.4", "26.3"], "ids": ["acacia_slab", "..."],
@@ -265,13 +265,21 @@ properties that decide it:
   "conducts": { "reads": ["type"], "map": { "bottom": false, "double": true, "top": false } } }
 ```
 
-A row without `conducts` conducts in every state, and a block no row names conducts in none, as does
-a Bedrock block no canonical block is written as. The loader refuses a component with no rows, a row
-that names no block or no version, a block two rows name at one version, a lookup that reads no
-property, maps no value or maps no state to `true`, a default the lookup does not read and a read it
-gives no default, and a table that misses a targetable version or names one the version table lacks.
-It also refuses a row naming a block, or a value of a state, that the version's block table does not
-give on Java, or its state map on Bedrock.
+A row without `conducts` conducts in every state, and a block no row names conducts in none. A row
+with `"unsettled": true` names blocks whose conduction no source settles: the table says neither
+that they conduct nor that they do not, as it says nothing of a Bedrock block no canonical block is
+written as, or of a state the version's tables do not give the block. A Bedrock id is read as the
+canonical state of each block it is written from, so `oak_double_slab` is `oak_slab[type=double]`.
+
+The loader refuses a component with no rows, a row that names no block or no version, a block two
+rows name at one version, a lookup that reads no property, maps no value or maps no state to
+`true`, a lookup key that does not give one value for each property the lookup reads, a default the
+lookup does not read and a read it gives no default, an unsettled row that gives a lookup or a
+default, and a table that misses a targetable version or names one the version table lacks. It also
+refuses a row naming a block, or a value of a state, that the tables it is checked against do not
+give at the version, the block table on Java and the state map on Bedrock, and a lookup that maps
+no key for a state those tables give the block, so a value the map leaves out is one the block does
+not take.
 
 Both packs carry a `paintings` component too: the paintings each targetable version has, each with
 its `width` and `height` in blocks, which a `painting`'s `variant=` names and hangs by ([Entities
