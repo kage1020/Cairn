@@ -520,6 +520,7 @@ fn differing_states(expected: &GridEntry, built: &BlockState) -> Vec<StateDiffer
         state: BlockState::bare(expected.state.id.clone()),
         defaults: expected.defaults.clone(),
         unread: expected.unread.clone(),
+        needed: expected.needed.clone(),
     };
     compared
         .defaults

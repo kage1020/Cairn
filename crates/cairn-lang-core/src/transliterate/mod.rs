@@ -128,11 +128,14 @@ impl std::error::Error for BlockGridError {}
 pub struct GridEntry {
     /// The block state, with every property the file says.
     pub state: BlockState,
-    /// The value the target builds for a property a line leaves out; a property with none is
-    /// built only as the line writes it.
+    /// The value the target builds for a property a line leaves out, but a needed one; a property
+    /// with none is built only as the line writes it.
     pub defaults: IndexMap<String, String>,
     /// The properties the target builds the same whatever their value.
     pub unread: Vec<String>,
+    /// The properties at their default that a line writes all the same, since the target builds
+    /// another block for a line that leaves them out.
+    pub needed: Vec<String>,
 }
 
 impl GridEntry {
@@ -143,6 +146,7 @@ impl GridEntry {
             state,
             defaults: IndexMap::new(),
             unread: Vec::new(),
+            needed: Vec::new(),
         }
     }
 
@@ -181,9 +185,14 @@ impl GridEntry {
             .filter(|key| !self.unread.contains(key))
     }
 
-    /// The value `state` builds for `key`: its own, else the target's default.
+    /// The value `state` builds for `key`: its own, else the target's default, which a needed
+    /// property has none of.
     fn read<'a>(&'a self, state: &'a BlockState, key: &str) -> Option<&'a String> {
-        state.properties.get(key).or_else(|| self.defaults.get(key))
+        state.properties.get(key).or_else(|| {
+            self.defaults
+                .get(key)
+                .filter(|_| !self.needed.iter().any(|needed| needed == key))
+        })
     }
 }
 

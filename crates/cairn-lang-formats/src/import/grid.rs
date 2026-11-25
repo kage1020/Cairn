@@ -93,6 +93,7 @@ pub(super) fn bedrock_grid(
                         state: spelling.state,
                         defaults: spelling.defaults,
                         unread: spelling.unread,
+                        needed: spelling.needed,
                     },
                     Some(spelling.waterlogged),
                 ),
@@ -145,6 +146,7 @@ struct EntryKey {
     properties: Vec<(String, String)>,
     defaults: Vec<(String, String)>,
     unread: Vec<String>,
+    needed: Vec<String>,
 }
 
 impl EntryKey {
@@ -155,13 +157,17 @@ impl EntryKey {
             out.sort_unstable();
             out
         };
-        let mut unread = entry.unread.clone();
-        unread.sort_unstable();
+        let names = |names: &[String]| {
+            let mut out = names.to_vec();
+            out.sort_unstable();
+            out
+        };
         Self {
             id: entry.state.id.clone(),
             properties: sorted(&entry.state.properties),
             defaults: sorted(&entry.defaults),
-            unread,
+            unread: names(&entry.unread),
+            needed: names(&entry.needed),
         }
     }
 }

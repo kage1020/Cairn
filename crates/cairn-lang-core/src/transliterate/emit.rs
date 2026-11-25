@@ -245,7 +245,7 @@ impl<'a> UnitPlan<'a> {
 
 /// How `entry` is written, or `None` for air: every state it says but those the target reads the
 /// same at any value and those at the target's default, which no rule but the connections sets,
-/// and the connection states left out or written.
+/// with each needed state kept, and the connection states left out or written.
 fn spellings(entry: &GridEntry, registry: &dyn TargetRegistry) -> Option<Spellings> {
     if entry.state.id == BlockState::AIR_ID {
         return None;
@@ -259,7 +259,7 @@ fn spellings(entry: &GridEntry, registry: &dyn TargetRegistry) -> Option<Spellin
         let connection = connections.contains(&key.as_str());
         let unread = entry.unread.contains(key);
         let defaulted = entry.defaults.get(key) == Some(value);
-        if unread || (defaulted && !connection) {
+        if !entry.needed.contains(key) && (unread || (defaulted && !connection)) {
             continue;
         }
         written.properties.insert(key.clone(), value.clone());

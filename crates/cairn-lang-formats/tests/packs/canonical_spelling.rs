@@ -59,7 +59,33 @@ fn a_stair_reads_as_its_java_state_with_the_states_bedrock_drops_unread() {
                 ("waterlogged", "false"),
             ]),
             unread: vec!["shape".to_owned()],
+            needed: Vec::new(),
             waterlogged: true,
+        })
+    );
+}
+
+#[test]
+fn a_state_at_its_default_that_picks_the_java_block_is_needed() {
+    let torch = spelled(
+        "minecraft:redstone_torch",
+        &[(
+            "torch_facing_direction",
+            StateValue::Str("south".to_owned()),
+        )],
+        false,
+    );
+    assert_eq!(
+        torch,
+        Some(CanonicalSpelling {
+            state: state(
+                "minecraft:redstone_torch",
+                &[("facing", "north"), ("lit", "true")]
+            ),
+            defaults: props([("facing", "north"), ("lit", "true")]),
+            unread: vec!["lit".to_owned()],
+            needed: vec!["facing".to_owned()],
+            waterlogged: false,
         })
     );
 }

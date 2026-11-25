@@ -12,6 +12,7 @@ use cairn_lang_formats::import::{
     ImportError, ImportFormat, LossKind, RawImport, SavedVersion, SemanticLoss, StampFit,
     import_raw,
 };
+use cairn_lang_formats::registry::builtin_pack;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use crate::common::{BedrockCell, bedrock_cells, compile_source, states_for};
@@ -174,6 +175,134 @@ fn a_bedrock_structure_imports_in_the_canonical_vocabulary_and_builds_the_same_f
         .expect("the import builds");
     let again = self::root(&compiled.structures["struct::stoop"], "1.21.60");
     assert_eq!(cells(&bytes(&again)), cells(&bytes(&root)));
+}
+
+/// `source`'s struct `name` built at bedrock `version` as `cairn compile` builds it, written as a
+/// `.mcstructure` and imported: the import, the file's cells, and the cells of what compiling the
+/// import at its stamp builds.
+fn round_trip(
+    source: &str,
+    name: &str,
+    version: &str,
+) -> (RawImport, Vec<BedrockCell>, Vec<BedrockCell>) {
+    let scope = format!("struct::{name}");
+    let built = compile_source(source, Edition::Bedrock, version)
+        .unwrap_or_else(|codes| panic!("the source builds at {version}: {codes:?}"));
+    let file = bytes(&root(&built.structures[&scope], version));
+    let import = import_raw(
+        file.as_slice(),
+        ImportFormat::Mcstructure,
+        &format!("{name}.mcstructure"),
+    )
+    .unwrap_or_else(|error| panic!("{name} imports at {version}: {error}"));
+    let stamp = import.decoded.stamp.mc_version().to_owned();
+    let rebuilt = compile_source(&import.transliteration.source, Edition::Bedrock, &stamp)
+        .unwrap_or_else(|codes| panic!("the import builds at {stamp}: {codes:?}"));
+    let again = bytes(&root(&rebuilt.structures[&scope], &stamp));
+    (import, cells(&file), cells(&again))
+}
+
+/// The written source past its header.
+fn body(source: &str) -> &str {
+    source.split_once("\n\n").map_or(source, |(_, body)| body)
+}
+
+/// A row of blocks Bedrock writes as the same id as another Java block, each at its default
+/// `facing` or `half`, with a wall behind them.
+const PICKED_BY_DEFAULT: &str = "@cairn 2026.11.0
+
+struct walls size=10x2
+  raw_fill mat=minecraft:stone from=0,0,1 to=9,1,1 origin=imported
+  raw_block mat=minecraft:redstone_torch[facing=north] at=0,0,0 origin=imported
+  raw_block mat=minecraft:unlit_redstone_torch[facing=north,lit=false] at=1,0,0 origin=imported
+  raw_block mat=minecraft:torch[facing=north] at=2,0,0 origin=imported
+  raw_block mat=minecraft:soul_torch[facing=north] at=3,0,0 origin=imported
+  raw_block mat=minecraft:oak_hanging_sign[facing=north] at=4,0,0 origin=imported
+  raw_block mat=minecraft:bamboo_hanging_sign[facing=north,waterlogged=true] at=5,0,0 origin=imported
+  raw_block mat=minecraft:melon_stem[facing=north] at=6,0,0 origin=imported
+  raw_block mat=minecraft:pumpkin_stem[facing=north] at=7,0,0 origin=imported
+  raw_block mat=minecraft:seagrass[half=lower] at=8,0,0 origin=imported
+  raw_block mat=minecraft:seagrass[half=upper] at=8,1,0 origin=imported
+";
+
+#[test]
+fn a_state_at_its_default_that_picks_the_block_is_written_at_every_target() {
+    for version in builtin_pack(Edition::Bedrock).targetable_versions() {
+        let (import, file, rebuilt) = round_trip(PICKED_BY_DEFAULT, "walls", &version);
+        assert_eq!(
+            body(&import.transliteration.source),
+            "struct walls size=10x2\n  \
+               raw_block mat=minecraft:redstone_torch[facing=north] at=0,0,0 origin=imported\n  \
+               raw_block mat=minecraft:unlit_redstone_torch[facing=north,lit=false] at=1,0,0 \
+             origin=imported\n  \
+               raw_block mat=minecraft:torch[facing=north] at=2,0,0 origin=imported\n  \
+               raw_block mat=minecraft:soul_torch[facing=north] at=3,0,0 origin=imported\n  \
+               raw_block mat=minecraft:oak_hanging_sign[facing=north] at=4,0,0 origin=imported\n  \
+               raw_block mat=minecraft:bamboo_hanging_sign[facing=north,waterlogged=true] \
+             at=5,0,0 origin=imported\n  \
+               raw_block mat=minecraft:melon_stem[facing=north] at=6,0,0 origin=imported\n  \
+               raw_block mat=minecraft:pumpkin_stem[facing=north] at=7,0,0 origin=imported\n  \
+               raw_block mat=minecraft:seagrass[half=lower] at=8,0,0 origin=imported\n  \
+               raw_fill mat=minecraft:stone from=0,0,1 to=9,1,1 origin=imported\n  \
+               raw_block mat=minecraft:seagrass[half=upper] at=8,1,0 origin=imported\n",
+            "at {version}"
+        );
+        let kinds: Vec<LossKind> = import.decoded.losses.iter().map(|loss| loss.kind).collect();
+        assert_eq!(kinds, [LossKind::Intent], "at {version}");
+        assert_eq!(rebuilt, file, "at {version}");
+    }
+}
+
+/// A wall head of each kind, facing north from the wall behind it.
+const WALL_HEADS: &str = "@cairn 2026.11.0
+
+struct heads size=3x2
+  raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported
+  raw_block mat=minecraft:skeleton_skull[facing=north] at=0,0,0 origin=imported
+  raw_block mat=minecraft:zombie_head[facing=north] at=1,0,0 origin=imported
+  raw_block mat=minecraft:dragon_head[facing=north] at=2,0,0 origin=imported
+";
+
+#[test]
+fn a_wall_head_is_written_with_the_facing_that_picks_it_from_the_floor_head() {
+    for version in ["1.21.60", "1.26.60"] {
+        let (import, file, rebuilt) = round_trip(WALL_HEADS, "heads", version);
+        assert_eq!(
+            body(&import.transliteration.source),
+            "struct heads size=3x2\n  \
+               raw_block mat=minecraft:skeleton_skull[facing=north] at=0,0,0 origin=imported\n  \
+               raw_block mat=minecraft:zombie_head[facing=north] at=1,0,0 origin=imported\n  \
+               raw_block mat=minecraft:dragon_head[facing=north] at=2,0,0 origin=imported\n  \
+               raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported\n",
+            "at {version}"
+        );
+        assert_eq!(rebuilt, file, "at {version}");
+    }
+}
+
+/// Blocks 1.21.0 writes as the block another Java block is, each at its default `axis` or
+/// `facing`: the pillars merged into their blocks, and a wall head merged into `skull`.
+const MERGED_AT_1_21_0: &str = "@cairn 2026.11.0
+
+struct merged size=3x2
+  raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported
+  raw_block mat=minecraft:quartz_block[axis=y] at=0,0,0 origin=imported
+  raw_block mat=minecraft:purpur_block[axis=y] at=1,0,0 origin=imported
+  raw_block mat=minecraft:skull[facing=north] at=2,0,0 origin=imported
+";
+
+#[test]
+fn a_pillar_or_head_1_21_0_merges_into_another_block_is_written_with_the_state_that_picks_it() {
+    let (import, file, rebuilt) = round_trip(MERGED_AT_1_21_0, "merged", "1.21.0");
+    assert_eq!(
+        body(&import.transliteration.source),
+        "struct merged size=3x2\n  \
+           raw_block mat=minecraft:quartz_block[axis=y] at=0,0,0 origin=imported\n  \
+           raw_block mat=minecraft:purpur_block[axis=y] at=1,0,0 origin=imported\n  \
+           raw_block mat=minecraft:skull[facing=north] at=2,0,0 origin=imported\n  \
+           raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported\n"
+    );
+    assert_eq!(rebuilt, file);
 }
 
 #[test]
