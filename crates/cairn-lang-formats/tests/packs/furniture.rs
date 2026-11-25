@@ -12,15 +12,18 @@ use cairn_lang_nbt::tag::Tag;
 
 use crate::common::{block_palette, compile_source, states_for, supported_versions};
 
-/// One room per library def, each standing its def against the back wall.
+/// One roofed room per library def, each setting its def against the back wall, on the floor or,
+/// for the lantern, which hangs from the block above it, under the roof.
 fn furnished() -> String {
     let mut src =
         String::from("theme t:\n  slot floor -> @oak_planks\n  slot wall -> @cobblestone\n\n");
     for def in furniture::defs() {
+        let y = if def.name == "lantern" { 4 } else { 1 };
         writeln!(
             src,
             "struct {name} size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=4\n  \
-             place use={name} at=inside.back offset=1 y=1\n",
+             roof kind=flat mat_slot=wall overhang=0\n  \
+             place use={name} at=inside.back offset=1 y={y}\n",
             name = def.name,
         )
         .expect("a String takes every write");

@@ -11,8 +11,9 @@ use cairn_lang_formats::diff_blocks::{DiffBlocksRefusal, DiffBlocksRun, diff_blo
 use cairn_lang_formats::import::{
     DecodeFileError, DecodedStructure, ImportFormat, decode_structure, decode_structure_file,
 };
+use cairn_lang_formats::registry::builtin_pack;
 
-use crate::common::{examples_dir, lower_source};
+use crate::common::{admitted_versions, compile_source, examples, examples_dir, lower_source};
 
 /// A struct of stone, which every Java target declares.
 const STONE: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=2x2\n  floor mat_slot=wall\n  walls \
@@ -123,6 +124,66 @@ fn a_lift_is_compared_with_its_structure_at_the_stamp() {
     assert_eq!(
         document,
         serde_json::to_value(&compared.document).expect("serialises")
+    );
+}
+
+#[test]
+fn the_one_bedrock_file_an_example_writes_agrees_with_the_example_at_every_cell() {
+    let mut several_files = Vec::new();
+    for (name, source) in examples() {
+        let edition = Edition::Bedrock;
+        for version in admitted_versions(builtin_pack(edition), &source, edition) {
+            let label = format!("{name} at bedrock {version}");
+            let ir = compile_source(&source, edition, &version)
+                .unwrap_or_else(|codes| panic!("{label} does not build: {codes:?}"));
+            let [(scope, array)] = ir.structures.iter().collect::<Vec<_>>()[..] else {
+                several_files.push(name.clone());
+                continue;
+            };
+            if !ir.walkways.is_empty() {
+                several_files.push(name.clone());
+                continue;
+            }
+            let target = resolve_target(edition, &version).expect("a shipped target");
+            let prepared = prepare_artifact(&ir, scope, array, &target)
+                .unwrap_or_else(|refusal| panic!("{label} is refused: {refusal:?}"));
+            let mut bytes = Vec::new();
+            prepared
+                .structure
+                .write(&mut bytes)
+                .expect("the file writes");
+            let structure = decode_structure(
+                bytes.as_slice(),
+                ImportFormat::Mcstructure,
+                &prepared.file_name,
+            )
+            .expect("the file decodes");
+            let run = diff_blocks(&source, &structure);
+            let compared = run
+                .outcome
+                .as_ref()
+                .unwrap_or_else(|refusal| panic!("{label} is not compared: {refusal:?}"));
+            let report = &compared.document.report;
+            assert_eq!(
+                (
+                    report.metrics.block_iou,
+                    report.metrics.state_accuracy,
+                    report.regions.len()
+                ),
+                (1.0, 1.0, 0),
+                "{label}"
+            );
+        }
+    }
+    several_files.dedup();
+    assert_eq!(
+        several_files,
+        [
+            "at-side-walkway.crn",
+            "l-walkway.crn",
+            "village.crn",
+            "window-walkway.crn"
+        ]
     );
 }
 
