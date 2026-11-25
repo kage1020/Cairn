@@ -207,8 +207,8 @@ fn body(source: &str) -> &str {
     source.split_once("\n\n").map_or(source, |(_, body)| body)
 }
 
-/// A row of blocks Bedrock writes as the same id as another Java block, each at its default
-/// `facing` or `half`, with a wall behind them.
+/// A row of blocks Bedrock writes as the id of another Java block too, which their `facing` or
+/// `half` tells apart, at its default but in the upper seagrass, with a wall behind them.
 const PICKED_BY_DEFAULT: &str = "@cairn 2026.11.0
 
 struct walls size=10x2
@@ -256,11 +256,15 @@ fn a_state_at_its_default_that_picks_the_block_is_written_at_every_target() {
 /// A wall head of each kind, facing north from the wall behind it.
 const WALL_HEADS: &str = "@cairn 2026.11.0
 
-struct heads size=3x2
-  raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported
+struct heads size=7x2
+  raw_fill mat=minecraft:stone from=0,0,1 to=6,0,1 origin=imported
   raw_block mat=minecraft:skeleton_skull[facing=north] at=0,0,0 origin=imported
-  raw_block mat=minecraft:zombie_head[facing=north] at=1,0,0 origin=imported
-  raw_block mat=minecraft:dragon_head[facing=north] at=2,0,0 origin=imported
+  raw_block mat=minecraft:wither_skeleton_skull[facing=north] at=1,0,0 origin=imported
+  raw_block mat=minecraft:zombie_head[facing=north] at=2,0,0 origin=imported
+  raw_block mat=minecraft:player_head[facing=north] at=3,0,0 origin=imported
+  raw_block mat=minecraft:creeper_head[facing=north] at=4,0,0 origin=imported
+  raw_block mat=minecraft:dragon_head[facing=north] at=5,0,0 origin=imported
+  raw_block mat=minecraft:piglin_head[facing=north] at=6,0,0 origin=imported
 ";
 
 #[test]
@@ -269,26 +273,33 @@ fn a_wall_head_is_written_with_the_facing_that_picks_it_from_the_floor_head() {
         let (import, file, rebuilt) = round_trip(WALL_HEADS, "heads", version);
         assert_eq!(
             body(&import.transliteration.source),
-            "struct heads size=3x2\n  \
+            "struct heads size=7x2\n  \
                raw_block mat=minecraft:skeleton_skull[facing=north] at=0,0,0 origin=imported\n  \
-               raw_block mat=minecraft:zombie_head[facing=north] at=1,0,0 origin=imported\n  \
-               raw_block mat=minecraft:dragon_head[facing=north] at=2,0,0 origin=imported\n  \
-               raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported\n",
+               raw_block mat=minecraft:wither_skeleton_skull[facing=north] at=1,0,0 \
+             origin=imported\n  \
+               raw_block mat=minecraft:zombie_head[facing=north] at=2,0,0 origin=imported\n  \
+               raw_block mat=minecraft:player_head[facing=north] at=3,0,0 origin=imported\n  \
+               raw_block mat=minecraft:creeper_head[facing=north] at=4,0,0 origin=imported\n  \
+               raw_block mat=minecraft:dragon_head[facing=north] at=5,0,0 origin=imported\n  \
+               raw_block mat=minecraft:piglin_head[facing=north] at=6,0,0 origin=imported\n  \
+               raw_fill mat=minecraft:stone from=0,0,1 to=6,0,1 origin=imported\n",
             "at {version}"
         );
         assert_eq!(rebuilt, file, "at {version}");
     }
 }
 
-/// Blocks 1.21.0 writes as the block another Java block is, each at its default `axis` or
-/// `facing`: the pillars merged into their blocks, and a wall head merged into `skull`.
+/// Blocks 1.21.0 writes as the block another Java block is, each at its default `axis`, `facing`
+/// or `rotation`: the pillars merged into their blocks, and a wall and a floor head merged into
+/// `skull`, the floor head turned, which Bedrock keeps in its block entity.
 const MERGED_AT_1_21_0: &str = "@cairn 2026.11.0
 
-struct merged size=3x2
+struct merged size=4x2
   raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported
   raw_block mat=minecraft:quartz_block[axis=y] at=0,0,0 origin=imported
   raw_block mat=minecraft:purpur_block[axis=y] at=1,0,0 origin=imported
   raw_block mat=minecraft:skull[facing=north] at=2,0,0 origin=imported
+  raw_block mat=minecraft:skull[rotation=8] at=3,0,0 origin=imported
 ";
 
 #[test]
@@ -296,10 +307,11 @@ fn a_pillar_or_head_1_21_0_merges_into_another_block_is_written_with_the_state_t
     let (import, file, rebuilt) = round_trip(MERGED_AT_1_21_0, "merged", "1.21.0");
     assert_eq!(
         body(&import.transliteration.source),
-        "struct merged size=3x2\n  \
+        "struct merged size=4x2\n  \
            raw_block mat=minecraft:quartz_block[axis=y] at=0,0,0 origin=imported\n  \
            raw_block mat=minecraft:purpur_block[axis=y] at=1,0,0 origin=imported\n  \
            raw_block mat=minecraft:skull[facing=north] at=2,0,0 origin=imported\n  \
+           raw_block mat=minecraft:skull[rotation=0] at=3,0,0 origin=imported\n  \
            raw_fill mat=minecraft:stone from=0,0,1 to=2,0,1 origin=imported\n"
     );
     assert_eq!(rebuilt, file);

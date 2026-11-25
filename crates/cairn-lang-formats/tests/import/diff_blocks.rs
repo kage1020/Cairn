@@ -187,6 +187,51 @@ fn the_one_bedrock_file_an_example_writes_agrees_with_the_example_at_every_cell(
     );
 }
 
+/// A floor head turned to `rotation=8`, which Bedrock keeps in its block entity rather than in a
+/// state, and which at 1.21.0 is the state that picks a floor head from the wall heads of `skull`.
+const FLOOR_SKULL: &str =
+    "struct s size=1x1\n  raw_block mat=minecraft:skull[rotation=8] at=0,0,0\n";
+
+#[test]
+fn a_needed_state_bedrock_does_not_read_agrees_at_any_value_and_differs_left_out() {
+    let structure = written(FLOOR_SKULL, Edition::Bedrock, "1.21.0");
+    let compared = |lift: &str| {
+        let run = diff_blocks(lift, &structure);
+        let document = json(&run, lift);
+        let report = run.outcome.expect("the lift is compared").document.report;
+        let states: Vec<(String, Option<String>, Option<String>)> = report
+            .regions
+            .iter()
+            .flat_map(|region| &region.states)
+            .map(|s| (s.key.clone(), s.structure.clone(), s.built.clone()))
+            .collect();
+        (
+            document["target"].clone(),
+            report.metrics.block_iou,
+            report.metrics.state_accuracy,
+            states,
+        )
+    };
+    let target = serde_json::json!({ "edition": "bedrock", "version": "1.21.0" });
+    for rotation in ["0", "8"] {
+        let lift = FLOOR_SKULL.replace("rotation=8", &format!("rotation={rotation}"));
+        assert_eq!(
+            compared(&lift),
+            (target.clone(), 1.0, 1.0, Vec::new()),
+            "rotation={rotation}"
+        );
+    }
+    assert_eq!(
+        compared(&FLOOR_SKULL.replace("skull[rotation=8]", "skull")),
+        (
+            target,
+            1.0,
+            0.0,
+            vec![("rotation".to_owned(), Some("0".to_owned()), None)]
+        )
+    );
+}
+
 /// A stone box of 40 blocks with an item frame and a glow item frame lying on its floor.
 const FRAMED: &str = "theme t:\n  slot wall -> @stone\n\nstruct s size=4x4\n  floor mat_slot=wall\n  \
      walls height=2 mat_slot=wall\n  item_frame id=plain at=1,1,1 facing=up\n  item_frame id=lit \

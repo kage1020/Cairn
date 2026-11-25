@@ -1,8 +1,6 @@
 //! The canonical state a Bedrock `block_palette` entry reads as at one version: a state of a Java
 //! block mapped onto its id whose form there is the entry, checked by resolving it.
 
-use std::collections::HashMap;
-
 use cairn_lang_core::block_array::BlockState;
 use indexmap::IndexMap;
 
@@ -12,9 +10,10 @@ use crate::registry::blocks::StateValue;
 /// The most combinations of the values its states read that a family is searched over.
 const MOST_COMBINATIONS: usize = 1 << 16;
 
-/// The most sets of properties at their default a family's spelling is tried with before it names
-/// them all.
-const MOST_RESTORED: usize = 1 << 12;
+/// The most properties a line leaves out whose every set is tried as the needed ones; past it, the
+/// first `1 << MOST_SEARCHED` sets are, then all of them (`spec/ecosystem-interop` "What an import
+/// writes").
+const MOST_SEARCHED: usize = 12;
 
 /// How a source spells a Bedrock block at one version, as [`VersionStates::canonical_spelling`]
 /// finds it.
@@ -22,13 +21,14 @@ const MOST_RESTORED: usize = 1 << 12;
 pub struct CanonicalSpelling {
     /// The state, with every property of its Java block.
     pub state: BlockState,
-    /// The value the map takes for a property a line leaves out, but a needed one.
+    /// The value the map takes for a property a line leaves out, which a needed one left out does
+    /// not get.
     pub defaults: IndexMap<String, String>,
     /// The properties no Bedrock state reads, which the entry is written the same at any value.
     pub unread: Vec<String>,
-    /// The properties a line writes though they are at their default, since leaving them out
-    /// writes another block, as bare `redstone_torch` is a standing torch: the fewest that do,
-    /// the first in the block's order among as few.
+    /// The properties a line writes even at their default, since a line that leaves one out is not
+    /// built as this block, as bare `redstone_torch` is a standing torch: the fewest that build it,
+    /// the first in the block's order among as few, or past the sets searched every one left out.
     pub needed: Vec<String>,
     /// Whether the state is written with the water layer.
     pub waterlogged: bool,
@@ -67,14 +67,10 @@ impl VersionStates<'_> {
             properties,
         };
         for (_, java, family, full) in found {
-            // Naming more of `full` never turns a line that writes the entry into another block,
-            // so an id whose line of `full` whole writes another one has no shorter line either.
             let ids: Vec<&str> = [java, id]
                 .into_iter()
                 .take(if java == id { 1 } else { 2 })
-                .filter(|spelled| {
-                    declares(spelled) && written_as(&line(spelled, full.clone())).is_some()
-                })
+                .filter(|spelled| declares(spelled))
                 .collect();
             if ids.is_empty() {
                 continue;
@@ -87,11 +83,10 @@ impl VersionStates<'_> {
                 })
                 .map(|(key, _)| key)
                 .collect();
-            // Past the cap, `full` itself, which writes the entry, is the spelling.
-            let every = (0..left_out.len()).collect();
-            let restorations = subsets(left_out.len())
-                .take(MOST_RESTORED)
-                .chain(std::iter::once(every));
+            let n = left_out.len();
+            let restorations = subsets(n)
+                .take(1 << MOST_SEARCHED)
+                .chain((n > MOST_SEARCHED).then(|| (0..n).collect()));
             for restored in restorations {
                 let needed: Vec<String> = restored.iter().map(|&i| left_out[i].clone()).collect();
                 let properties: IndexMap<String, String> = full
@@ -106,10 +101,7 @@ impl VersionStates<'_> {
                     return Some(CanonicalSpelling {
                         state: line(spelled, full),
                         defaults: family.defaults.clone(),
-                        unread: unread
-                            .into_iter()
-                            .filter(|key| !needed.contains(key))
-                            .collect(),
+                        unread,
                         needed,
                         waterlogged,
                     });
@@ -169,16 +161,16 @@ fn closest(
             .iter()
             .find(|(state, _)| state == name)
             .map(|(_, v)| v)?;
-        match rule {
-            Rule::Constant(value) if value == wanted => {}
-            Rule::Constant(_) => return None,
-            Rule::Lookup { reads, map } => {
-                match read.iter().position(|key| reads.iter().any(|r| r == key)) {
-                    Some(first) => checks[first].push(Check { reads, map, wanted }),
-                    None if map.get("") == Some(wanted) => {}
-                    None => return None,
-                }
+        let first = match rule {
+            Rule::Lookup { reads, .. } => {
+                read.iter().position(|key| reads.iter().any(|r| r == key))
             }
+            Rule::Constant(_) => None,
+        };
+        match first {
+            Some(first) => checks[first].push(Check { rule, wanted }),
+            None if rule.value(&base) == Some(wanted) => {}
+            None => return None,
         }
     }
     if family.states.len() != states.len() {
@@ -195,9 +187,8 @@ fn closest(
     search.best
 }
 
-/// A search of a family's whole states for those whose Bedrock states are given, which sets the
-/// read properties from the last to the first: of the states as near their defaults, it keeps the
-/// first a count over the properties meets, the first property counting fastest.
+/// A search for a family's whole state nearest its defaults whose Bedrock states are given; among
+/// as near, the first in a count whose first read property moves fastest.
 struct Search<'a> {
     family: &'a Family,
     read: &'a [&'a str],
@@ -210,8 +201,7 @@ struct Search<'a> {
 /// A lookup of a family's Bedrock state, with the value it must give.
 #[derive(Clone, Copy)]
 struct Check<'a> {
-    reads: &'a [String],
-    map: &'a HashMap<String, StateValue>,
+    rule: &'a Rule,
     wanted: &'a StateValue,
 }
 
@@ -229,10 +219,9 @@ impl Search<'_> {
         let key = self.read[at];
         for value in &self.family.java[key] {
             self.full.insert(key.to_owned(), value.clone());
-            let holds = self.checks[at].iter().all(|check| {
-                let joined: Vec<&str> = check.reads.iter().map(|k| self.full[k].as_str()).collect();
-                check.map.get(&joined.join(",")) == Some(check.wanted)
-            });
+            let holds = self.checks[at]
+                .iter()
+                .all(|check| check.rule.value(&self.full) == Some(check.wanted));
             if holds {
                 let moved = usize::from(self.family.defaults.get(key) != Some(value));
                 self.set(at, off + moved);

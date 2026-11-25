@@ -151,6 +151,12 @@ struct EntryKey {
 
 impl EntryKey {
     fn of(entry: &GridEntry) -> Self {
+        let GridEntry {
+            state,
+            defaults,
+            unread,
+            needed,
+        } = entry;
         let sorted = |pairs: &IndexMap<String, String>| {
             let mut out: Vec<(String, String)> =
                 pairs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
@@ -163,11 +169,11 @@ impl EntryKey {
             out
         };
         Self {
-            id: entry.state.id.clone(),
-            properties: sorted(&entry.state.properties),
-            defaults: sorted(&entry.defaults),
-            unread: names(&entry.unread),
-            needed: names(&entry.needed),
+            id: state.id.clone(),
+            properties: sorted(&state.properties),
+            defaults: sorted(defaults),
+            unread: names(unread),
+            needed: names(needed),
         }
     }
 }
