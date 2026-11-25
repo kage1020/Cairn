@@ -569,54 +569,142 @@ fn floored(floor: &str) -> String {
     )
 }
 
+/// The refusal of `named`, on the line `line`, over glass that `laid` lays, with `fix`.
+fn over_glass(line: &'static str, named: &str, laid: &'static str, fix: &str) -> Finding<'static> {
+    (
+        "E_ROUTE_UNREACHABLE_COMPONENT",
+        line,
+        format!(
+            "struct=room: {named} at y=1 cannot reach the circuit under the floor: the floor block \
+             under it, `minecraft:glass`, passes no power between it and the layer under the floor"
+        ),
+        vec![
+            (
+                Some(laid),
+                format!("the `minecraft:glass` under {named} is laid here"),
+            ),
+            (None, format!("Fix: {fix}")),
+        ],
+    )
+}
+
+/// The fix of a component but a door over a floor block that passes no power.
+const OFF_GLASS: &str =
+    "set `y=0` on it, or build the floor under it of a block that passes power, such as `@stone`";
+
 #[test]
 fn a_component_over_a_floor_block_that_passes_no_power_is_refused_at_its_line() {
     let source = floored("@glass");
-    let refused = |line: &'static str, named: &str, fix: &str| {
-        (
-            "E_ROUTE_UNREACHABLE_COMPONENT",
-            line,
-            format!(
-                "struct=room: {named} at y=1 cannot reach the circuit under the floor: the floor \
-                 block under it, `minecraft:glass`, passes no power between it and the layer under \
-                 the floor"
-            ),
-            vec![
-                (
-                    Some("floor mat_slot=fl"),
-                    format!("the `minecraft:glass` under {named} is laid here"),
-                ),
-                (None, format!("Fix: {fix}")),
-            ],
-        )
-    };
-    let elsewhere = "set `y=0` on it, or build the floor under it of a block that passes power, \
-                     such as `@stone`";
     for edition in [Edition::Java, Edition::Bedrock] {
         let out = placement_of(&source, edition);
         assert!(out.scoped.scopes.is_empty(), "{edition:?}");
         assert_eq!(
             findings(&source, &out.diagnostics),
             [
-                refused(
+                over_glass(
                     "pressure_plate id=p at=inside.back offset=4 y=1 -> sig.a",
                     "the pressure_plate `p`",
-                    elsewhere,
+                    "floor mat_slot=fl",
+                    OFF_GLASS,
                 ),
-                refused(
+                over_glass(
                     "lamp id=m at=inside.left offset=4 y=1 lit_by=sig.b",
                     "the lamp `m`",
-                    elsewhere,
+                    "floor mat_slot=fl",
+                    OFF_GLASS,
                 ),
-                refused(
+                over_glass(
                     "door id=d side=front at=center",
                     "the door `d`",
+                    "floor mat_slot=fl",
                     "build the floor under the door of a block that passes power, such as `@stone`",
                 ),
             ],
             "{edition:?}",
         );
     }
+}
+
+#[test]
+fn an_observer_looking_up_a_piston_or_a_dispenser_over_glass_is_refused_at_its_line() {
+    let source = "theme t:\n  slot wall -> @oak_planks\n  slot fl -> @glass\n\n\
+                  struct room size=15x11\n  floor mat_slot=fl\n  walls mat_slot=wall height=3\n  \
+                  observer id=o at=inside.back offset=4 y=1 facing=up -> sig.a\n  \
+                  piston id=r at=inside.left offset=4 y=1 powered_by=sig.a\n  \
+                  dispenser id=s at=inside.right offset=4 y=1 fired_by=sig.a\n  \
+                  circuit region=floor void=3\n";
+    let out = placement_of(source, Edition::Java);
+    assert_eq!(
+        findings(source, &out.diagnostics),
+        [
+            over_glass(
+                "observer id=o at=inside.back offset=4 y=1 facing=up -> sig.a",
+                "the observer `o`",
+                "floor mat_slot=fl",
+                OFF_GLASS,
+            ),
+            over_glass(
+                "piston id=r at=inside.left offset=4 y=1 powered_by=sig.a",
+                "the piston `r`",
+                "floor mat_slot=fl",
+                OFF_GLASS,
+            ),
+            over_glass(
+                "dispenser id=s at=inside.right offset=4 y=1 fired_by=sig.a",
+                "the dispenser `s`",
+                "floor mat_slot=fl",
+                OFF_GLASS,
+            ),
+        ],
+    );
+}
+
+#[test]
+fn the_note_points_at_the_member_that_lays_the_block_under_the_component() {
+    let floor = "floor mat_slot=fl";
+    let source = floored("@stone").replace(
+        floor,
+        "floor mat_slot=fl\n  raw_block mat=minecraft:glass at=10,0,1\n  \
+         raw_block mat=minecraft:glass at=12,0,8",
+    );
+    let out = placement_of(&source, Edition::Java);
+    assert_eq!(
+        findings(&source, &out.diagnostics),
+        [over_glass(
+            "pressure_plate id=p at=inside.back offset=4 y=1 -> sig.a",
+            "the pressure_plate `p`",
+            "raw_block mat=minecraft:glass at=10,0,1",
+            OFF_GLASS,
+        )],
+    );
+    let source = floored("@glass").replace(
+        floor,
+        "floor mat_slot=fl\n  raw_block mat=minecraft:glass at=10,0,1",
+    );
+    let out = placement_of(&source, Edition::Java);
+    assert_eq!(
+        findings(&source, &out.diagnostics),
+        [
+            over_glass(
+                "pressure_plate id=p at=inside.back offset=4 y=1 -> sig.a",
+                "the pressure_plate `p`",
+                "raw_block mat=minecraft:glass at=10,0,1",
+                OFF_GLASS,
+            ),
+            over_glass(
+                "lamp id=m at=inside.left offset=4 y=1 lit_by=sig.b",
+                "the lamp `m`",
+                floor,
+                OFF_GLASS,
+            ),
+            over_glass(
+                "door id=d side=front at=center",
+                "the door `d`",
+                floor,
+                "build the floor under the door of a block that passes power, such as `@stone`",
+            ),
+        ],
+    );
 }
 
 #[test]
