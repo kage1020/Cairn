@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cairn_lang_formats::write_path::WritePath;
+use cairn_lang_formats::write_path::Scratch;
 
 /// What a staged file is going to become, so a failure can name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +118,7 @@ impl StagedSet {
     ) -> io::Result<()> {
         use std::io::Write as _;
 
-        let tmp_path = WritePath::Staged.of(final_path);
+        let tmp_path = Scratch::Staged.of(final_path);
         let result = (|| {
             let mut file = io::BufWriter::new(fs::File::create(&tmp_path)?);
             write(&mut file)?;
@@ -156,7 +156,7 @@ impl StagedSet {
         for entry in &self.entries {
             match occupant(&entry.final_path) {
                 Ok(Occupant::Movable) => {
-                    let backup_path = WritePath::Backup.of(&entry.final_path);
+                    let backup_path = Scratch::Backup.of(&entry.final_path);
                     if let Err(err) = fs::rename(&entry.final_path, &backup_path) {
                         undo(&displaced, &committed);
                         self.discard_scratch();

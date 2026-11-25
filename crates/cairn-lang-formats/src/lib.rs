@@ -20,6 +20,7 @@ pub mod import;
 pub mod info;
 pub mod java_structure;
 pub mod litematic;
+pub mod lock_path;
 mod nbt_text;
 pub mod portability;
 mod read_stream;

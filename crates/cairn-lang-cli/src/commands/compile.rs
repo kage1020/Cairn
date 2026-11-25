@@ -9,7 +9,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::lowering::BuildRefusal;
 use cairn_lang_formats::build::run_level::floor_refusal_message;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::info::{LockPathRefusal, default_lock_path, lock_path_refusal};
+use cairn_lang_formats::lock_path::{LockPathRefusal, default_lock_path, lock_path_refusal};
 use cairn_lang_formats::write_path::WritePath;
 
 use crate::artifacts::{
@@ -95,7 +95,7 @@ fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) 
             eprintln!("error: `--lock {shown}` names `{source}`, the source being compiled");
             String::new()
         }
-        LockPathRefusal::Source(scratch) => {
+        LockPathRefusal::Source(WritePath::Scratch(scratch)) => {
             eprintln!(
                 "error: `--lock {shown}` would put its scratch file `{}` over `{source}`, the \
                  source being compiled",

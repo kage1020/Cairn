@@ -10,6 +10,13 @@ use crate::file_identity::FileIdentity;
 pub enum WritePath {
     /// The file's own path.
     Final,
+    /// One of the two scratch paths beside it.
+    Scratch(Scratch),
+}
+
+/// One of the two scratch paths beside a file's own, through which the file is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scratch {
     /// The file's path with `.tmp` added, written and then renamed to the file's own.
     Staged,
     /// The file's path with `.bak` added, holding the file a write replaces until the new one is
@@ -17,15 +24,13 @@ pub enum WritePath {
     Backup,
 }
 
-impl WritePath {
-    /// Every one, the file's own first.
-    pub const ALL: [Self; 3] = [Self::Final, Self::Staged, Self::Backup];
+impl Scratch {
+    const ALL: [Self; 2] = [Self::Staged, Self::Backup];
 
-    /// This path of the file at `final_path`.
+    /// This scratch path of the file at `final_path`.
     #[must_use]
     pub fn of(self, final_path: &Path) -> PathBuf {
         let suffix = match self {
-            Self::Final => return final_path.to_path_buf(),
             Self::Staged => ".tmp",
             Self::Backup => ".bak",
         };
@@ -33,21 +38,34 @@ impl WritePath {
         raw.push(suffix);
         PathBuf::from(raw)
     }
+}
 
-    /// The first path the file at `final_path` is written through that reaches `file`.
+impl WritePath {
+    /// The first path the file at `final_path` is written through that reaches `file`, its own
+    /// path first.
     #[must_use]
     pub fn reaching(file: &FileIdentity, final_path: &Path) -> Option<Self> {
+        let scratch = Scratch::ALL.map(|scratch| (Self::Scratch(scratch), scratch.of(final_path)));
         // An error asking of a path means no file is there, or one a write would fail at as well.
-        Self::ALL.into_iter().find(|path| {
-            FileIdentity::of(&path.of(final_path)).is_ok_and(|reached| reached == *file)
-        })
+        [(Self::Final, final_path.to_path_buf())]
+            .into_iter()
+            .chain(scratch)
+            .find(|(_, at)| FileIdentity::of(at).is_ok_and(|reached| reached == *file))
+            .map(|(path, _)| path)
     }
+}
+
+/// The two scratch paths beside the file at `final_path`, `.tmp` first.
+#[must_use]
+pub fn scratch_paths(final_path: &Path) -> [PathBuf; 2] {
+    Scratch::ALL.map(|scratch| scratch.of(final_path))
 }
 
 /// Every path the file at `final_path` is written through, its own first.
 #[must_use]
 pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
-    WritePath::ALL.map(|path| path.of(final_path))
+    let [staged, backup] = scratch_paths(final_path);
+    [final_path.to_path_buf(), staged, backup]
 }
 
 #[cfg(test)]
@@ -60,6 +78,13 @@ mod tests {
             reserved_paths(Path::new("out/hut.nbt")),
             [
                 PathBuf::from("out/hut.nbt"),
+                PathBuf::from("out/hut.nbt.tmp"),
+                PathBuf::from("out/hut.nbt.bak"),
+            ],
+        );
+        assert_eq!(
+            scratch_paths(Path::new("out/hut.nbt")),
+            [
                 PathBuf::from("out/hut.nbt.tmp"),
                 PathBuf::from("out/hut.nbt.bak"),
             ],
@@ -78,8 +103,14 @@ mod tests {
         };
 
         assert_eq!(reached("hut.nbt", "hut.nbt"), Some(WritePath::Final));
-        assert_eq!(reached("notes.tmp", "notes"), Some(WritePath::Staged));
-        assert_eq!(reached("notes.bak", "notes"), Some(WritePath::Backup));
+        assert_eq!(
+            reached("notes.tmp", "notes"),
+            Some(WritePath::Scratch(Scratch::Staged))
+        );
+        assert_eq!(
+            reached("notes.bak", "notes"),
+            Some(WritePath::Scratch(Scratch::Backup))
+        );
         assert_eq!(reached("hut.nbt", "./hut.nbt"), Some(WritePath::Final));
         assert_eq!(reached("hut.nbt", "hut"), None);
         assert_eq!(reached("notes.tmp", "notes.tmp"), Some(WritePath::Final));

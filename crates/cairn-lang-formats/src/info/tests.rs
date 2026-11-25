@@ -7,7 +7,6 @@ use cairn_lang_core::{CAIRN_VERSION, Edition, UnknownEdition};
 use serde_json::json;
 
 use super::*;
-use crate::write_path::WritePath;
 
 /// A source two editions lower apart: Bedrock's theme variant leaves a slot unbound.
 const EDITION_SPECIFIC: &str = "@cairn 2026.06\n\n\
@@ -88,14 +87,6 @@ fn an_editions_list_naming_nothing_to_report_on_is_refused() {
         Err(EditionsRefused::Unknown(UnknownEdition {
             input: "pocket".to_owned()
         })),
-    );
-}
-
-#[test]
-fn the_default_lock_keeps_the_source_extension() {
-    assert_eq!(
-        default_lock_path(Path::new("site/shop.crn")),
-        Path::new("site/shop.crn.lock"),
     );
 }
 
@@ -265,76 +256,6 @@ fn run_on_disk(file: &Path, lock: Option<&Path>) -> (InfoDocument, Vec<String>) 
 }
 
 #[test]
-fn a_lock_path_reaching_the_source_is_refused_however_it_is_spelled() {
-    let (dir, file) = hut_on_disk();
-    std::fs::create_dir(dir.path().join("sub")).expect("make sub");
-    let refused = |lock: &Path| lock_path_refusal(&file, lock);
-
-    for lock in [
-        file.clone(),
-        dir.path().join(".").join("hut.crn"),
-        dir.path().join("sub").join("..").join("hut.crn"),
-    ] {
-        assert_eq!(
-            refused(&lock),
-            Some(LockPathRefusal::Source(WritePath::Final)),
-            "{lock:?}",
-        );
-    }
-    assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
-    std::fs::write(dir.path().join("hut.crn.lock"), "").expect("write lock");
-    assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
-}
-
-#[test]
-fn a_lock_path_hard_linked_to_the_source_is_refused() {
-    let (dir, file) = hut_on_disk();
-    std::fs::hard_link(&file, dir.path().join("hard.lock")).expect("hard link");
-
-    assert_eq!(
-        lock_path_refusal(&file, &dir.path().join("hard.lock")),
-        Some(LockPathRefusal::Source(WritePath::Final)),
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_lock_path_symlinked_to_the_source_is_refused() {
-    let (dir, file) = hut_on_disk();
-    std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).expect("symlink dir");
-    std::os::unix::fs::symlink(&file, dir.path().join("soft.lock")).expect("symlink");
-
-    for lock in ["link/hut.crn", "soft.lock"] {
-        assert_eq!(
-            lock_path_refusal(&file, &dir.path().join(lock)),
-            Some(LockPathRefusal::Source(WritePath::Final)),
-            "{lock}",
-        );
-    }
-}
-
-#[test]
-fn a_lock_path_whose_scratch_file_reaches_the_source_is_refused() {
-    let dir = tempfile::tempdir().expect("temp dir");
-    let lock = dir.path().join("notes");
-    let refused = |source: &str| {
-        let file = dir.path().join(source);
-        std::fs::write(&file, HUT).expect("write source");
-        lock_path_refusal(&file, &lock)
-    };
-
-    assert_eq!(
-        refused("notes.tmp"),
-        Some(LockPathRefusal::Source(WritePath::Staged)),
-    );
-    assert_eq!(
-        refused("notes.bak"),
-        Some(LockPathRefusal::Source(WritePath::Backup)),
-    );
-    assert_eq!(refused("notes.crn"), None);
-}
-
-#[test]
 fn a_lock_flag_whose_scratch_file_is_the_source_gives_the_fix_rather_than_a_compile() {
     let dir = tempfile::tempdir().expect("temp dir");
     let file = dir.path().join("notes.tmp");
@@ -379,38 +300,6 @@ fn a_default_lock_linked_to_the_source_gives_the_fix_rather_than_a_compile() {
             ),
         ],
     );
-}
-
-#[test]
-fn a_lock_path_ending_in_crn_is_refused_whatever_it_names() {
-    let (dir, file) = hut_on_disk();
-    std::fs::write(dir.path().join("other.crn"), HUT).expect("write other source");
-
-    for lock in [
-        "other.crn",
-        "missing.crn",
-        "OTHER.CRN",
-        ".crn",
-        "no/such/dir/x.Crn",
-    ] {
-        assert_eq!(
-            lock_path_refusal(&file, &dir.path().join(lock)),
-            Some(LockPathRefusal::SourceName),
-            "{lock}",
-        );
-    }
-    for lock in [
-        "other.crn.lock",
-        "crn",
-        "other.crnx",
-        "other.crn.d/hut.lock",
-    ] {
-        assert_eq!(
-            lock_path_refusal(&file, &dir.path().join(lock)),
-            None,
-            "{lock}"
-        );
-    }
 }
 
 #[test]

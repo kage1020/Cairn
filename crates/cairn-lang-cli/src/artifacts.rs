@@ -380,7 +380,7 @@ pub(crate) fn check_source_is_left_alone(
             WritePath::Final => {
                 eprintln!("error: {kind} `{shown}` names `{file}`, the source being compiled");
             }
-            scratch => eprintln!(
+            WritePath::Scratch(scratch) => eprintln!(
                 "error: {kind} `{shown}` would put its scratch file `{}` over `{file}`, the \
                  source being compiled",
                 scratch.of(output).display(),
