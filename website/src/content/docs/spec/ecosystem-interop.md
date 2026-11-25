@@ -134,7 +134,12 @@ The first step is built. `cairn import FILE --mode raw` reads a `.nbt`, `.litema
 `.mcstructure` file and writes `<stem>.raw.crn` beside it, or the path `--out` names, replacing a
 file already there. The extension, in any case, names the format, and the format the edition:
 `.mcstructure` is Bedrock's and the other three are Java's. An extension that names none of them is
-a usage error, exit 2, as are a file that is not there and an `--out` that names the file itself.
+a usage error, exit 2, as are a file that is not there and an `--out` that would write over the
+file itself: one that reaches it, or whose `.tmp` or `.bak` scratch path the source is written
+through does, by any spelling or link, counted as the paths that reach a compile's source are
+([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
+`<stem>.raw.crn` is refused the same way when a link makes one of its paths the file, and a path the
+file system cannot answer for refuses the import with exit 1.
 `raw` is the one mode, since L1 is the compiler's ceiling
 ([§12.3](#123-three-tiers-of-transliteration)) and the lift is a refactor of what it writes.
 

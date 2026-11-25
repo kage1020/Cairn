@@ -33,6 +33,9 @@
 - *(cli)* `cairn info` on a lock path `cairn compile` refuses to write, `--lock` naming the source
   or a path whose scratch file is the source, says that the compile refuses it and what to pass
   instead, where its note named the compile that would have overwritten the source as the remedy.
-- *(cli)* `cairn import --out` reaching the file being imported by a hard link, or in another
-  letter case where the directory folds case, is refused with exit 2 as the file's own path is. On
-  Linux a name differing only in case let the import write its `.crn` over the structure file.
+- *(cli)* `cairn import --out` reaching the file being imported, by a hard link, in another letter
+  case where the directory folds case, or through the `.tmp` or `.bak` scratch path the source is
+  written through, is refused with exit 2 as the file's own path is, and so is a `<stem>.raw.crn`
+  a link makes the file. On Linux a name differing only in case let the import write its `.crn`
+  over the structure file, and an `--out` whose `.tmp` was a link to the file wrote the source into
+  it.

@@ -60,15 +60,6 @@ fn key(path: &Path) -> io::Result<Key> {
     path.canonicalize().map(Key::Canonical)
 }
 
-/// Whether `a` and `b` reach one file, false when the file system cannot say what either reaches.
-#[must_use]
-pub fn same_file(a: &Path, b: &Path) -> bool {
-    match (FileIdentity::of(a), FileIdentity::of(b)) {
-        (Ok(a), Ok(b)) => a == b,
-        _ => false,
-    }
-}
-
 /// How a path reaches the file another path names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reach {

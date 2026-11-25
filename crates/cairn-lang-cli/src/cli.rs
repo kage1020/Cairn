@@ -344,8 +344,10 @@ pub(crate) enum Command {
             Exits 0 when the source is written, warnings included; 1 when the file cannot be \
             read as its format, is saved past every shipped target, holds blocks the stamped \
             target refuses or that no raw member builds, or cannot be read or written for a \
-            reason other than absence; and 2 when the file cannot be located, its extension names no format this command \
-            reads, or `--out` names the file itself"
+            reason other than absence, or when the file system cannot tell a path the source is \
+            written through from the file; and 2 when the file cannot be located, its \
+            extension names no format this command reads, or the source would be written over \
+            the file, its path or its `.tmp` or `.bak` scratch path reaching it"
     )]
     Import {
         /// Path to the structure file to import.
@@ -367,7 +369,9 @@ pub(crate) enum Command {
             long,
             long_help = "Path to write the `.crn` to, its directory created if missing. Defaults \
                 to `<stem>.raw.crn` beside the file, so `house.litematic` → `house.raw.crn`. An \
-                existing file there is replaced"
+                existing file there is replaced, but a path that reaches the file being imported, \
+                itself or through its `.tmp` or `.bak` scratch path, by any spelling or link, is \
+                refused with exit 2"
         )]
         out: Option<PathBuf>,
     },

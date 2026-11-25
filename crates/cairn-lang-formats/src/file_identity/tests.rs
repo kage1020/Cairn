@@ -48,25 +48,6 @@ fn every_spelling_of_a_file_reaches_it_by_name_and_no_other_path_reaches_it() {
 }
 
 #[test]
-fn every_spelling_of_a_file_is_the_same_file_and_no_other_is() {
-    let (dir, file) = hut();
-    fs::write(dir.path().join("other.crn"), "").expect("write other");
-    fs::create_dir(dir.path().join("sub")).expect("make sub");
-
-    assert!(same_file(
-        &file,
-        &dir.path().join("sub").join("..").join("hut.crn")
-    ));
-    assert!(same_file(&file, &dir.path().join(".").join("hut.crn")));
-    assert!(!same_file(&file, &dir.path().join("other.crn")));
-    assert!(!same_file(&file, &dir.path().join("missing.crn")));
-    assert!(!same_file(
-        &dir.path().join("missing.crn"),
-        &dir.path().join("missing.crn")
-    ));
-}
-
-#[test]
 fn a_hard_link_reaches_the_file_through_a_link() {
     let (dir, file) = hut();
     fs::create_dir(dir.path().join("sub")).expect("make sub");
