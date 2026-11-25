@@ -13,6 +13,7 @@ export RUSTFLAGS="-D warnings"
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --locked
+cargo test --workspace --locked -- --ignored
 cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 cargo xtask lint
@@ -24,6 +25,8 @@ python3 -m unittest discover -s .github/scripts
 
 While iterating on one crate, `-p <crate>` on clippy and test is enough. Run the whole list once
 before pushing: most crates depend on `cairn-lang-core`, so a core change can break any of them.
+`-- --ignored` runs the tests marked `#[ignore]` as too slow for a plain `cargo test`, such as the
+walk over every entry of the built-in Bedrock pack.
 
 Add these when the change reaches them:
 

@@ -110,12 +110,14 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test --workspace --locked -- --ignored
 cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 ```
 
-`--workspace` does not select bench targets, so the last two run each bench once, as an untimed
-test.
+`-- --ignored` runs the tests marked `#[ignore]` as too slow for a plain `cargo test`, such as the
+walk over every entry of the built-in Bedrock pack. `--workspace` does not select bench targets, so
+the last two run each bench once, as an untimed test.
 
 CI's `Lint` job also runs `cargo xtask lint`, which compares files with each other rather than
 testing behaviour: README inventories, spec citations, the diagnostic catalog, the copies of the

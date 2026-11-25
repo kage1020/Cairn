@@ -42,10 +42,12 @@ jobs:
 
       - name: Test
         # bash: pwsh, Windows' default, passes a step whose first command failed. `--workspace`
-        # leaves out the benches, whose fixture checks run only under `--bench`.
+        # leaves out the benches, whose fixture checks run only under `--bench`. `--ignored` runs
+        # the tests marked `#[ignore]` as too slow for a plain `cargo test`.
         shell: bash
         run: |
           cargo test --workspace --locked
+          cargo test --workspace --locked -- --ignored
           cargo test -p cairn-lang-core --bench lowering
           cargo test -p cairn-lang-redstone --bench place_and_route
 

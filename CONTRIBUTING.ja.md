@@ -35,11 +35,12 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo build --workspace --locked
 cargo test --workspace --locked
+cargo test --workspace --locked -- --ignored
 cargo test -p cairn-lang-core --bench lowering
 cargo test -p cairn-lang-redstone --bench place_and_route
 ```
 
-`--workspace` ではベンチターゲットが選ばれないので、最後の 2 つで各ベンチを時間計測なしのテストとして 1 回ずつ実行します。何を確かめているかは「[リリースプロファイルの変更](#リリースプロファイルの変更)」で説明します。
+`-- --ignored` は、組み込みの Bedrock パックのすべてのエントリーをたどるテストのように、通常の `cargo test` には遅すぎるので `#[ignore]` を付けたテストを実行します。`--workspace` ではベンチターゲットが選ばれないので、最後の 2 つで各ベンチを時間計測なしのテストとして 1 回ずつ実行します。何を確かめているかは「[リリースプロファイルの変更](#リリースプロファイルの変更)」で説明します。
 
 CI はこのほかに、Linux 上で rustdoc の警告をエラー扱いにして API ドキュメントを 2 回ビルドします。非公開の項目へのドキュメントリンクや、解決できなくなったパスへのリンクは clippy では検出できないためです。1 回目は公開 API が対象で、公開ドキュメントから非公開項目へのリンクを検出できるのはこちらだけです。2 回目は、コントリビューター向けのドキュメントも対象にします。
 
