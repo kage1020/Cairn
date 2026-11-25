@@ -3,7 +3,7 @@
   and lays every circuit in the layers its `circuit` line reserves under the struct:
   - each sensor enters the circuit by a pad under it and each actuator is driven by a riser, two
     torches carrying the signal up under it, so a component stands in the floor row `y = 0` or at
-    `y = 1` over a block of the floor;
+    `y = 1` over a floor block that passes power;
   - each cell's tile is laid at the free spot nearest the tiles its nets join, each net's dust runs
     up and down staircases apart from every other net's, and a buffer repeater goes in wherever an
     input would read its signal too weak;
@@ -19,3 +19,12 @@
   strength, as `OutputSignal`. Bedrock writes a lit or powered redstone state
   with the block that holds it, such as `unlit_redstone_torch` and `powered_repeater`, through
   `TargetRegistry::spelling`.
+- *(formats)* Both built-in packs carry a `conductors` component, per version: which states of
+  which blocks conduct redstone power, so that a plate's power or a riser torch's reaches the
+  other side of the floor block between them. Java's is extracted by asking the game of each block
+  state; Bedrock's is written from what its game is known to do, a block it is unsure of left
+  out. `PackView::conducts`, behind the new `TargetRegistry::conducts`, answers from it at a
+  pinned version or, unpinned, with what every version agrees on, and reads a Bedrock id as the
+  canonical blocks its state map names. The loader refuses a component that misses a targetable
+  version, an empty row, a lookup that reads or maps nothing or maps no state to `true`, and a
+  block or state value the version's block table or state map does not give.

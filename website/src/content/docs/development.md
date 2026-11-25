@@ -229,13 +229,19 @@ the Java release each mapping follows to name its states, so the Bedrock run nee
 For both editions it derives `connections.json`, what each block is to the rules that join panes,
 fences and walls, from the block tags in the server jar of the Java release each version's states
 follow, the version itself on Java and the release its state map follows on Bedrock, and the block
-models in that release's client jar, which it downloads beside the server jar. It rewrites the
-edition's `blocks.json`, each targetable row's `data_version` on Java or `block_version` on Bedrock
-and `latest` in `data_versions.json`, Bedrock's `states.json`, `connections.json`, and the
-`extracted` record in `pack.json`.
+models in that release's client jar, which it downloads beside the server jar. For Java it derives
+`conductors.json` too, which block states conduct redstone power: it boots each version's server
+jar and asks every state through `.github/scripts/RedstoneConductors.java`, which it runs from its
+source with the jar's classes on the class path, so it needs a JDK rather than a bare Java runtime,
+and for a release that obfuscates its names it reads the names from the server mappings Mojang
+publishes beside the jar. Bedrock's `conductors.json` is written by hand, by the rule
+[Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables) gives. It
+rewrites the edition's `blocks.json`, each targetable row's `data_version` on Java or
+`block_version` on Bedrock and `latest` in `data_versions.json`, Bedrock's `states.json`,
+`connections.json`, Java's `conductors.json`, and the `extracted` record in `pack.json`.
 
 ```sh
-python3 .github/scripts/extract_registry.py java --java <path to Java 25>
+python3 .github/scripts/extract_registry.py java --java <path to a JDK 25>
 python3 .github/scripts/extract_registry.py bedrock --java <path to Java 25>
 ```
 

@@ -7,7 +7,8 @@
   - a `pulse` of more than 6 stages or a `counter` of more than 4 is `E_ATTENUATION_LIMIT`, and a
     `delay` whose row of two repeaters a stage is longer than the struct is `E_ROUTE_CONGESTION`;
   - a sensor or actuator the circuit under the floor cannot reach, such as a lever above the floor
-    row, is `E_ROUTE_UNREACHABLE_COMPONENT`;
+    row or a pressure plate at `y = 1` on a floor of glass, a slab that is not double or another
+    block that passes no power, is `E_ROUTE_UNREACHABLE_COMPONENT`;
   - an `assert latency` the laid circuit misses is `E_SIM_ASSERTION_FAILED`;
   - a target whose pack declares no block for a circuit token, such as the new `@circuit.block`, is
     `E_UNKNOWN_ABSTRACT_TOKEN` on the `circuit` line.
@@ -29,12 +30,15 @@
   `PlacementIr`, `ScopedPlacementIr`, `ScopedPlacementIrEntry`, `PlacedCellNode`,
   `PlacedOutputNode`, `CellCoord`, `BufferCoord`, `BufferSegment`, `CircuitRegionReservation`,
   `RouteLayer`, `PlacementPhase`, `PlacementPhaseTransitionError` and `PlacementStage` are removed,
-  `compile_placement` takes the `BlockArrayIr` the struct lowered to, and `compile_routing` and
-  `compile_delay` take a `ScopedCircuitLayout`.
+  `compile_placement` takes the `BlockArrayIr` the struct lowered to and the `TargetRegistry`
+  that says which floor blocks pass power, and `compile_routing` and `compile_delay` take a
+  `ScopedCircuitLayout`.
 - *(redstone)* A Bedrock `or` is a `RepeaterOR`, as on Java: one tick from each port, restoring
   strength, where a dust merge took none and passed its strongest input on. A path into an actuator
   also counts the two ticks of the torches that carry the signal up to it, so `assert latency`
   bounds measure higher than before on both editions.
+- *(formats)* `PackFiles` gains `conductors`, and both built-in packs' hashes move with the new
+  component.
 - `examples/control-room.crn`, `crossbar.crn` and `redstone-door.crn` stand their sensors and
   actuators where the circuit under the floor reaches them, reserve `void=3` or more, and bound
   their latency by what the laid circuit takes.

@@ -13,6 +13,7 @@ on:
       - "Cargo.lock"
       - ".github/scripts/minecraft_load.py"
       - ".github/scripts/extract_registry.py"
+      - ".github/scripts/RedstoneConductors.java"
       - ".github/workflows/minecraft.yml"
   pull_request:
     # Keep in step with the `push` filter.
@@ -26,6 +27,7 @@ on:
       - "Cargo.lock"
       - ".github/scripts/minecraft_load.py"
       - ".github/scripts/extract_registry.py"
+      - ".github/scripts/RedstoneConductors.java"
       - ".github/workflows/minecraft.yml"
   schedule:
     # Weekly, off the hour, for a change to Java 25 or to what Mojang and GeyserMC serve, which no
@@ -110,6 +112,7 @@ jobs:
             minecraft-
 
       - name: Install Java
+        # A JDK, since the conductor table's probe runs from its source.
         uses: actions/setup-java@v6
         with:
           distribution: temurin

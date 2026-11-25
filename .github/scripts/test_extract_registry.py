@@ -1253,5 +1253,292 @@ class ConnectionsText(unittest.TestCase):
         )
 
 
+
+# --- the conductor table ------------------------------------------------------------------------
+
+# The probe's names as Mojang's mappings of an obfuscated server write them, with a field, an
+# overload and a class the probe does not reach beside them.
+MAPPINGS = """\
+# {"id":"sourceFile","fileName":"SharedConstants.java"}
+net.minecraft.SharedConstants -> ab:
+    int WORLD_RESOLUTION -> a
+    12:20:void tryDetectVersion():88:96 -> b
+net.minecraft.server.Bootstrap -> ka:
+    30:44:void bootStrap() -> a
+net.minecraft.world.level.block.Block -> dfy:
+    net.minecraft.core.IdMapper BLOCK_STATE_REGISTRY -> q
+net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase -> dzz$a:
+    7:7:boolean isRedstoneConductor() -> f
+    8:8:boolean isRedstoneConductor(net.minecraft.world.level.BlockGetter,net.minecraft.core.BlockPos) -> g
+net.minecraft.world.level.BlockGetter -> dcc:
+    int getMaxLightLevel() -> m
+net.minecraft.world.level.EmptyBlockGetter -> dcd:
+    net.minecraft.world.level.EmptyBlockGetter INSTANCE -> a
+net.minecraft.core.BlockPos -> jd:
+    net.minecraft.core.BlockPos ZERO -> c
+net.minecraft.Util -> ac:
+    void shutdownExecutors() -> h
+"""
+
+
+class ProbeArguments(Case):
+    def test_an_obfuscated_server_is_asked_by_the_names_its_mappings_give(self) -> None:
+        self.assertEqual(
+            registry.probe_arguments(MAPPINGS),
+            ["ab", "b", "ka", "a", "dfy", "q", "dzz$a", "g", "dcc", "dcd", "a", "jd", "c"],
+        )
+
+    def test_a_server_that_keeps_its_names_is_asked_by_them(self) -> None:
+        self.assertEqual(
+            registry.probe_arguments(None),
+            [
+                "net.minecraft.SharedConstants",
+                "tryDetectVersion",
+                "net.minecraft.server.Bootstrap",
+                "bootStrap",
+                "net.minecraft.world.level.block.Block",
+                "BLOCK_STATE_REGISTRY",
+                "net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase",
+                "isRedstoneConductor",
+                "net.minecraft.world.level.BlockGetter",
+                "net.minecraft.world.level.EmptyBlockGetter",
+                "INSTANCE",
+                "net.minecraft.core.BlockPos",
+                "ZERO",
+            ],
+        )
+
+    def test_mappings_that_lack_a_name_the_probe_needs_are_refused(self) -> None:
+        lacking = MAPPINGS.replace("    net.minecraft.core.BlockPos ZERO -> c\n", "").replace(
+            "net.minecraft.server.Bootstrap -> ka:\n    30:44:void bootStrap() -> a\n", ""
+        )
+        self.assertEqual(
+            self.refusal(registry.probe_arguments, lacking),
+            "the mappings name no `net.minecraft.server.Bootstrap.bootStrap`, "
+            "`net.minecraft.core.BlockPos.ZERO`",
+        )
+
+    def test_mappings_that_give_a_member_two_names_are_refused(self) -> None:
+        twice = MAPPINGS.replace(
+            "    net.minecraft.core.BlockPos ZERO -> c\n",
+            "    net.minecraft.core.BlockPos ZERO -> c\n    net.minecraft.core.BlockPos ZERO -> d\n",
+        )
+        self.assertEqual(
+            self.refusal(registry.probe_arguments, twice),
+            "the mappings give `net.minecraft.core.BlockPos.ZERO` two names",
+        )
+
+    def test_a_line_that_is_no_mapping_is_refused(self) -> None:
+        self.assertEqual(
+            self.refusal(registry.probe_arguments, "net.minecraft.SharedConstants\n"),
+            "a line of the mappings names no class: 'net.minecraft.SharedConstants'",
+        )
+
+
+class ServerMappings(Case):
+    """`server_mappings` offline, Mojang's metadata and downloads faked."""
+
+    BODY = MAPPINGS.encode("utf-8")
+    DOWNLOAD = {"url": "https://example.invalid/server.txt", "sha1": hashlib.sha1(BODY).hexdigest()}
+
+    def setUp(self) -> None:
+        self.cache = self.temporary_folder()
+        self.cached = self.cache / "server-mappings-1.21.txt"
+        self.fetched: list[str] = []
+        self.downloads: dict = {"server_mappings": self.DOWNLOAD}
+        self.patch(registry, "version_meta", lambda version, cache: {"downloads": self.downloads})
+
+    def serve(self, body: bytes) -> None:
+        def fetch(url: str, timeout: int) -> bytes:
+            self.fetched.append(url)
+            return body
+
+        self.patch(registry, "fetch", fetch)
+
+    def test_a_release_mojang_publishes_no_mappings_for_keeps_its_names(self) -> None:
+        self.downloads = {}
+        self.serve(b"")
+        self.assertEqual(registry.server_mappings("1.21", self.cache), (None, None))
+        self.assertEqual(self.fetched, [])
+
+    def test_cached_mappings_that_match_mojangs_sha1_are_read_without_a_download(self) -> None:
+        self.cached.write_bytes(self.BODY)
+        self.serve(b"")
+        self.assertEqual(registry.server_mappings("1.21", self.cache), (MAPPINGS, self.DOWNLOAD))
+        self.assertEqual(self.fetched, [])
+
+    def test_cached_mappings_that_fail_it_are_downloaded_again(self) -> None:
+        self.cached.write_bytes(b"corrupt")
+        self.serve(self.BODY)
+        self.assertEqual(registry.server_mappings("1.21", self.cache), (MAPPINGS, self.DOWNLOAD))
+        self.assertEqual(self.fetched, [self.DOWNLOAD["url"]])
+        self.assertEqual(self.cached.read_bytes(), self.BODY)
+
+    def test_a_download_that_fails_it_is_refused_and_not_cached(self) -> None:
+        self.serve(b"corrupt")
+        self.assertEqual(
+            self.refusal(registry.server_mappings, "1.21", self.cache),
+            "the 1.21 server mappings do not match the SHA-1 Mojang publishes",
+        )
+        self.assertFalse(self.cached.exists())
+
+
+class ProbeClasspath(Case):
+    def test_the_bundled_class_path_is_unpacked_in_the_order_the_bundler_lists_it(self) -> None:
+        folder = self.temporary_folder()
+        jar = folder / "server.jar"
+        with zipfile.ZipFile(jar, "w") as bundler:
+            bundler.writestr("META-INF/classpath-joined", "libraries/b.jar;versions/1.21/a.jar\n")
+            bundler.writestr("META-INF/libraries/b.jar", b"library")
+            bundler.writestr("META-INF/versions/1.21/a.jar", b"game")
+        into = folder / "classpath"
+        self.assertEqual(
+            registry.probe_classpath(jar, into),
+            [into / "libraries/b.jar", into / "versions/1.21/a.jar"],
+        )
+        self.assertEqual((into / "versions/1.21/a.jar").read_bytes(), b"game")
+
+    def test_a_jar_that_lists_a_file_it_does_not_hold_is_refused(self) -> None:
+        folder = self.temporary_folder()
+        jar = folder / "server.jar"
+        with zipfile.ZipFile(jar, "w") as bundler:
+            bundler.writestr("META-INF/classpath-joined", "libraries/b.jar")
+        self.assertEqual(
+            self.refusal(registry.probe_classpath, jar, folder / "classpath"),
+            "server.jar does not unpack its class path: "
+            "\"There is no item named 'META-INF/libraries/b.jar' in the archive\"",
+        )
+
+
+class ConductingStates(Case):
+    """`conducting_states` offline: the jars, the mappings and the probe's run are faked."""
+
+    SERVER = {"url": "https://example.invalid/server.jar", "sha1": "0" * 40}
+    MAPPED = {"url": "https://example.invalid/server.txt", "sha1": "1" * 40}
+
+    def setUp(self) -> None:
+        self.work = self.temporary_folder()
+        self.runs: list[list[str]] = []
+        self.patch(registry, "server_jar", lambda version, cache: (self.work / "server.jar", 21))
+        self.patch(registry, "server_download", lambda version, cache: (self.SERVER, 21))
+        self.patch(registry, "server_mappings", lambda version, cache: (MAPPINGS, self.MAPPED))
+        self.patch(registry, "probe_classpath", lambda jar, into: [into / "a.jar", into / "b.jar"])
+
+    def probe(self, returncode: int, answers: str | None) -> None:
+        def run_tool(command: list[str], cwd: Path | None = None):
+            self.runs.append(command)
+            if answers is not None:
+                Path(command[4]).write_text(answers + "\n", encoding="utf-8")
+            return mock.Mock(returncode=returncode, stdout="booted\n", stderr="")
+
+        self.patch(registry, "run_tool", run_tool)
+
+    def test_the_probe_runs_from_its_source_with_the_servers_classes_and_its_names(self) -> None:
+        self.probe(0, "0110")
+        root = self.work / "1.21" / "probe"
+        self.assertEqual(
+            registry.conducting_states("1.21", "java", self.work, self.work),
+            (
+                "0110",
+                {"mc_version": "1.21", "server": self.SERVER, "mappings": self.MAPPED},
+            ),
+        )
+        classpath = f"{root / 'classpath' / 'a.jar'}{registry.os.pathsep}{root / 'classpath' / 'b.jar'}"
+        self.assertEqual(
+            self.runs,
+            [
+                [
+                    "java",
+                    "-cp",
+                    classpath,
+                    str(registry.PROBE),
+                    str(root / "conductors.txt"),
+                    *registry.probe_arguments(MAPPINGS),
+                ]
+            ],
+        )
+
+    def test_a_probe_that_fails_is_refused_with_its_log(self) -> None:
+        self.probe(1, None)
+        root = self.work / "1.21" / "probe"
+        self.assertEqual(
+            self.refusal(registry.conducting_states, "1.21", "java", self.work, self.work),
+            f"the 1.21 conductor probe failed (exit 1, log in {root / 'probe.log'}):\nbooted",
+        )
+
+
+class ConductorTable(unittest.TestCase):
+    REPORT = report(
+        {
+            "stone": ({}, {}),
+            "glass": ({}, {}),
+            "oak_slab": (
+                {"type": ["top", "bottom", "double"], "waterlogged": ["true", "false"]},
+                {"type": "bottom", "waterlogged": "false"},
+            ),
+        }
+    )
+
+    def test_a_block_is_read_with_the_fewest_properties_that_decide_whether_it_conducts(self):
+        self.assertEqual(
+            registry.conductor_table(self.REPORT, "10000011"),
+            {
+                "oak_slab": registry.Conduction(
+                    registry.StateRule(
+                        ("type",), (("bottom", False), ("double", True), ("top", False))
+                    ),
+                    (("type", "bottom"),),
+                ),
+                "stone": registry.Conduction(registry.StateRule((), (("", True),)), ()),
+            },
+        )
+
+    def test_answers_that_are_not_one_bit_per_state_are_refused(self):
+        for answers, refused in [
+            ("10", "the probe answered 2 times for 8 block states"),
+            ("1000001x", "the probe answered 'x', which is neither 0 nor 1"),
+        ]:
+            with self.assertRaises(load.Refused) as caught:
+                registry.conductor_table(self.REPORT, answers)
+            self.assertEqual(str(caught.exception), refused)
+
+
+class ConductorsText(unittest.TestCase):
+    def test_a_block_that_conducts_alike_at_two_versions_is_one_row_with_both(self):
+        every = registry.Conduction(registry.StateRule((), (("", True),)), ())
+        slab = registry.Conduction(
+            registry.StateRule(("type",), (("bottom", False), ("double", True), ("top", False))),
+            (("type", "bottom"),),
+        )
+        body = json.loads(
+            registry.conductors_text(
+                {
+                    "1.0": {"stone": every, "oak_slab": slab},
+                    "1.1": {"stone": every, "oak_slab": slab, "tuff": every},
+                }
+            )
+        )
+        self.assertEqual(
+            body,
+            {
+                "schema_version": 1,
+                "namespace": "minecraft",
+                "rows": [
+                    {
+                        "mc_versions": ["1.0", "1.1"],
+                        "ids": ["oak_slab"],
+                        "defaults": {"type": "bottom"},
+                        "conducts": {
+                            "reads": ["type"],
+                            "map": {"bottom": False, "double": True, "top": False},
+                        },
+                    },
+                    {"mc_versions": ["1.0", "1.1"], "ids": ["stone"]},
+                    {"mc_versions": ["1.1"], "ids": ["tuff"]},
+                ],
+            },
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

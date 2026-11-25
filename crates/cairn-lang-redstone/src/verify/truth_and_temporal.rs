@@ -427,6 +427,8 @@ impl<'a> Circuit<'a> {
             pulses: Vec::new(),
         };
         for &sensor in on {
+            // The cell over a pad is the sensor, or the floor block it powers whole, which coupling
+            // meets only where it passes power (`spec/redstone` "Place-and-route").
             let inputs: Vec<Voxel> = self
                 .pads
                 .get(&sensor)

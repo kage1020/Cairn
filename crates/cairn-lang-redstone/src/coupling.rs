@@ -1,9 +1,12 @@
 //! `spec/redstone` "Place-and-route": where each sensor's signal enters the circuit under the base
 //! plane, where each actuator's leaves it, and which columns the top layer may wire under.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
-use cairn_lang_core::block_array::{BlockArray, Face, ResolvedBlock, ResolvedMember};
+use cairn_lang_core::block_array::{
+    BlockArray, BlockState, Face, ResolvedBlock, ResolvedMember, TargetRegistry,
+};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{Actuator, Member, SENSOR_HOSTS};
 
@@ -151,8 +154,19 @@ struct Component<'a> {
     named: String,
 }
 
+/// What the floor row holds under a component at `y = 1`.
+#[derive(Debug, Clone, Copy)]
+enum Floor<'a> {
+    Air,
+    /// A block that passes power, or one the target cannot say of.
+    Passes,
+    /// A block that passes no power.
+    Insulates(&'a BlockState),
+}
+
 /// The terminals of `netlist` in `array`, the struct `members` lowered to, over a circuit `layers`
-/// deep; a component that cannot reach the circuit is a finding.
+/// deep, with `registry` saying which floor blocks pass power; a component that cannot reach the
+/// circuit is a finding.
 pub(crate) fn couple(
     netlist: &EditionNetlistIr,
     members: &[Member],
@@ -160,6 +174,7 @@ pub(crate) fn couple(
     resolved: &[ResolvedMember],
     layers: u32,
     scope: &str,
+    registry: Option<&dyn TargetRegistry>,
 ) -> (Coupled, Vec<Diagnostic>) {
     let painted = painted(resolved);
     let surface = surface(array, &painted);
@@ -169,7 +184,13 @@ pub(crate) fn couple(
         .iter()
         .map(|member| ((member.span.start, member.span.end), member))
         .collect();
-    let filled = |cell: Cell| filled(array, cell);
+    let floor = |cell: Cell| match state_at(array, cell) {
+        None => Floor::Air,
+        Some(state) if registry.and_then(|r| r.conducts(state)) == Some(false) => {
+            Floor::Insulates(state)
+        }
+        Some(_) => Floor::Passes,
+    };
     let mut coupled = Coupled {
         surface,
         ..Coupled::default()
@@ -191,7 +212,7 @@ pub(crate) fn couple(
         let Some(component) = component(member, &built) else {
             continue;
         };
-        match pad_for(&component, filled) {
+        match pad_for(&component, floor) {
             Ok((kind, (x, z))) => coupled.pads.push(Pad {
                 input,
                 kind,
@@ -199,7 +220,7 @@ pub(crate) fn couple(
                 span: component.span.clone(),
                 named: component.named.clone(),
             }),
-            Err(reason) => diagnostics.push(unreachable(&component, scope, &reason, &[])),
+            Err(reason) => diagnostics.push(unreachable(&component, scope, &reason, resolved, &[])),
         }
     }
 
@@ -218,38 +239,9 @@ pub(crate) fn couple(
         let Some(component) = component(host, &built) else {
             continue;
         };
-        let shared = riser_for(&component, filled)
+        let shared = riser_for(&component, floor)
             .map_err(|reason| (reason, Vec::new()))
-            .and_then(|(x, z)| {
-                let beside = [
-                    x.checked_sub(1).map(|x| (x, 0, z)),
-                    Some((x + 1, 0, z)),
-                    z.checked_sub(1).map(|z| (x, 0, z)),
-                    Some((x, 0, z + 1)),
-                    Some((x, 1, z)),
-                ];
-                let mut sharing: Vec<&Span> = beside
-                    .into_iter()
-                    .flatten()
-                    .filter(|cell| !component.cells.contains(cell))
-                    .filter_map(|cell| painted.get(&cell))
-                    .filter(|paint| matches!(paint.painter, Painter::Actuator | Painter::Unknown))
-                    .map(|paint| paint.span)
-                    .collect();
-                sharing.sort_by_key(|span| (span.start, span.end));
-                sharing.dedup();
-                if sharing.is_empty() {
-                    Ok((x, z))
-                } else {
-                    Err((
-                        Unreachable {
-                            reason: "the block that drives it from under the floor would power the component beside that block too",
-                            fix: "move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
-                        },
-                        sharing,
-                    ))
-                }
-            });
+            .and_then(|column| unshared(&component, column, &painted));
         match shared {
             Ok((x, z)) => coupled.risers.push(Riser {
                 output,
@@ -258,11 +250,47 @@ pub(crate) fn couple(
                 named: component.named.clone(),
             }),
             Err((reason, sharing)) => {
-                diagnostics.push(unreachable(&component, scope, &reason, &sharing));
+                diagnostics.push(unreachable(&component, scope, &reason, resolved, &sharing));
             }
         }
     }
     (coupled, diagnostics)
+}
+
+/// The riser column `(x, z)` of `component`, or why it cannot drive the component and the lines of
+/// the other components beside the block it powers.
+fn unshared<'a>(
+    component: &Component<'_>,
+    (x, z): (u32, u32),
+    painted: &HashMap<Cell, Paint<'a>>,
+) -> Result<(u32, u32), (Unreachable<'static>, Vec<&'a Span>)> {
+    let beside = [
+        x.checked_sub(1).map(|x| (x, 0, z)),
+        Some((x + 1, 0, z)),
+        z.checked_sub(1).map(|z| (x, 0, z)),
+        Some((x, 0, z + 1)),
+        Some((x, 1, z)),
+    ];
+    let mut sharing: Vec<&Span> = beside
+        .into_iter()
+        .flatten()
+        .filter(|cell| !component.cells.contains(cell))
+        .filter_map(|cell| painted.get(&cell))
+        .filter(|paint| matches!(paint.painter, Painter::Actuator | Painter::Unknown))
+        .map(|paint| paint.span)
+        .collect();
+    sharing.sort_by_key(|span| (span.start, span.end));
+    sharing.dedup();
+    if sharing.is_empty() {
+        return Ok((x, z));
+    }
+    Err((
+        Unreachable::new(
+            "the block that drives it from under the floor would power the component beside that block too",
+            "move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+        ),
+        sharing,
+    ))
 }
 
 /// Whether anything reads `net`.
@@ -294,12 +322,18 @@ fn painted(resolved: &[ResolvedMember]) -> HashMap<Cell, Paint<'_>> {
     by_cell
 }
 
-fn filled(array: &BlockArray, (x, y, z): Cell) -> bool {
-    array
+fn filled(array: &BlockArray, cell: Cell) -> bool {
+    state_at(array, cell).is_some()
+}
+
+/// The block at `cell`, or `None` for air.
+fn state_at(array: &BlockArray, (x, y, z): Cell) -> Option<&BlockState> {
+    let slot = array
         .dims
         .index(x, y, z)
         .and_then(|index| array.voxels.get(index))
-        .is_some_and(|slot| slot.0 != 0)
+        .filter(|slot| slot.0 != 0)?;
+    array.palette.entries.get(usize::from(slot.0))
 }
 
 fn surface(array: &BlockArray, painted: &HashMap<Cell, Paint<'_>>) -> Surface {
@@ -378,87 +412,142 @@ fn component<'a>(
 }
 
 /// Why a component cannot reach the circuit, and how to move it so it does.
-struct Unreachable {
-    reason: &'static str,
+struct Unreachable<'a> {
+    reason: Cow<'static, str>,
     fix: &'static str,
+    /// The block under it that passes no power, and its cell.
+    insulated_by: Option<(&'a BlockState, Cell)>,
+}
+
+impl<'a> Unreachable<'a> {
+    fn new(reason: &'static str, fix: &'static str) -> Self {
+        Self {
+            reason: Cow::Borrowed(reason),
+            fix,
+            insulated_by: None,
+        }
+    }
+
+    /// The finding of a component met over the floor block `block` at `cell`, which passes no power.
+    fn insulated(block: &'a BlockState, cell: Cell, fix: &'static str) -> Self {
+        Self {
+            reason: Cow::Owned(format!(
+                "the floor block under it, `{}`, passes no power between it and the layer under \
+                 the floor",
+                block_named(block),
+            )),
+            fix,
+            insulated_by: Some((block, cell)),
+        }
+    }
+}
+
+/// `block` as a finding names it: its id, then its states in brackets if it has any.
+fn block_named(block: &BlockState) -> String {
+    if block.properties.is_empty() {
+        block.id.clone()
+    } else {
+        format!("{}[{}]", block.id, block.properties_text())
+    }
 }
 
 /// The pad a sensor's signal enters by, and the column it stands in.
-fn pad_for(
+fn pad_for<'a>(
     sensor: &Component<'_>,
-    filled: impl Fn(Cell) -> bool,
-) -> Result<(PadKind, (u32, u32)), Unreachable> {
+    floor: impl Fn(Cell) -> Floor<'a>,
+) -> Result<(PadKind, (u32, u32)), Unreachable<'a>> {
     let (x, y, z) = sensor.cell;
-    let on_floor = y == 1 && filled((x, 0, z));
+    let under = if y == 1 { floor((x, 0, z)) } else { Floor::Air };
+    let on_floor = !matches!(under, Floor::Air);
     let kind = match sensor.keyword {
         "pressure_plate" if y == 0 => PadKind::Block,
         "pressure_plate" if on_floor => PadKind::Dust,
         "pressure_plate" => {
-            return Err(Unreachable {
-                reason: "a pressure plate reaches the layer under the floor from the floor row `y = 0`, or from `y = 1` standing on a block, which it powers whole",
-                fix: "set `y=0` on the plate, or `y=1` over a floor block",
-            });
+            return Err(Unreachable::new(
+                "a pressure plate reaches the layer under the floor from the floor row `y = 0`, or from `y = 1` standing on a block that passes power, which it powers whole",
+                "set `y=0` on the plate, or `y=1` over a floor block that passes power",
+            ));
         }
         "lever" | "button" if y == 0 => PadKind::Dust,
         "lever" | "button" => {
-            return Err(Unreachable {
-                reason: "a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
-                fix: "set `y=0` on it",
-            });
+            return Err(Unreachable::new(
+                "a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+                "set `y=0` on it",
+            ));
         }
         "daylight" if y == 0 => PadKind::Repeater,
         "daylight" => {
-            return Err(Unreachable {
-                reason: "a daylight detector reaches the layer under the floor only from the floor row `y = 0`, the row over it",
-                fix: "set `y=0` on it",
-            });
+            return Err(Unreachable::new(
+                "a daylight detector reaches the layer under the floor only from the floor row `y = 0`, the row over it",
+                "set `y=0` on it",
+            ));
         }
         "observer" if sensor.facing == Some(Face::Up) && (y == 0 || on_floor) => PadKind::Observer,
         _ => {
-            return Err(Unreachable {
-                reason: "an observer reaches the layer under the floor only looking up, so that its back powers the cell under it, from the floor row `y = 0` or from `y = 1` over a block",
-                fix: "write `facing=up` on the observer, and set `y=0`, or `y=1` over a floor block",
-            });
+            return Err(Unreachable::new(
+                "an observer reaches the layer under the floor only looking up, so that its back powers the cell under it, from the floor row `y = 0` or from `y = 1` over a block that passes power",
+                "write `facing=up` on the observer, and set `y=0`, or `y=1` over a floor block that passes power",
+            ));
         }
     };
+    if let Floor::Insulates(block) = under {
+        return Err(Unreachable::insulated(block, (x, 0, z), FIX_OVER_INSULATOR));
+    }
     Ok((kind, (x, z)))
 }
 
+/// The fix of a component met over a floor block that passes no power, but for a door.
+const FIX_OVER_INSULATOR: &str =
+    "set `y=0` on it, or build the floor under it of a block that passes power, such as `@stone`";
+
 /// The column of the block, or the actuator itself, that the riser's top torch powers.
-fn riser_for(
+fn riser_for<'a>(
     actuator: &Component<'_>,
-    filled: impl Fn(Cell) -> bool,
-) -> Result<(u32, u32), Unreachable> {
+    floor: impl Fn(Cell) -> Floor<'a>,
+) -> Result<(u32, u32), Unreachable<'a>> {
     let (x, y, z) = actuator.cell;
     if actuator.keyword == "piston" && actuator.facing == Some(Face::Down) {
-        return Err(Unreachable {
-            reason: "a piston looking down would push into the torch that drives it from under the floor",
-            fix: "turn the piston with another `facing=`",
-        });
+        return Err(Unreachable::new(
+            "a piston looking down would push into the torch that drives it from under the floor",
+            "turn the piston with another `facing=`",
+        ));
     }
-    let on_floor = y == 1 && filled((x, 0, z));
-    match actuator.keyword {
-        "door" if on_floor => Ok((x, z)),
-        "door" => Err(Unreachable {
-            reason: "a door is driven through the block under its lower half, so it must stand at `y = 1` over a floor block",
-            fix: "stand the door on the floor row's blocks",
-        }),
-        _ if y == 0 || on_floor => Ok((x, z)),
-        _ => Err(Unreachable {
-            reason: "an actuator is driven from the layer under the floor, so it must stand in the floor row `y = 0`, or at `y = 1` over a floor block",
-            fix: "set `y=0` on it, or `y=1` over a floor block",
-        }),
+    let under = if y == 1 { floor((x, 0, z)) } else { Floor::Air };
+    let on_floor = !matches!(under, Floor::Air);
+    let door = actuator.keyword == "door";
+    if door && !on_floor {
+        return Err(Unreachable::new(
+            "a door is driven through the block under its lower half, so it must stand at `y = 1` over a floor block that passes power",
+            "stand the door on a floor block that passes power",
+        ));
     }
+    if !door && y != 0 && !on_floor {
+        return Err(Unreachable::new(
+            "an actuator is driven from the layer under the floor, so it must stand in the floor row `y = 0`, or at `y = 1` over a floor block that passes power",
+            "set `y=0` on it, or `y=1` over a floor block that passes power",
+        ));
+    }
+    if let Floor::Insulates(block) = under {
+        let fix = if door {
+            "build the floor under the door of a block that passes power, such as `@stone`"
+        } else {
+            FIX_OVER_INSULATOR
+        };
+        return Err(Unreachable::insulated(block, (x, 0, z), fix));
+    }
+    Ok((x, z))
 }
 
-/// `component`'s refusal, with a note at each member in `sharing` that the block under it touches.
+/// `component`'s refusal, with a note at the member of `resolved` that lays a floor block under it
+/// that passes no power, and at each member in `sharing` that the block under it touches.
 fn unreachable(
     component: &Component<'_>,
     scope: &str,
-    why: &Unreachable,
+    why: &Unreachable<'_>,
+    resolved: &[ResolvedMember],
     sharing: &[&Span],
 ) -> Diagnostic {
-    let diagnostic = Diagnostic::new(
+    let mut diagnostic = Diagnostic::new(
         DiagnosticCode::RouteUnreachableComponent,
         component.span.clone(),
         format!(
@@ -468,6 +557,18 @@ fn unreachable(
             reason = why.reason,
         ),
     );
+    if let Some((block, cell)) = why.insulated_by
+        && let Some(layer) = laid_by(resolved, block, cell)
+    {
+        diagnostic = diagnostic.with_note(
+            layer.clone(),
+            format!(
+                "the `{}` under {} is laid here",
+                block_named(block),
+                component.named
+            ),
+        );
+    }
     sharing
         .iter()
         .fold(diagnostic, |diagnostic, span| {
@@ -477,6 +578,20 @@ fn unreachable(
             )
         })
         .with_footer(format!("Fix: {}", why.fix))
+}
+
+/// The line of the last member of `resolved` that lays `block` at `cell`.
+fn laid_by<'a>(resolved: &'a [ResolvedMember], block: &BlockState, cell: Cell) -> Option<&'a Span> {
+    resolved
+        .iter()
+        .rev()
+        .find(|member| {
+            member
+                .resolved_state
+                .iter()
+                .any(|laid| laid.state == *block && laid.cells().any(|at| at == cell))
+        })
+        .map(|member| &member.span)
 }
 
 fn coord(value: u32) -> i32 {

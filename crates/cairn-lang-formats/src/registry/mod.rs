@@ -1,10 +1,11 @@
 //! Registry packs: the JSON files of `DataVersion`s, materials, block ids, aliases, absences,
-//! meanings, state maps and connection tables a compile depends on, and the constraint catalog
-//! beside them, each hashed into the lockfile so a build is reproducible.
+//! meanings, state maps, connection tables and conductor tables a compile depends on, and the
+//! constraint catalog beside them, each hashed into the lockfile so a build is reproducible.
 
 pub mod absent;
 pub mod aliases;
 pub mod blocks;
+pub mod conductors;
 pub mod connections;
 pub mod constraints;
 pub mod data_versions;
@@ -22,6 +23,10 @@ pub use aliases::{AliasCatalog, AliasError, AliasGroup, AliasIndex, SUPPORTED_AL
 pub use blocks::{
     BlockEntries, BlockStates, BlocksBase, BlocksCatalog, BlocksDiff, BlocksError, BlocksIndex,
     SUPPORTED_BLOCKS_SCHEMA, StateValue,
+};
+pub use conductors::{
+    ConductorIndex, ConductorRow, ConductorsCatalog, ConductorsError, ConductsLookup,
+    SUPPORTED_CONDUCTORS_SCHEMA,
 };
 pub use connections::{
     ByState, ConnectionIndex, ConnectionKind, ConnectionRow, ConnectionsCatalog, ConnectionsError,

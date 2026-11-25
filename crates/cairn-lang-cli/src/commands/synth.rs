@@ -8,7 +8,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, IntentModule, lower, resolve};
 use cairn_lang_formats::build::finding::Finding;
 use cairn_lang_formats::build::gate::build_diagnostics;
-use cairn_lang_formats::registry::builtin_pack;
+use cairn_lang_formats::registry::{PackView, builtin_pack};
 use cairn_lang_redstone::{
     LayoutStage, compile_delay, compile_edition_netlist, compile_legalize, compile_netlist,
     compile_placement, compile_routing, synthesize, verify_latency, verify_portable,
@@ -137,14 +137,15 @@ fn dump_stage(
         ),
     };
     let edition_netlist = compile_edition_netlist(&netlist, edition);
-    let built = built_for(ir, edition);
+    let registry = builtin_pack(edition).view(None);
+    let built = built_for(ir, edition, &registry);
     reporting.gate(&built.diagnostics)?;
-    reporting.gate(&verify_portable(ir, &built, edition))?;
+    reporting.gate(&verify_portable(ir, &built, edition, Some(&registry)))?;
     if matches!(stage, SynthStage::Edition) {
         return dump("Edition Netlist IR", &edition_netlist);
     }
 
-    let placement = compile_placement(&edition_netlist, ir, &built);
+    let placement = compile_placement(&edition_netlist, ir, &built, Some(&registry));
     reporting.gate(&placement.diagnostics)?;
     if matches!(stage, SynthStage::Placement) {
         return dump("Placement IR", &placement.scoped);
@@ -162,7 +163,6 @@ fn dump_stage(
         return dump("Delayed Placement IR", &delay.scoped);
     }
 
-    let registry = builtin_pack(edition).view(None);
     let legalized = compile_legalize(&delay.scoped, Some(&registry));
     reporting.gate(&legalized.diagnostics)?;
     reporting.gate(&verify_latency(&legalized.scoped, ir))?;
@@ -182,13 +182,9 @@ fn dump(
     Ok((serde_json::to_string_pretty(ir), label))
 }
 
-/// `ir` lowered to the block array for `edition` on the built-in pack.
-fn built_for(ir: &IntentModule, edition: Edition) -> BlockArrayIr {
-    lower_to_block_array(
-        ir,
-        &resolve(ir, Some(edition)),
-        Some(&builtin_pack(edition).view(None)),
-    )
+/// `ir` lowered to the block array for `edition` on `registry`.
+fn built_for(ir: &IntentModule, edition: Edition, registry: &PackView<'_>) -> BlockArrayIr {
+    lower_to_block_array(ir, &resolve(ir, Some(edition)), Some(registry))
 }
 
 /// The spelling clap accepts for `--stage`, for runtime messages.

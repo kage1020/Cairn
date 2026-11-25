@@ -29,12 +29,21 @@ answers `isSignalSource`: by the `buttons` and `pressure_plates` tags, and by na
 which no tag lists, so those names are the game's code as read here. Which faces of each state
 are whole comes from the block models the release's client jar ships.
 
-The run rewrites the edition's `blocks.json`, the targetable rows' integers and `latest` in
-`data_versions.json`, Bedrock's `states.json`, both packs' `connections.json`, and the `extracted`
-record in `pack.json`. With `--check` it writes nothing and fails when a committed file differs from
-what the game says.
+The Java pack gets a conductor table: the block states that pass redstone power, so that a block
+powered whole powers what is beside it. No data file of the game says which they are, so each
+version's server is asked: `RedstoneConductors.java`, beside this script, boots the server's
+registries and asks every block state the game's own `isRedstoneConductor`, reaching the game by
+the names Mojang's mappings give an obfuscated release, and each block's answers are factored into
+the fewest properties that decide them. Bedrock's game cannot be asked, so its table is written by
+hand.
 
-Standard library only: it runs on a bare `ubuntu-latest` runner.
+The run rewrites the edition's `blocks.json`, the targetable rows' integers and `latest` in
+`data_versions.json`, Bedrock's `states.json`, both packs' `connections.json`, Java's
+`conductors.json`, and the `extracted` record in `pack.json`. With `--check` it writes nothing and
+fails when a committed file differs from what the game says.
+
+Standard library only: it runs on a bare `ubuntu-latest` runner, with a JDK to run the probe from
+its source.
 """
 
 from __future__ import annotations
@@ -61,6 +70,7 @@ from minecraft_load import (
     fetch,
     java_major,
     read_nbt,
+    run_tool,
     server_download,
     server_jar,
     version_meta,
@@ -75,6 +85,7 @@ DATA_VERSIONS_SCHEMA = 3
 STATES_SCHEMA = 1
 SENSITIVITY_SCHEMA = 1
 CONNECTIONS_SCHEMA = 1
+CONDUCTORS_SCHEMA = 1
 
 GEYSER_PALETTE = (
     "https://raw.githubusercontent.com/GeyserMC/Geyser/{commit}/core/src/main/resources/bedrock/{file}"
@@ -1175,6 +1186,235 @@ def connection_sources(releases: dict[str, str], cache: Path) -> list[dict]:
     return sources
 
 
+# --- the conductor table ------------------------------------------------------------------------
+
+# The program that asks a server which of its block states conduct, run from its source.
+PROBE = Path(__file__).resolve().with_name("RedstoneConductors.java")
+BLOCK_GETTER = "net.minecraft.world.level.BlockGetter"
+BLOCK_POS = "net.minecraft.core.BlockPos"
+# What the probe reaches, in the order it takes the names, each as `(class, member, parameters)`:
+# a method with the parameter types its mappings write, a field with `None`, a bare class with no
+# member.
+PROBE_NAMES = (
+    ("net.minecraft.SharedConstants", "tryDetectVersion", ()),
+    ("net.minecraft.server.Bootstrap", "bootStrap", ()),
+    ("net.minecraft.world.level.block.Block", "BLOCK_STATE_REGISTRY", None),
+    (
+        "net.minecraft.world.level.block.state.BlockBehaviour$BlockStateBase",
+        "isRedstoneConductor",
+        (BLOCK_GETTER, BLOCK_POS),
+    ),
+    (BLOCK_GETTER, None, None),
+    ("net.minecraft.world.level.EmptyBlockGetter", "INSTANCE", None),
+    (BLOCK_POS, "ZERO", None),
+)
+# One member line of Mojang's mappings: optional line numbers, the type, the name, a method's
+# parameters and the lines it was inlined from, then the obfuscated name.
+MAPPED_MEMBER = re.compile(r"(?:\d+:\d+:)?\S+ ([^\s(]+)(\(([^)]*)\))?(?::\d+(?::\d+)?)? -> (\S+)")
+MAPPED_CLASS = re.compile(r"(\S+) -> (\S+):")
+
+
+@dataclass(frozen=True)
+class Conduction:
+    """In which states one block conducts redstone power, read off its states' answers."""
+
+    rule: StateRule
+    # The default state's value of each property `rule` reads.
+    defaults: tuple[tuple[str, str], ...]
+
+
+def server_mappings(version: str, cache: Path) -> tuple[str | None, dict | None]:
+    """Mojang's mappings of the `version` server jar's obfuscated names, with where they came
+    from; `None` for a jar that keeps the game's own names, for which Mojang publishes none."""
+    download = version_meta(version, cache)["downloads"].get("server_mappings")
+    if download is None:
+        return None, None
+    path = cache / f"server-mappings-{version}.txt"
+    if not path.exists() or hashlib.sha1(path.read_bytes()).hexdigest() != download["sha1"]:
+        body = fetch(download["url"], 300)
+        if hashlib.sha1(body).hexdigest() != download["sha1"]:
+            raise Refused(f"the {version} server mappings do not match the SHA-1 Mojang publishes")
+        write_atomically(path, body)
+    source = {"url": download["url"], "sha1": download["sha1"]}
+    return path.read_text(encoding="utf-8"), source
+
+
+def obfuscated_names(mappings: str) -> dict[tuple, str]:
+    """Each `PROBE_NAMES` class, keyed `(class,)`, and member, keyed `(class, member, parameters)`,
+    as `mappings` obfuscates it."""
+    wanted_classes = {cls for cls, _, _ in PROBE_NAMES}
+    wanted = {(cls, member, parameters) for cls, member, parameters in PROBE_NAMES if member}
+    found: dict[tuple, str] = {}
+    current = None
+    for line in mappings.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "\t")):
+            named = MAPPED_CLASS.fullmatch(line)
+            if named is None:
+                raise Refused(f"a line of the mappings names no class: {line!r}")
+            current = named.group(1)
+            if current in wanted_classes:
+                found[(current,)] = named.group(2)
+            continue
+        if current not in wanted_classes:
+            continue
+        member = MAPPED_MEMBER.fullmatch(line.strip())
+        if member is None:
+            raise Refused(f"a line of the mappings of `{current}` names no member: {line!r}")
+        name, method, parameters, obfuscated = member.groups()
+        key = (
+            current,
+            name,
+            tuple(filter(None, parameters.split(","))) if method else None,
+        )
+        if key in wanted and found.setdefault(key, obfuscated) != obfuscated:
+            raise Refused(f"the mappings give `{current}.{name}` two names")
+    missing = [
+        ".".join(filter(None, (cls, member)))
+        for cls, member, parameters in PROBE_NAMES
+        if ((cls, member, parameters) if member else (cls,)) not in found
+    ]
+    if missing:
+        raise Refused(f"the mappings name no {', '.join(f'`{name}`' for name in missing)}")
+    return found
+
+
+def probe_arguments(mappings: str | None) -> list[str]:
+    """The names the probe takes after its output file, obfuscated as `mappings` say."""
+    names = obfuscated_names(mappings) if mappings is not None else None
+    arguments = []
+    for cls, member, parameters in PROBE_NAMES:
+        arguments.append(names[(cls,)] if names else cls)
+        if member:
+            arguments.append(names[(cls, member, parameters)] if names else member)
+    return arguments
+
+
+def probe_classpath(jar: Path, into: Path) -> list[Path]:
+    """The server's classes, the game's and its libraries', unpacked from the bundler `jar` into
+    `into` in the order its own class path lists them."""
+    try:
+        with zipfile.ZipFile(jar) as bundler:
+            listed = bundler.read("META-INF/classpath-joined").decode("utf-8").strip().split(";")
+            paths = []
+            for entry in listed:
+                path = into / entry
+                if not path.exists():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(bundler.read(f"META-INF/{entry}"))
+                paths.append(path)
+    except (OSError, KeyError, zipfile.BadZipFile) as problem:
+        raise Refused(f"{jar.name} does not unpack its class path: {problem}") from None
+    return paths
+
+
+def conducting_states(version: str, java: str, cache: Path, work: Path) -> tuple[str, dict]:
+    """One `1` or `0` per block state of the `version` server, in global id order, for whether it
+    conducts redstone power, with the jars the answers came from."""
+    jar, _ = server_jar(version, cache)
+    mappings, mapped_by = server_mappings(version, cache)
+    root = work / version / "probe"
+    out = root / "conductors.txt"
+    if not out.exists():
+        root.mkdir(parents=True, exist_ok=True)
+        classpath = probe_classpath(jar, root / "classpath")
+        log = root / "probe.log"
+        run = run_tool(
+            [
+                java, "-cp", os.pathsep.join(map(str, classpath)), str(PROBE), str(out),
+                *probe_arguments(mappings),
+            ],
+            cwd=root,
+        )
+        log.write_text(run.stdout + run.stderr, encoding="utf-8")
+        if run.returncode != 0 or not out.exists():
+            tail = "\n".join((run.stdout + run.stderr).strip().splitlines()[-30:])
+            raise Refused(
+                f"the {version} conductor probe failed (exit {run.returncode}, log in {log}):\n{tail}"
+            )
+    download, _ = server_download(version, cache)
+    source = {"mc_version": version, "server": {"url": download["url"], "sha1": download["sha1"]}}
+    if mapped_by is not None:
+        source["mappings"] = mapped_by
+    return out.read_text(encoding="utf-8").strip(), source
+
+
+def conductor_table(report: dict, answers: str) -> dict[str, Conduction]:
+    """Each block of a `--reports` `blocks.json` that conducts in some state, with the states it
+    conducts in, from `answers`, one per state in id order."""
+    java = java_states(report)
+    if len(answers) != len(java.rows):
+        raise Refused(
+            f"the probe answered {len(answers)} times for {len(java.rows)} block states"
+        )
+    if odd := sorted(set(answers) - {"0", "1"}):
+        raise Refused(f"the probe answered {', '.join(map(repr, odd))}, which is neither 0 nor 1")
+    rows: dict[str, list[tuple[dict[str, str], dict]]] = {}
+    for (name, properties), answer in zip(java.rows, answers):
+        rows.setdefault(name, []).append((properties, {"conducts": answer == "1"}))
+    table = {}
+    for name, states in sorted(rows.items()):
+        if not any(held["conducts"] for _, held in states):
+            continue
+        rule = decided_by(states, sorted(java.domains[name]), "conducts")
+        if rule is None:
+            raise Refused(f"whether `{name}` conducts is no function of its states")
+        default = java.defaults[name]
+        table[name] = Conduction(rule, tuple((key, default[key]) for key in rule.reads))
+    return table
+
+
+def extract_conductors(
+    versions: list[str], java: str, cache: Path, work: Path
+) -> tuple[dict[str, dict[str, Conduction]], list[dict]]:
+    """Each Java version's conductor table, asked of its server, and where each came from."""
+    tables, sources = {}, []
+    for version in versions:
+        report = java_report(version, java, cache, work)
+        answers, source = conducting_states(version, java, cache, work)
+        tables[version] = conductor_table(report.blocks, answers)
+        sources.append(source)
+        print(f"conductors of Java {version}: {len(tables[version])} blocks", flush=True)
+    return tables, sources
+
+
+def conduction_json(conduction: Conduction, versions: list[str], ids: list[str]) -> dict:
+    """One `conductors.json` row."""
+    row: dict = {"mc_versions": versions, "ids": ids}
+    if conduction.rule.reads:
+        row["defaults"] = dict(conduction.defaults)
+        row["conducts"] = {"reads": list(conduction.rule.reads), "map": dict(conduction.rule.table)}
+    return row
+
+
+def conductors_text(tables: dict[str, dict[str, Conduction]]) -> str:
+    """`conductors.json`: one row per way of conducting and set of versions, with its ids."""
+    order = list(tables)
+    held: dict[tuple[Conduction, str], list[str]] = {}
+    for version, table in tables.items():
+        for name, conduction in table.items():
+            held.setdefault((conduction, name), []).append(version)
+    rows: dict[tuple[Conduction, tuple[str, ...]], list[str]] = {}
+    for (conduction, name), versions in held.items():
+        rows.setdefault((conduction, tuple(versions)), []).append(name)
+    ordered = sorted(
+        rows.items(),
+        key=lambda row: (order.index(row[0][1][0]), -len(row[0][1]), sorted(row[1])[0]),
+    )
+    lines = [
+        "{",
+        f'  "schema_version": {CONDUCTORS_SCHEMA},',
+        f'  "namespace": {json.dumps(NAMESPACE)},',
+        '  "rows": [',
+    ]
+    for i, ((conduction, versions), ids) in enumerate(ordered):
+        row = json.dumps(conduction_json(conduction, list(versions), sorted(ids)), ensure_ascii=False)
+        lines.append(f"    {row}" + ("," if i < len(ordered) - 1 else ""))
+    lines += ["  ]", "}"]
+    return "\n".join(lines) + "\n"
+
+
 # --- the pack files -----------------------------------------------------------------------------
 
 
@@ -1260,8 +1500,8 @@ def updated_data_versions(table: dict, edition: str, tables: list[Table]) -> dic
 
 @dataclass(frozen=True)
 class Extracted:
-    """What one edition's extraction read: its block tables, Bedrock's state maps, and each
-    version's connection table."""
+    """What one edition's extraction read: its block tables, Bedrock's state maps, each version's
+    connection table, and Java's conductor tables."""
 
     tables: list[Table]
     # Empty for Java, whose states are the canonical vocabulary itself.
@@ -1269,6 +1509,9 @@ class Extracted:
     connections: dict[str, dict[str, Joins]]
     # Where each Java release's jars came from.
     connection_sources: list[dict]
+    # Empty for Bedrock, whose game no probe can ask.
+    conductors: dict[str, dict[str, Conduction]]
+    conductor_sources: list[dict]
 
 
 def updated_manifest(manifest: dict, extracted: Extracted) -> dict:
@@ -1281,6 +1524,8 @@ def updated_manifest(manifest: dict, extracted: Extracted) -> dict:
     if extracted.maps:
         record["states"] = state_map_sources(extracted.tables)
     record["connections"] = extracted.connection_sources
+    if extracted.conductors:
+        record["conductors"] = extracted.conductor_sources
     return {**manifest, "extracted": record}
 
 
@@ -1289,8 +1534,9 @@ def pack_files(edition: str, extracted: Extracted) -> dict[Path, str]:
     pack = PACKS / edition
     manifest = json.loads((pack / "pack.json").read_text(encoding="utf-8"))
     versions = json.loads((pack / "data_versions.json").read_text(encoding="utf-8"))
-    if "connections" not in manifest["files"]:
-        raise Refused(f"{edition}/pack.json names no `connections` file")
+    for component in ("connections", "conductors"):
+        if component not in manifest["files"]:
+            raise Refused(f"{edition}/pack.json names no `{component}` file")
     files = {
         pack / manifest["files"]["blocks"]: blocks_text(extracted.tables),
         pack / manifest["files"]["connections"]: connections_text(extracted.connections),
@@ -1299,6 +1545,8 @@ def pack_files(edition: str, extracted: Extracted) -> dict[Path, str]:
         ),
         pack / "pack.json": json_text(updated_manifest(manifest, extracted)),
     }
+    if extracted.conductors:
+        files[pack / manifest["files"]["conductors"]] = conductors_text(extracted.conductors)
     if extracted.maps:
         sensitivity = pack / manifest["files"]["sensitivity"]
         try:
@@ -1348,7 +1596,17 @@ def extract(edition: str, java: str, cache: Path, work: Path) -> Extracted:
         for version in versions
     }
     connections = extract_connections(releases, java, cache, work)
-    return Extracted(tables, maps, connections, connection_sources(releases, cache))
+    conductors, conductor_sources = (
+        extract_conductors(versions, java, cache, work) if edition == "java" else ({}, [])
+    )
+    return Extracted(
+        tables,
+        maps,
+        connections,
+        connection_sources(releases, cache),
+        conductors,
+        conductor_sources,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1359,7 +1617,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--java",
         default="java",
-        help="a Java new enough for every Java target and every Java release a state map follows",
+        help="a JDK new enough for every Java target and every Java release a state map follows",
     )
     parser.add_argument(
         "--cache",

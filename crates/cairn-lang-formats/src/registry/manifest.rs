@@ -47,6 +47,10 @@ pub struct PackFiles {
     /// The `connections` file; without it, lowering derives no connection state.
     #[serde(default)]
     pub connections: Option<String>,
+    /// The `conductors` file; without it, any floor block is taken to pass power to the component
+    /// over it.
+    #[serde(default)]
+    pub conductors: Option<String>,
     /// The `paintings` file; without it, a painting's `variant=` is not checked and it hangs as
     /// one cell.
     #[serde(default)]

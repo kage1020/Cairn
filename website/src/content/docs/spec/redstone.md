@@ -419,17 +419,40 @@ power between it and the top layer:
 | `door` | `y = 1`, over a block | the riser's upper torch, under that block, which it powers |
 | `lamp`, `piston`, `dispenser` | `y = 0`, or `y = 1` over a block | the riser's upper torch, under it or under the block it stands on |
 
+A block **passes power** when the game makes it conduct redstone power: power given it whole, by the
+plate or observer on it or by the riser's torch under it, reaches what stands beside it. The game
+decides that for each state of each block, and the editions and their versions decide some blocks
+apart, so each edition's registry pack records it for each version in its `conductors` table
+([Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables)). On both
+editions `@stone`, `@oak_planks` and a double slab pass power, and glass, stained glass, leaves,
+glowstone, a slab that is not double and a stair pass none. A Bedrock honey block passes power where
+a Java one does not, and a Bedrock sea lantern stopped passing power at 1.21.30. A check that pins
+no version reads a block as every version that declares it agrees, and a block they disagree on,
+like one a pack without the table names, is taken to pass power, since such a check reports what
+every target raises ([Lint §11.3](/spec/lint/#113-error-vs-warning)).
+
 A component anywhere else is `E_ROUTE_UNREACHABLE_COMPONENT` at its line: the message says where
 that kind of component reaches the layer under the floor, and the fix moves it there. So is a
-`piston` looking down, which would push into the torch under it, and an actuator whose riser would
-drive another component as well. The cell the riser's torch powers, the actuator itself in the
-floor row or the block under it at `y = 1`, powers whatever stands beside it in the floor row or
-over it, so no other actuator, Tier 0 part or raw member may stand there. A sensor may, since power
-moves no sensor.
+component at `y = 1` over a floor block that passes no power: the message names the block, a note
+points at the member that lays it, and the fix offers `y=0`, or a floor block that passes power,
+which alone helps a door. So is a `piston` looking down, which would push into the torch under it,
+and an actuator whose riser would drive another component as well. The cell the riser's torch
+powers, the actuator itself in the floor row or the block under it at `y = 1`, powers whatever
+stands beside it in the floor row or over it, so no other actuator, Tier 0 part or raw member may
+stand there. A sensor may, since power moves no sensor.
 
 ```text
 room.crn:8:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it
   note: Fix: set `y=0` on it
+```
+
+A plate on a floor of glass reaches nothing under it, since the glass passes none of its power to
+the dust there:
+
+```text
+room.crn:9:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the pressure_plate `p` at y=1 cannot reach the circuit under the floor: the floor block under it, `minecraft:glass`, passes no power between it and the layer under the floor
+room.crn:5:3:   note: the `minecraft:glass` under the pressure_plate `p` is laid here
+  note: Fix: set `y=0` on it, or build the floor under it of a block that passes power, such as `@stone`
 ```
 
 The top layer stays clear of what the struct powers, since dust under a powered block reads that
@@ -617,9 +640,11 @@ checked against the structure as built for the edition:
   signal into that cell, a `lever`, `button`, `pressure_plate` or `daylight` into every cell beside
   it and an `observer` into the cell behind it, or when it powers whole a block beside that cell: a
   `lever` or `button` the block it hangs on, a `pressure_plate` the block under it, and an
-  `observer` the block behind it. Any block but air, a sensor, a `piston` and a `door` is taken to
-  pass that power on, a `lamp` and a `dispenser` among them, since no table records which blocks
-  conduct. A piston takes no power through its front. The finding is at the actuator, with a note at
+  `observer` the block behind it. A block passes that power on when the target's `conductors`
+  table says it conducts ([§14.5](#145-place-and-route)). Where the target cannot say, any block
+  but air, a sensor, a `piston` and a `door` is taken to, a `lamp` and a `dispenser` among them,
+  since a finding too many is safer here than a circuit that waits on update order unreported. A
+  piston takes no power through its front. The finding is at the actuator, with a note at
   the sensor. Bedrock has no quasi-connectivity, so this is no finding there.
 
 A [Tier 0 part](#tier-0-parts) and a raw member are the author's, so neither is checked, and a
