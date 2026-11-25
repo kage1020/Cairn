@@ -172,12 +172,18 @@ identifier is `W_IGNORED_ARGUMENT` and read as if the key were not written. The 
 writes is kept in the sign's block entity ([Entities §8.1](/spec/entities/#81-two-tiers)). The
 sign's `mat_slot=` names a standing sign, and a sign without one is built from the registry pack's
 `@sign.oak`. A hung sign is built from that sign's wall sign, the block whose id ends in
-`wall_sign` where the standing sign's ends in `sign` or in `standing_sign`: `spruce_sign` hangs as
-`spruce_wall_sign`, Bedrock's `spruce_standing_sign` as `spruce_wall_sign`, and the default hangs as
-`@sign.oak_wall`. The block MUST be a standing sign whose wall sign the target has: its id ends in
-`_sign` and in neither `wall_sign` nor `hanging_sign`, and the pinned target declares its wall sign,
-or, with no version pinned, some version of the edition may. Any other is `E_INCOMPATIBLE_MATERIAL`,
-and the sign is built from the default beside the error.
+`wall_sign` where the standing sign's ends in `sign` or in `standing_sign`, written as the canonical
+token naming it is: `spruce_sign` hangs as `spruce_wall_sign`, Bedrock's `spruce_standing_sign` as
+`spruce_wall_sign`, `oak_sign` as `oak_wall_sign`, which Bedrock writes as `wall_sign`, and the
+default hangs as `@sign.oak_wall`. The block MUST be a standing sign whose wall sign the target has:
+its id ends in `_sign` and in neither `wall_sign` nor `hanging_sign`, and the pinned target declares
+its wall sign or writes it under another ID ([Materials and Themes
+§7.3](/spec/materials-themes/#73-mappings-across-version-and-edition)). Any other is
+`E_INCOMPATIBLE_MATERIAL`, and the sign is built from the default beside the error; for a standing
+sign whose wall sign the target lacks, the message names that wall sign. With no version pinned, the
+wall sign is weighed as a canonical token is ([Lint §11.3](/spec/lint/#113-error-vs-warning)): one
+no shipped version writes stands in for the block a target's pack names, and the sign is not refused
+for it.
 
 A `bed` lays a bed's two blocks: its head in the cell its `at=` names and its foot in the cell
 behind the head, each with its `part`, `head` or `foot`, and the `facing` its head points. By a wall
