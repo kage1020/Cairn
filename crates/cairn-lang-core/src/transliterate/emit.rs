@@ -245,7 +245,8 @@ impl<'a> UnitPlan<'a> {
 
 /// How `entry` is written, or `None` for air: every state it says but those the target reads the
 /// same at any value and those at the target's default, which no rule but the connections sets,
-/// with each needed state kept, and the connection states left out or written.
+/// each needed one kept but in the derived spelling's connection states, and the connection states
+/// left out or written.
 fn spellings(entry: &GridEntry, registry: &dyn TargetRegistry) -> Option<Spellings> {
     if entry.state.id == BlockState::AIR_ID {
         return None;

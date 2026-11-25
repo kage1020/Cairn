@@ -107,6 +107,33 @@ fn a_needed_state_the_build_leaves_out_differs_though_the_entry_gives_its_defaul
 }
 
 #[test]
+fn a_needed_state_the_target_does_not_read_agrees_at_any_value_and_differs_left_out() {
+    let source =
+        format!("{THEME}struct s size=3x3\n  raw_block mat=minecraft:skull[rotation=8] at=1,0,1\n");
+    let built = build(&source).expect("it builds");
+    let floor = unit_edited("s", only_structure(&built), |entry| {
+        if entry.state.id == "minecraft:skull" {
+            let pairs = [("powered", "false"), ("rotation", "0")]
+                .map(|(k, v)| (k.to_owned(), v.to_owned()));
+            entry.state.properties = pairs.clone().into_iter().collect();
+            entry.defaults = pairs.into_iter().collect();
+            entry.unread = vec!["powered".to_owned(), "rotation".to_owned()];
+            entry.needed = vec!["rotation".to_owned()];
+        }
+    });
+    let units = [floor];
+    assert_eq!(report(&units, &source).counts, agreeing(1, 1));
+    let bare = report(&units, &source.replace("skull[rotation=8]", "skull"));
+    assert_eq!((bare.counts.matched, bare.counts.states_matched), (1, 0));
+    let states: Vec<_> = bare.regions[0]
+        .states
+        .iter()
+        .map(|s| (s.key.as_str(), s.structure.as_deref(), s.built.as_deref()))
+        .collect();
+    assert_eq!(states, [("rotation", Some("0"), None)]);
+}
+
+#[test]
 fn a_waterlogged_either_side_leaves_out_counts_as_dry() {
     let source = format!(
         "{THEME}struct s size=3x3\n  raw_block mat=minecraft:oak_stairs[facing=east] at=1,0,1\n"

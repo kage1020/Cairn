@@ -513,14 +513,13 @@ fn merged(spans: impl Iterator<Item = (u32, u32)>) -> Vec<(u32, u32)> {
 }
 
 /// Each property `built` holds otherwise than `expected`, as the target builds them: a property
-/// one side leaves out reads as the target's default where `expected` gives one, `waterlogged` as
-/// `false`, and one the build leaves out with no default is not compared.
+/// one side leaves out reads as the target's default where `expected` gives one and does not need
+/// it, `waterlogged` as `false`, and one the build leaves out with no default is not compared
+/// unless it is needed.
 fn differing_states(expected: &GridEntry, built: &BlockState) -> Vec<StateDifference> {
     let mut compared = GridEntry {
         state: BlockState::bare(expected.state.id.clone()),
-        defaults: expected.defaults.clone(),
-        unread: expected.unread.clone(),
-        needed: expected.needed.clone(),
+        ..expected.clone()
     };
     compared
         .defaults
@@ -528,7 +527,7 @@ fn differing_states(expected: &GridEntry, built: &BlockState) -> Vec<StateDiffer
         .or_insert_with(|| "false".to_owned());
     for (key, value) in &expected.state.properties {
         let left_out = !built.properties.contains_key(key);
-        if !left_out || compared.defaults.contains_key(key) {
+        if !left_out || compared.defaults.contains_key(key) || compared.needed.contains(key) {
             compared.state.properties.insert(key.clone(), value.clone());
         }
     }

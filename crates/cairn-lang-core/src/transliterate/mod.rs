@@ -128,13 +128,13 @@ impl std::error::Error for BlockGridError {}
 pub struct GridEntry {
     /// The block state, with every property the file says.
     pub state: BlockState,
-    /// The value the target builds for a property a line leaves out, but a needed one; a property
-    /// with none is built only as the line writes it.
+    /// The value the target builds for a property a line leaves out, which a needed one left out
+    /// does not get; a property with none is built only as the line writes it.
     pub defaults: IndexMap<String, String>,
     /// The properties the target builds the same whatever their value.
     pub unread: Vec<String>,
-    /// The properties at their default that a line writes all the same, since the target builds
-    /// another block for a line that leaves them out.
+    /// The properties a line writes even at their default, since a line that leaves one out is not
+    /// built as this block; one also unread is compared only by whether a line writes it.
     pub needed: Vec<String>,
 }
 
@@ -152,22 +152,20 @@ impl GridEntry {
 
     /// Whether `built` builds the same block as this entry at the target.
     fn is_built_as(&self, built: &BlockState) -> bool {
-        built.id == self.state.id
-            && self
-                .compared_keys(built)
-                .all(|key| self.read(&self.state, key) == self.read(built, key))
+        built.id == self.state.id && self.compared_keys(built).all(|key| self.agrees(built, key))
     }
 
-    /// Each property `built` holds at another value than this entry, as `(key, this entry's
-    /// value, built's value)`, a property one side leaves out read as the target's default.
+    /// Each property `built` holds otherwise than this entry, as `(key, this entry's value,
+    /// built's value)`, a property one side leaves out read as the target's default, a needed one
+    /// as none.
     pub(crate) fn differing_states(
         &self,
         built: &BlockState,
     ) -> Vec<(String, Option<String>, Option<String>)> {
         let mut out: Vec<(String, Option<String>, Option<String>)> = Vec::new();
         for key in self.compared_keys(built) {
-            let (expected, got) = (self.read(&self.state, key), self.read(built, key));
-            if expected != got && !out.iter().any(|(seen, _, _)| seen == key) {
+            if !self.agrees(built, key) && !out.iter().any(|(seen, _, _)| seen == key) {
+                let (expected, got) = (self.read(&self.state, key), self.read(built, key));
                 out.push((key.clone(), expected.cloned(), got.cloned()));
             }
         }
@@ -175,18 +173,29 @@ impl GridEntry {
     }
 
     /// Every property either side writes or the target gives a default for, but those the target
-    /// does not read; a key both sides name comes up more than once.
+    /// does not read and does not need; a key both sides name comes up more than once.
     fn compared_keys<'a>(&'a self, built: &'a BlockState) -> impl Iterator<Item = &'a String> {
         built
             .properties
             .keys()
             .chain(self.state.properties.keys())
             .chain(self.defaults.keys())
-            .filter(|key| !self.unread.contains(key))
+            .filter(|key| !self.unread.contains(key) || self.needed.contains(key))
     }
 
-    /// The value `state` builds for `key`: its own, else the target's default, which a needed
-    /// property has none of.
+    /// Whether `built` builds `key` as this entry does: at the same value, or for a needed property
+    /// the target does not read, written by both or by neither.
+    fn agrees(&self, built: &BlockState, key: &str) -> bool {
+        let (expected, got) = (self.read(&self.state, key), self.read(built, key));
+        if self.unread.iter().any(|unread| unread == key) {
+            expected.is_some() == got.is_some()
+        } else {
+            expected == got
+        }
+    }
+
+    /// The value `state` builds for `key`: its own, else the target's default, none for a needed
+    /// property left out.
     fn read<'a>(&'a self, state: &'a BlockState, key: &str) -> Option<&'a String> {
         state.properties.get(key).or_else(|| {
             self.defaults
