@@ -1108,15 +1108,18 @@ raises, with the code, span and text a pinned check gives them. It weighs the so
 block id some shipped version of the edition declares were declared, and every canonical token some
 shipped version writes under another ID too, as Bedrock writes `@oak_sign` ([Materials and
 Themes](/spec/materials-themes/#73-mappings-across-version-and-edition)). An abstract token, a
-canonical token no shipped version writes, and a raw block whose id no shipped version declares are
-not deferred: each stands in for the block a target's pack names for it, and no verdict on that
-block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, no `W_PHASE_CONFLICT` between it and
-another block, and no `W_PALETTE_TOO_LARGE` that only it could cause, since the palette is counted
-without it. A stand-in overwritten by air, or air by a stand-in, is still a `W_PHASE_CONFLICT`,
-since no pack names air. A `beam`, `column`, `arch`, `door`, `chest`, `trapdoor`, `note_block`,
-`sign`, `bed`, sensor or actuator built from its default block takes the block the pack names for
-it, so it is such a block too, and a `W_WALKWAY_BLOCKED` note says "a block" where a pinned check
-would name it. `E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` on a
+canonical token no shipped version writes, the wall sign a `sign` hangs as where no shipped version
+writes it ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), and a raw block whose id no
+shipped version declares are not deferred: each stands in for the block a target's pack names for
+it, and no verdict on that block is given. So there is no `E_INCOMPATIBLE_MATERIAL` on it, nor on
+the sign whose wall sign it is, no `W_PHASE_CONFLICT` between it and another block, and no
+`W_PALETTE_TOO_LARGE` that only it could cause, since the palette is counted without it. A stand-in
+overwritten by air, or air by a stand-in, is still a `W_PHASE_CONFLICT`, since no pack names air. A
+`beam`, `column`, `arch`, `door`, `chest`, `trapdoor`, `note_block`, `sign`, `bed`, sensor or
+actuator built from its default block takes the block the pack names for it, so it is such a block
+too, and a `W_WALKWAY_BLOCKED` note says "a block" where a pinned check would name it.
+`E_UNKNOWN_ID`, `E_STATE_DOMAIN`, `E_STATE_UNMAPPED`, `E_PARITY_UNSUPPORTED` on a
 block and `E_UNKNOWN_ABSTRACT_TOKEN` are the pack's verdicts and are not raised, nor are
 `W_STATE_LITERAL_UNCHECKED`, which is about a pinned target's tables, the four [constraint
 checks](#constraint-checks), which read the pinned version's blocks, and `E_PARTIAL_BUILD`, which
