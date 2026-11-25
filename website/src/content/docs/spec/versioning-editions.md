@@ -1201,12 +1201,12 @@ A note promises only what a compile does. A compile writes a missing lock, so th
 compile, unless the path's directory does not exist, which the note then says instead. A compile
 replaces a document the schema refuses, so that note names the compile too. A file that cannot be
 read, such as a directory at the path, can stop the compile from writing there as well, so that
-note names the cause alone. A compile refuses a lock one of whose paths names the source
-([§10.6](#106-provenance-and-lock)) rather than write or replace anything there, so no note names
-a compile for such a path: each says what it says of the lock and stops there, and one more note
-says why the compile refuses the path and gives the fix. For a `--lock`, that is a `.lock` path, or
-no `--lock`, which reads `<source>.lock`. For `<source>.lock`, whose paths name the source only
-through a link, it is a `.lock` path elsewhere.
+note names the cause alone. A compile refuses a lock one of whose paths names the source, and a
+`--lock` that names a `.crn` ([§10.6](#106-provenance-and-lock)), rather than write or replace
+anything there, so no note names a compile for such a path: each says what it says of the lock and
+stops there, and one more note says why the compile refuses the path and gives the fix. For a
+`--lock`, that is a `.lock` path, or no `--lock`, which reads `<source>.lock`. For
+`<source>.lock`, whose paths name the source only through a link, it is a `.lock` path elsewhere.
 
 None of them refuses the command. A lock is the record of an earlier build rather than an input to
 this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
@@ -1304,6 +1304,10 @@ artifact goes is known only once the source is lowered, so an artifact one of wh
 source, such as `hut.nbt` when the source is `hut.nbt` and builds `struct hut`, is refused then,
 exit 1, as is `<source>.lock` when a link makes one of its paths the source. Either way the
 compile writes no artifact and no lock, and the source is left as it was.
+
+A `--lock` whose file name ends in `.crn`, in any case, is the same usage error, exit 2 before the
+source is read, whatever file it names or none: a lock is never a source, and `other.crn` is most
+likely `other.crn.lock` that a shell completed only as far as the source's name.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell or placed an

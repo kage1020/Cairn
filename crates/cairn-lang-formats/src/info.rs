@@ -196,14 +196,27 @@ pub fn default_lock_path(source: &Path) -> PathBuf {
 pub enum LockPathRefusal {
     /// The lock would be written through this path, which reaches the source's file.
     Source(WritePath),
+    /// The path's file name ends in `.crn`, as a source's does.
+    SourceName,
 }
 
 /// Why `cairn compile` refuses to write the lock of `source` at `lock`, or `None` when it writes
 /// there.
 #[must_use]
 pub fn lock_path_refusal(source: &Path, lock: &Path) -> Option<LockPathRefusal> {
-    let source = FileIdentity::of(source).ok()?;
-    WritePath::reaching(&source, lock).map(LockPathRefusal::Source)
+    let reaching = FileIdentity::of(source)
+        .ok()
+        .and_then(|source| WritePath::reaching(&source, lock));
+    if let Some(path) = reaching {
+        return Some(LockPathRefusal::Source(path));
+    }
+    lock.file_name()
+        .is_some_and(|name| {
+            name.to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".crn")
+        })
+        .then_some(LockPathRefusal::SourceName)
 }
 
 /// The report `cairn info` gives on `request`, its side findings and notes sent to `sink`.
@@ -381,17 +394,26 @@ fn verified_target_notes(
 fn refused_lock_note(file: &Path, lock: &Path, refusal: LockPathRefusal, flagged: bool) -> String {
     let shown = lock.display();
     let source = file.display();
-    let why = match refusal {
-        LockPathRefusal::Source(WritePath::Final) => format!("which names {source}, the source"),
-        LockPathRefusal::Source(scratch) => format!(
-            "whose scratch file {} names {source}, the source",
-            scratch.of(lock).display(),
+    let (why, instead) = match refusal {
+        LockPathRefusal::Source(WritePath::Final) => {
+            (format!("which names {source}, the source"), String::new())
+        }
+        LockPathRefusal::Source(scratch) => (
+            format!(
+                "whose scratch file {} names {source}, the source",
+                scratch.of(lock).display(),
+            ),
+            String::new(),
+        ),
+        LockPathRefusal::SourceName => (
+            "which ends in `.crn` as a source does".to_owned(),
+            format!(", such as {}", default_lock_path(lock).display()),
         ),
     };
     if flagged {
         format!(
-            "note: `cairn compile` refuses `--lock {shown}`, {why}; give `--lock` a `.lock` path, \
-             or leave it out to read {}",
+            "note: `cairn compile` refuses `--lock {shown}`, {why}; give `--lock` a `.lock` \
+             path{instead}, or leave it out to read {}",
             default_lock_path(file).display(),
         )
     } else {

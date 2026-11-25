@@ -1,5 +1,5 @@
-//! A `--lock` that names the source, which the compile refuses before reading the source
-//! (`spec/versioning-editions` "Provenance and lock").
+//! A `--lock` the compile refuses before reading the source: one that names the source, and one
+//! that ends in `.crn` (`spec/versioning-editions` "Provenance and lock").
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -111,6 +111,29 @@ fn a_lock_naming_the_source_in_another_case_is_refused_where_the_directory_folds
     for lock in ["src/HUT.CRN", "SRC/Hut.crn"] {
         assert_refused(dir.path(), lock, &names_the_source(lock));
     }
+}
+
+#[test]
+fn a_lock_ending_in_crn_is_refused_whatever_it_names() {
+    let dir = source_dir();
+    fs::write(
+        dir.path().join("src").join("other.crn"),
+        "struct other size=3x3\n",
+    )
+    .expect("write another source");
+    for lock in ["src/other.crn", "src/missing.crn", "build/hut.CRN"] {
+        let stderr = format!(
+            "error: `--lock {lock}` names a `.crn` file, and a lockfile is never a Cairn source\n  \
+             note: give `--lock` a `.lock` path, such as `{lock}.lock`, or leave it out to write \
+             `src/hut.crn.lock`\n"
+        );
+        assert_refused(dir.path(), lock, &stderr);
+    }
+    assert_eq!(snapshot(dir.path()), BTreeMap::new(), "nothing beside src");
+    assert!(
+        !dir.path().join("build").exists(),
+        "no directory made for the lock"
+    );
 }
 
 #[test]

@@ -1,6 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use cairn_lang_core::{Edition, UnknownEdition};
+use cairn_lang_core::lock::{
+    HashHex, LOCK_SCHEMA_VERSION, LockInputs, LockTarget, Lockfile, hash_source,
+};
+use cairn_lang_core::{CAIRN_VERSION, Edition, UnknownEdition};
 use serde_json::json;
 
 use super::*;
@@ -370,6 +373,38 @@ fn a_default_lock_linked_to_the_source_gives_the_fix_rather_than_a_compile() {
 }
 
 #[test]
+fn a_lock_path_ending_in_crn_is_refused_whatever_it_names() {
+    let (dir, file) = hut_on_disk();
+    std::fs::write(dir.path().join("other.crn"), HUT).expect("write other source");
+
+    for lock in [
+        "other.crn",
+        "missing.crn",
+        "OTHER.CRN",
+        ".crn",
+        "no/such/dir/x.Crn",
+    ] {
+        assert_eq!(
+            lock_path_refusal(&file, &dir.path().join(lock)),
+            Some(LockPathRefusal::SourceName),
+            "{lock}",
+        );
+    }
+    for lock in [
+        "other.crn.lock",
+        "crn",
+        "other.crnx",
+        "other.crn.d/hut.lock",
+    ] {
+        assert_eq!(
+            lock_path_refusal(&file, &dir.path().join(lock)),
+            None,
+            "{lock}"
+        );
+    }
+}
+
+#[test]
 fn a_lock_flag_naming_the_source_gives_the_fix_rather_than_a_compile() {
     let (_dir, file) = hut_on_disk();
 
@@ -391,6 +426,62 @@ fn a_lock_flag_naming_the_source_gives_the_fix_rather_than_a_compile() {
                 "note: `cairn compile` refuses `--lock {file}`, which names {file}, the source; \
                  give `--lock` a `.lock` path, or leave it out to read {file}.lock"
             ),
+        ],
+    );
+}
+
+#[test]
+fn a_lock_flag_ending_in_crn_gives_the_fix_rather_than_a_compile() {
+    let (dir, file) = hut_on_disk();
+    let lock = dir.path().join("other.crn");
+    let fix = format!(
+        "note: `cairn compile` refuses `--lock {lock}`, which ends in `.crn` as a source does; \
+         give `--lock` a `.lock` path, such as {lock}.lock, or leave it out to read {file}.lock",
+        lock = lock.display(),
+        file = file.display(),
+    );
+
+    let (_, sent) = run_at(&file, &lock);
+    assert_eq!(
+        sent,
+        [
+            format!(
+                "note: no lockfile at {}, so no target is verified",
+                lock.display()
+            ),
+            fix.clone(),
+        ],
+    );
+
+    Lockfile {
+        lock_schema_version: LOCK_SCHEMA_VERSION,
+        source_hash: hash_source("an earlier revision"),
+        cairn_version: CAIRN_VERSION.to_owned(),
+        target: LockTarget {
+            edition: Edition::Java,
+            mc_version: "1.21.4".to_owned(),
+            data_version: 4189,
+        },
+        inputs: LockInputs::zero(),
+        resolved_ir_hash: HashHex::zero(),
+        verified: true,
+        member_version_sensitivity: Vec::new(),
+        placements: Vec::new(),
+        walkways: Vec::new(),
+    }
+    .write_to_path(&lock)
+    .expect("the lock is written");
+    let (_, sent) = run_at(&file, &lock);
+    assert_eq!(
+        sent,
+        [
+            format!(
+                "note: {} has changed since {} was written, so its target was verified for \
+                 another revision of the file",
+                file.display(),
+                lock.display(),
+            ),
+            fix,
         ],
     );
 }

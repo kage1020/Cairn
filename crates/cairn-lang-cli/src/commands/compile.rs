@@ -89,22 +89,30 @@ pub(crate) fn run_compile(
 
 /// Say why `--lock lock` cannot be the lockfile of `file`, and which paths it can be.
 fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) {
-    match refusal {
-        LockPathRefusal::Source(WritePath::Final) => eprintln!(
-            "error: `--lock {}` names `{}`, the source being compiled",
-            lock.display(),
-            file.display(),
-        ),
-        LockPathRefusal::Source(scratch) => eprintln!(
-            "error: `--lock {}` would put its scratch file `{}` over `{}`, the source being \
-             compiled",
-            lock.display(),
-            scratch.of(lock).display(),
-            file.display(),
-        ),
-    }
+    let (shown, source) = (lock.display(), file.display());
+    let instead = match refusal {
+        LockPathRefusal::Source(WritePath::Final) => {
+            eprintln!("error: `--lock {shown}` names `{source}`, the source being compiled");
+            String::new()
+        }
+        LockPathRefusal::Source(scratch) => {
+            eprintln!(
+                "error: `--lock {shown}` would put its scratch file `{}` over `{source}`, the \
+                 source being compiled",
+                scratch.of(lock).display(),
+            );
+            String::new()
+        }
+        LockPathRefusal::SourceName => {
+            eprintln!(
+                "error: `--lock {shown}` names a `.crn` file, and a lockfile is never a Cairn \
+                 source"
+            );
+            format!(", such as `{}`", default_lock_path(lock).display())
+        }
+    };
     eprintln!(
-        "  note: give `--lock` a `.lock` path, or leave it out to write `{}`",
+        "  note: give `--lock` a `.lock` path{instead}, or leave it out to write `{}`",
         default_lock_path(file).display(),
     );
 }
