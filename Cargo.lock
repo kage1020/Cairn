@@ -231,6 +231,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "winapi-util",
 ]
 
 [[package]]

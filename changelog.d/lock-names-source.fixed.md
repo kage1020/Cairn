@@ -1,8 +1,8 @@
 - *(cli)* `cairn compile --lock` naming the source being compiled is refused with exit 2 before the
   source is read, where the compile moved the source aside, wrote the lockfile in its place and
   exited 0, leaving no copy. Every path that reaches the source counts, whatever its spelling
-  (`hut.crn`, `./hut.crn`, an absolute path, a symlinked directory, a directory that folds case)
-  and a symbolic link to it, and on Linux and macOS a hard link too:
+  (`hut.crn`, `./hut.crn`, an absolute path, a symlinked directory, or another letter case where
+  the directory folds case), and a symbolic link or a hard link to it:
 
   ```text
   error: `--lock hut.crn` names `hut.crn`, the source being compiled

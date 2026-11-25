@@ -310,11 +310,11 @@ pub(crate) enum Command {
             long,
             long_help = "Lockfile path. Defaults to `<source>.lock` next to the source (so \
                 `cottage.crn` → `cottage.crn.lock`), keeping per-source locks unambiguous when \
-                several `.crn` files share an output directory. A lock is written beside its \
-                source, never over a source: a path that reaches the source's file, through any \
-                spelling or symbolic link, or that ends in `.crn`, is refused with exit 2 before \
-                the source is read, and so is one whose `.tmp` or `.bak` scratch file reaches \
-                the source's file (`notes` for `notes.tmp`)"
+                several `.crn` files share an output directory. A lock is never written over the \
+                source being compiled: a path that reaches the source's file (any spelling, a \
+                symbolic link or a hard link), one whose `.tmp` or `.bak` scratch path does \
+                (`notes` for `notes.tmp`), or one whose file name ends in `.crn`, is refused with \
+                exit 2 before the source is read"
         )]
         lock: Option<PathBuf>,
     },

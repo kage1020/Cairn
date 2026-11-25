@@ -3,7 +3,7 @@
 use std::io;
 use std::path::Path;
 
-/// A file or directory as the file system tells it apart, so every path that reaches it has one.
+/// A file or directory as the file system tells it apart, the same for every path that reaches it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileIdentity(Key);
 
@@ -12,8 +12,11 @@ enum Key {
     /// Its device and inode.
     #[cfg(unix)]
     Inode(u64, u64),
+    /// Its volume's serial number and its index on that volume.
+    #[cfg(windows)]
+    FileIndex(u64, u64),
     /// Its canonical path, which spells each component as the directory stores it.
-    #[cfg(not(unix))]
+    #[cfg(not(any(unix, windows)))]
     Canonical(std::path::PathBuf),
 }
 
@@ -28,16 +31,30 @@ impl FileIdentity {
     }
 }
 
-/// Not `canonicalize`: on Linux it keeps each component's spelling, so `out` and `OUT` in a
-/// case-folding directory would be two keys.
+/// `path`'s device and inode, so every hard link is one file.
 #[cfg(unix)]
 fn key(path: &Path) -> io::Result<Key> {
     use std::os::unix::fs::MetadataExt as _;
+    // `canonicalize` keeps each component's spelling on Linux, so `out` and `OUT` in a
+    // case-folding directory would be two keys.
     let metadata = std::fs::metadata(path)?;
     Ok(Key::Inode(metadata.dev(), metadata.ino()))
 }
 
-#[cfg(not(unix))]
+/// `path`'s volume serial number and file index, so every hard link is one file.
+#[cfg(windows)]
+fn key(path: &Path) -> io::Result<Key> {
+    // `canonicalize` gives a hard link the path it was opened through, so two links would be
+    // two keys.
+    let handle = winapi_util::Handle::from_path_any(path)?;
+    let information = winapi_util::file::information(&handle)?;
+    Ok(Key::FileIndex(
+        information.volume_serial_number(),
+        information.file_index(),
+    ))
+}
+
+#[cfg(not(any(unix, windows)))]
 fn key(path: &Path) -> io::Result<Key> {
     path.canonicalize().map(Key::Canonical)
 }
@@ -74,17 +91,29 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn a_hard_link_to_a_file_is_the_file() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("hut.crn");
+        std::fs::write(&file, "").expect("write file");
+        std::fs::create_dir(dir.path().join("sub")).expect("make sub");
+
+        for link in ["hard", "sub/hut.crn"] {
+            std::fs::hard_link(&file, dir.path().join(link)).expect("hard link");
+            assert!(same_file(&file, &dir.path().join(link)), "{link}");
+        }
+    }
+
     #[cfg(unix)]
     #[test]
-    fn a_link_to_a_file_is_the_file() {
+    fn a_symbolic_link_to_a_file_is_the_file() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("hut.crn");
         std::fs::write(&file, "").expect("write file");
         std::os::unix::fs::symlink(&file, dir.path().join("soft")).expect("symlink");
         std::os::unix::fs::symlink(dir.path(), dir.path().join("dir")).expect("symlink dir");
-        std::fs::hard_link(&file, dir.path().join("hard")).expect("hard link");
 
-        for link in ["soft", "hard", "dir/hut.crn"] {
+        for link in ["soft", "dir/hut.crn"] {
             assert!(same_file(&file, &dir.path().join(link)), "{link}");
         }
     }

@@ -1294,9 +1294,9 @@ fails partway puts the directory back as it was.
 
 A compile never writes over the source it compiles. No path it writes a file through, the file's
 own or either scratch path, may name the source, and every path that reaches the source's file
-names it: relative or absolute, through a symbolic link, or spelled in another case where the
-directory folds case. On Linux and macOS, which tell one file from another by its device and inode,
-a hard link to the source names it too.
+names it: relative or absolute, through a symbolic link or a hard link, or spelled in another case
+where the directory folds case. The file system says which file a path reaches, by its device and
+inode, or on Windows by its volume and file index, so every link to one file is that file.
 
 A `--lock` one of whose paths names the source, such as the source itself, or `notes` when the
 source is `notes.tmp`, is a usage error, exit 2, refused before the source is read. Where each

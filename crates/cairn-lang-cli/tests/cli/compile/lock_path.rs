@@ -73,16 +73,28 @@ fn a_lock_naming_the_source_is_refused_however_it_is_spelled() {
     assert_eq!(snapshot(dir.path()), BTreeMap::new(), "nothing beside src");
 }
 
+#[test]
+fn a_lock_hard_linked_to_the_source_is_refused() {
+    let dir = source_dir();
+    let src = dir.path().join("src");
+    fs::hard_link(src.join("hut.crn"), src.join("hard.lock")).expect("hard-link the source");
+
+    assert_refused(
+        dir.path(),
+        "src/hard.lock",
+        &names_the_source("src/hard.lock"),
+    );
+}
+
 #[cfg(unix)]
 #[test]
-fn a_lock_reaching_the_source_through_a_link_is_refused() {
+fn a_lock_reaching_the_source_through_a_symbolic_link_is_refused() {
     let dir = source_dir();
     let src = dir.path().join("src");
     std::os::unix::fs::symlink(&src, dir.path().join("alias")).expect("symlink the directory");
     std::os::unix::fs::symlink("hut.crn", src.join("soft.lock")).expect("symlink the source");
-    fs::hard_link(src.join("hut.crn"), src.join("hard.lock")).expect("hard-link the source");
 
-    for lock in ["alias/hut.crn", "src/soft.lock", "src/hard.lock"] {
+    for lock in ["alias/hut.crn", "src/soft.lock"] {
         assert_refused(dir.path(), lock, &names_the_source(lock));
     }
 }

@@ -293,13 +293,9 @@ fn an_out_reaching_the_imported_file_by_another_name_is_refused() {
     let (tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
     let dir = tmp.path().join("built");
     let original = fs::read(&artifact).expect("the artifact reads");
-    let mut outs = Vec::new();
-    #[cfg(unix)]
-    {
-        let twin = dir.join("twin.crn");
-        fs::hard_link(&artifact, &twin).expect("hard-link the artifact");
-        outs.push(twin);
-    }
+    let twin = dir.join("twin.crn");
+    fs::hard_link(&artifact, &twin).expect("hard-link the artifact");
+    let mut outs = vec![twin];
     if folds_case(&dir) {
         outs.push(dir.join("COTTAGE.NBT"));
     }

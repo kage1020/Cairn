@@ -14,7 +14,6 @@ const ARTIFACT_FIX: &str = "  note: compile with `--out` naming another director
                             source a name ending in `.crn`\n";
 
 /// The note under a refused `<source>.lock`.
-#[cfg(unix)]
 const LINKED_LOCK_FIX: &str =
     "  note: a link makes them one file; give `--lock` a `.lock` path elsewhere\n";
 
@@ -109,43 +108,61 @@ fn a_lock_whose_scratch_file_is_the_source_is_refused_before_the_source_is_read(
     }
 }
 
-#[cfg(unix)]
 #[test]
-fn an_artifact_linked_to_the_source_is_refused() {
+fn an_artifact_hard_linked_to_the_source_is_refused() {
     let dir = TempDir::new().expect("tempdir");
-    for sub in ["src", "out", "hard"] {
+    for sub in ["src", "hard"] {
         fs::create_dir(dir.path().join(sub)).expect("make dir");
     }
     fs::write(dir.path().join("src/hut.crn"), HUT).expect("write source");
-    std::os::unix::fs::symlink("../src/hut.crn", dir.path().join("out/hut.nbt")).expect("symlink");
     fs::hard_link(
         dir.path().join("src/hut.crn"),
         dir.path().join("hard/hut.nbt.tmp"),
     )
     .expect("hard link");
 
-    let soft = format!(
-        "error: artifact `out/hut.nbt` names `src/hut.crn`, the source being compiled\n\
-         {ARTIFACT_FIX}"
+    let stderr = format!(
+        "error: artifact `{}` would put its scratch file `{}` over `src/hut.crn`, the source \
+         being compiled\n{ARTIFACT_FIX}",
+        Path::new("hard").join("hut.nbt").display(),
+        Path::new("hard").join("hut.nbt.tmp").display(),
     );
-    let hard = format!(
-        "error: artifact `hard/hut.nbt` would put its scratch file `hard/hut.nbt.tmp` over \
-         `src/hut.crn`, the source being compiled\n{ARTIFACT_FIX}"
+    let subs = ["src", "hard"];
+    assert_refused(
+        dir.path(),
+        "src/hut.crn",
+        &["--out", "hard"],
+        1,
+        &stderr,
+        &subs,
     );
-    for (out, stderr) in [("out", soft), ("hard", hard)] {
-        let subs = ["src", out];
-        assert_refused(
-            dir.path(),
-            "src/hut.crn",
-            &["--out", out],
-            1,
-            &stderr,
-            &subs,
-        );
-    }
 }
 
 #[cfg(unix)]
+#[test]
+fn an_artifact_symlinked_to_the_source_is_refused() {
+    let dir = TempDir::new().expect("tempdir");
+    for sub in ["src", "out"] {
+        fs::create_dir(dir.path().join(sub)).expect("make dir");
+    }
+    fs::write(dir.path().join("src/hut.crn"), HUT).expect("write source");
+    std::os::unix::fs::symlink("../src/hut.crn", dir.path().join("out/hut.nbt")).expect("symlink");
+
+    let stderr = format!(
+        "error: artifact `out/hut.nbt` names `src/hut.crn`, the source being compiled\n\
+         {ARTIFACT_FIX}"
+    );
+    let subs = ["src", "out"];
+    assert_refused(
+        dir.path(),
+        "src/hut.crn",
+        &["--out", "out"],
+        1,
+        &stderr,
+        &subs,
+    );
+}
+
 #[test]
 fn a_default_lock_linked_to_the_source_is_refused() {
     let dir = TempDir::new().expect("tempdir");
@@ -164,7 +181,7 @@ fn a_default_lock_linked_to_the_source_is_refused() {
 
     for link in ["hut.crn.lock", "hut.crn.lock.tmp", "hut.crn.lock.bak"] {
         let path = dir.path().join("src").join(link);
-        std::os::unix::fs::symlink("hut.crn", &path).expect("symlink");
+        fs::hard_link(dir.path().join("src/hut.crn"), &path).expect("hard link");
         let subs = ["src", "out"];
         assert_refused(
             dir.path(),

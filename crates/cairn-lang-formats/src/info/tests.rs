@@ -286,15 +286,25 @@ fn a_lock_path_reaching_the_source_is_refused_however_it_is_spelled() {
     assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
 }
 
+#[test]
+fn a_lock_path_hard_linked_to_the_source_is_refused() {
+    let (dir, file) = hut_on_disk();
+    std::fs::hard_link(&file, dir.path().join("hard.lock")).expect("hard link");
+
+    assert_eq!(
+        lock_path_refusal(&file, &dir.path().join("hard.lock")),
+        Some(LockPathRefusal::Source(WritePath::Final)),
+    );
+}
+
 #[cfg(unix)]
 #[test]
-fn a_lock_path_linked_to_the_source_is_refused() {
+fn a_lock_path_symlinked_to_the_source_is_refused() {
     let (dir, file) = hut_on_disk();
     std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).expect("symlink dir");
     std::os::unix::fs::symlink(&file, dir.path().join("soft.lock")).expect("symlink");
-    std::fs::hard_link(&file, dir.path().join("hard.lock")).expect("hard link");
 
-    for lock in ["link/hut.crn", "soft.lock", "hard.lock"] {
+    for lock in ["link/hut.crn", "soft.lock"] {
         assert_eq!(
             lock_path_refusal(&file, &dir.path().join(lock)),
             Some(LockPathRefusal::Source(WritePath::Final)),
@@ -348,12 +358,11 @@ fn a_lock_flag_whose_scratch_file_is_the_source_gives_the_fix_rather_than_a_comp
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn a_default_lock_linked_to_the_source_gives_the_fix_rather_than_a_compile() {
     let (dir, file) = hut_on_disk();
     let scratch = dir.path().join("hut.crn.lock.tmp");
-    std::os::unix::fs::symlink(&file, &scratch).expect("symlink");
+    std::fs::hard_link(&file, &scratch).expect("hard link");
 
     let (document, sent) = run_on_disk(&file, None);
 
