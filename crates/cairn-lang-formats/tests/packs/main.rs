@@ -16,6 +16,7 @@ mod entities;
 mod furniture;
 mod ids_exist;
 mod respelling;
+mod signs;
 mod spelling;
 mod state_domain;
 mod states;

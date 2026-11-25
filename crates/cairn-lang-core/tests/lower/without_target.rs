@@ -202,13 +202,14 @@ fn an_id_no_edition_sharing_the_lowering_declares_is_left_to_a_pinned_check() {
     );
 }
 
-/// What Java and Bedrock make of an id when Bedrock declares no `oak_sign` but writes the
-/// canonical token naming it under another id, as its state map does.
+/// What Java and Bedrock make of an id when Bedrock declares no `oak_sign` or `oak_wall_sign` but
+/// writes the canonical tokens naming them under other ids, as its state map does.
 fn bedrock_writes_signs(edition: Edition, id: &str) -> IdStanding {
-    if edition == Edition::Bedrock && id == "minecraft:oak_sign" {
-        IdStanding::Respelled
-    } else {
-        IdStanding::Declared
+    match (edition, id) {
+        (Edition::Bedrock, "minecraft:oak_sign" | "minecraft:oak_wall_sign") => {
+            IdStanding::Respelled
+        }
+        _ => IdStanding::Declared,
     }
 }
 
@@ -229,6 +230,43 @@ fn a_token_an_edition_writes_under_another_id_is_weighed_as_its_block() {
                 &without_target_declaring(source, edition, &bedrock_writes_signs),
             ),
             [("E_INCOMPATIBLE_MATERIAL", "@oak_sign")],
+            "{edition:?}",
+        );
+    }
+}
+
+/// A sign bound to `@<token>`, standing on the floor and hanging on the front wall.
+fn signs_of(token: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n  slot board -> @{token}\n\n\
+         struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
+         sign at=2,1,2 mat_slot=board\n  sign at=inside.front offset=1 y=1 mat_slot=board\n"
+    )
+}
+
+#[test]
+fn a_wall_sign_an_edition_writes_under_another_id_is_weighed_as_its_block() {
+    let source = signs_of("oak_sign");
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(
+            without_target_declaring(&source, edition, &bedrock_writes_signs),
+            [],
+            "{edition:?}",
+        );
+    }
+}
+
+#[test]
+fn a_wall_sign_an_edition_lacks_stands_in_and_refuses_no_sign() {
+    let source = signs_of("birch_sign");
+    let lacks_birch_wall_sign = |edition: Edition, id: &str| match (edition, id) {
+        (Edition::Bedrock, "minecraft:birch_wall_sign") => IdStanding::Unknown,
+        _ => IdStanding::Declared,
+    };
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(
+            without_target_declaring(&source, edition, &lacks_birch_wall_sign),
+            [],
             "{edition:?}",
         );
     }

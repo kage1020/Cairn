@@ -413,10 +413,11 @@ fn a_sign_whose_slot_binds_no_block_falls_back_to_the_default_sign_for_its_stand
     );
 }
 
-/// A target that declares `ids`, or, where it pins no version, may declare every id but
-/// `denied`.
+/// A target that declares `ids` and writes each canonical token `respelled` lists as the id beside
+/// it, or, where it pins no version, may declare every id but `denied`.
 struct Signs {
     ids: Option<Vec<String>>,
+    respelled: &'static [(&'static str, &'static str)],
     denied: &'static str,
 }
 
@@ -435,72 +436,142 @@ impl TargetRegistry for Signs {
             .map(|ids| BlockIdSet::new("test 2.0", ids))
     }
 
+    fn respelled(&self, state: &BlockState) -> Option<BlockState> {
+        self.respelled
+            .iter()
+            .find(|(token, _)| *token == state.id)
+            .map(|(_, written)| BlockState {
+                id: (*written).to_owned(),
+                properties: state.properties.clone(),
+            })
+    }
+
     fn may_declare(&self, id: &str) -> bool {
         id != self.denied
     }
 }
 
+/// [`Signs`] pinned to `ids`, writing the tokens `respelled` lists.
+fn pinned(ids: &[&str], respelled: &'static [(&'static str, &'static str)]) -> Signs {
+    Signs {
+        ids: Some(ids.iter().map(|id| (*id).to_owned()).collect()),
+        respelled,
+        denied: "",
+    }
+}
+
+/// A room hanging a sign bound to `@birch_sign` on its front wall and one bound to `@spruce_sign`
+/// on its back wall.
+const BIRCH_AND_SPRUCE: &str = "theme t:\n  slot wall -> @cobblestone\n  slot board -> @birch_sign\n  \
+                                slot pine -> @spruce_sign\n\nstruct s size=7x5\n  \
+                                floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+                                sign at=inside.front offset=2 y=1 mat_slot=board\n  \
+                                sign at=inside.back offset=2 y=1 mat_slot=pine\n";
+
 #[test]
-fn a_standing_sign_whose_wall_sign_the_target_lacks_is_no_sign() {
-    let src = "theme t:\n  slot wall -> @cobblestone\n  slot board -> @birch_sign\n  \
+fn a_standing_sign_whose_wall_sign_the_target_lacks_is_refused_naming_the_wall_sign() {
+    let registry = pinned(
+        &[
+            "minecraft:birch_sign",
+            "minecraft:cobblestone",
+            "minecraft:oak_sign",
+            "minecraft:oak_wall_sign",
+            "minecraft:spruce_sign",
+            "minecraft:spruce_wall_sign",
+        ],
+        &[],
+    );
+    let out = lowered_with(BIRCH_AND_SPRUCE, &registry);
+    assert_eq!(
+        findings(BIRCH_AND_SPRUCE, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@birch_sign",
+            "sign is built from a standing sign whose wall sign the target has, and \
+             `minecraft:birch_wall_sign`, the wall sign of `minecraft:birch_sign`, is not a block \
+             in `test 2.0`",
+            vec![
+                "bind the slot to a standing sign whose wall sign the target has — the registry \
+                 pack's `sign.oak` resolves to one",
+                "reached through `mat_slot=board`, so every member reading that slot has it too",
+            ],
+        )],
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[0].data).expect("serialises")["required"],
+        "sign",
+    );
+    assert_eq!(
+        signs(&out),
+        [
+            (
+                (2, 1, 3),
+                "minecraft:oak_wall_sign[facing=north]".to_owned()
+            ),
+            (
+                (4, 1, 1),
+                "minecraft:spruce_wall_sign[facing=south]".to_owned()
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_standing_sign_whose_wall_sign_the_target_writes_under_another_id_stands_and_hangs() {
+    let src = "theme t:\n  slot wall -> @cobblestone\n  slot board -> @oak_sign\n  \
                slot pine -> @spruce_sign\n\nstruct s size=7x5\n  floor mat_slot=wall\n  \
                walls mat_slot=wall height=3\n  sign at=inside.front offset=2 y=1 mat_slot=board\n  \
-               sign at=inside.back offset=2 y=1 mat_slot=pine\n";
-    let pinned = [
-        "minecraft:birch_sign",
-        "minecraft:cobblestone",
-        "minecraft:oak_sign",
-        "minecraft:oak_wall_sign",
-        "minecraft:spruce_sign",
-        "minecraft:spruce_wall_sign",
-    ]
-    .map(str::to_owned)
-    .to_vec();
-    for registry in [
-        Signs {
-            ids: Some(pinned),
-            denied: "",
-        },
-        Signs {
-            ids: None,
-            denied: "minecraft:birch_wall_sign",
-        },
-    ] {
-        let out = lowered_with(src, &registry);
-        assert_eq!(
-            findings(src, &out),
-            [(
-                DiagnosticCode::IncompatibleMaterial,
-                "@birch_sign",
-                "sign derives `facing` / `rotation` from the wall it hangs on or the block it \
-                 stands on and `minecraft:birch_sign` is not a sign, so those states have nowhere \
-                 to go",
-                vec![
-                    "bind the slot to a standing sign whose wall sign the target has — the \
-                     registry pack's `sign.oak` resolves to one",
-                    "reached through `mat_slot=board`, so every member reading that slot has it \
-                     too",
-                ],
-            )],
-            "{:?}",
-            registry.ids,
-        );
-        assert_eq!(
-            serde_json::to_value(&out.diagnostics[0].data).expect("serialises")["required"],
-            "sign",
-        );
-        assert_eq!(
-            signs(&out),
-            [
-                (
-                    (2, 1, 3),
-                    "minecraft:oak_wall_sign[facing=north]".to_owned()
-                ),
-                (
-                    (4, 1, 1),
-                    "minecraft:spruce_wall_sign[facing=south]".to_owned()
-                ),
-            ],
-        );
-    }
+               sign at=3,1,2 mat_slot=board\n  sign at=inside.back offset=2 y=1 mat_slot=pine\n";
+    // The oak wall sign is written apart, as Bedrock's state map writes it; the spruce one renamed.
+    let registry = pinned(
+        &[
+            "minecraft:cobblestone",
+            "minecraft:oak_sign",
+            "minecraft:spruce_sign",
+        ],
+        &[
+            ("minecraft:oak_wall_sign", "minecraft:oak_wall_sign"),
+            ("minecraft:spruce_wall_sign", "minecraft:spruce_hung_sign"),
+        ],
+    );
+    let out = lowered_with(src, &registry);
+    assert_eq!(findings(src, &out), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        signs(&out),
+        [
+            (
+                (2, 1, 3),
+                "minecraft:oak_wall_sign[facing=north]".to_owned()
+            ),
+            ((3, 1, 2), "minecraft:oak_sign[rotation=0]".to_owned()),
+            (
+                (4, 1, 1),
+                "minecraft:spruce_hung_sign[facing=south]".to_owned()
+            ),
+        ],
+    );
+}
+
+#[test]
+fn with_no_version_pinned_a_wall_sign_no_version_may_declare_stands_in_for_its_block() {
+    let registry = Signs {
+        ids: None,
+        respelled: &[],
+        denied: "minecraft:birch_wall_sign",
+    };
+    let out = lowered_with(BIRCH_AND_SPRUCE, &registry);
+    assert_eq!(findings(BIRCH_AND_SPRUCE, &out), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        signs(&out),
+        [
+            (
+                (2, 1, 3),
+                "@minecraft:birch_wall_sign[facing=north]".to_owned()
+            ),
+            (
+                (4, 1, 1),
+                "minecraft:spruce_wall_sign[facing=south]".to_owned()
+            ),
+        ],
+    );
 }

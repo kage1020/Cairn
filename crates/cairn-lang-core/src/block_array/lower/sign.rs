@@ -19,7 +19,7 @@ use crate::block_array::{BlockEntityData, BlockState, SIGN_FACE_LINES, SignText}
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, Toward, fixture_cell, outside_the_array};
 use super::geometry_material::{
-    Family, GeometryMemberDescription, geometry_material_id, wall_sign_of,
+    Family, GeometryMemberDescription, geometry_material_id, wall_sign_at,
 };
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 use super::stand::{COMPASS, COMPASS_FACES, Stand, stand_of, triple_cell};
@@ -292,5 +292,7 @@ fn sign_block_id(
     if fell_back || !hangs || is_stand_in(&BlockState::bare(&id)) {
         return Ok(Some(id));
     }
-    Ok(Some(wall_sign_of(&id)))
+    let wall = wall_sign_at(&id, ctx.registry)
+        .expect("a standing sign whose wall sign the target lacks falls back above");
+    Ok(Some(wall))
 }

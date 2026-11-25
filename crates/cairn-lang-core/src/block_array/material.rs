@@ -711,7 +711,11 @@ pub fn bound_canonical_tokens(resolution: &Resolution) -> Vec<(Span, BlockState)
 }
 
 /// [`validated_id`] for a canonical token, which the target may spell another way.
-fn validated_token(
+///
+/// # Errors
+///
+/// The [`UnknownId`] the pinned target refuses.
+pub(crate) fn validated_token(
     state: BlockState,
     registry: Option<&dyn TargetRegistry>,
 ) -> Result<BlockState, Box<UnknownId>> {
