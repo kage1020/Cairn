@@ -60,7 +60,138 @@ fn a_lookup_reads_the_written_values_and_the_defaults_for_the_rest() {
     assert_eq!(conducts(&[]), Some(false));
     assert_eq!(conducts(&[("type", "top")]), Some(false));
     assert_eq!(conducts(&[("type", "double")]), Some(true));
-    assert_eq!(conducts(&[("type", "sideways")]), Some(false));
+}
+
+#[test]
+fn a_state_the_lookup_maps_no_key_for_is_not_said_to_conduct_or_not() {
+    let tables = slabs();
+    assert_eq!(
+        tables.conducts(
+            "1.0",
+            "minecraft:oak_slab",
+            &properties(&[("type", "sideways")])
+        ),
+        None,
+    );
+}
+
+/// Tables whose `oak_slab` conducts as a double slab out of water, read by `type`, then
+/// `waterlogged`.
+fn two_reads() -> ConductorIndex {
+    index(&serde_json::json!([{
+        "mc_versions": ["1.0"], "ids": ["oak_slab"],
+        "defaults": {"type": "bottom", "waterlogged": "false"},
+        "conducts": {"reads": ["type", "waterlogged"], "map": {
+            "bottom,false": false, "bottom,true": false, "double,false": true,
+            "double,true": false,
+        }},
+    }]))
+    .expect("valid")
+}
+
+#[test]
+fn a_lookup_over_two_properties_reads_their_values_in_the_order_it_names_them() {
+    let tables = two_reads();
+    let conducts =
+        |pairs: &[(&str, &str)]| tables.conducts("1.0", "minecraft:oak_slab", &properties(pairs));
+    assert_eq!(
+        [
+            conducts(&[("waterlogged", "false"), ("type", "double")]),
+            conducts(&[("type", "double"), ("waterlogged", "true")]),
+            conducts(&[("type", "double")]),
+            conducts(&[("waterlogged", "true")]),
+        ],
+        [Some(true), Some(false), Some(true), Some(false)],
+    );
+    let mut named: Vec<_> = tables.named_states("1.0").collect();
+    named.sort_unstable();
+    assert_eq!(
+        named,
+        [
+            ("minecraft:oak_slab", "type", "bottom"),
+            ("minecraft:oak_slab", "type", "bottom"),
+            ("minecraft:oak_slab", "type", "bottom"),
+            ("minecraft:oak_slab", "type", "double"),
+            ("minecraft:oak_slab", "type", "double"),
+            ("minecraft:oak_slab", "waterlogged", "false"),
+            ("minecraft:oak_slab", "waterlogged", "false"),
+            ("minecraft:oak_slab", "waterlogged", "false"),
+            ("minecraft:oak_slab", "waterlogged", "true"),
+            ("minecraft:oak_slab", "waterlogged", "true"),
+        ],
+    );
+}
+
+#[test]
+fn the_first_state_a_lookup_leaves_out_is_found_in_the_order_it_reads_its_properties() {
+    let tables = two_reads();
+    let domain = |id: &str| {
+        (id == "minecraft:oak_slab").then(|| {
+            IndexMap::from([
+                (
+                    "type".to_owned(),
+                    vec!["top".to_owned(), "bottom".to_owned(), "double".to_owned()],
+                ),
+                (
+                    "waterlogged".to_owned(),
+                    vec!["true".to_owned(), "false".to_owned()],
+                ),
+            ])
+        })
+    };
+    assert_eq!(
+        tables.unmapped("1.0", domain),
+        Some(("minecraft:oak_slab", "type=top,waterlogged=true".to_owned())),
+    );
+    let covered = |id: &str| {
+        domain(id).map(|mut domain| {
+            domain["type"].retain(|value| value != "top");
+            domain
+        })
+    };
+    assert_eq!(tables.unmapped("1.0", covered), None);
+    assert_eq!(tables.unmapped("2.0", domain), None);
+}
+
+#[test]
+fn an_unsettled_row_says_nothing_of_its_blocks() {
+    let tables = index(&serde_json::json!([
+        {"mc_versions": ["1.0"], "ids": ["stone"]},
+        {"mc_versions": ["1.0"], "ids": ["mud", "loom"], "unsettled": true},
+    ]))
+    .expect("valid");
+    assert_eq!(
+        [
+            tables.conducts("1.0", "minecraft:mud", &properties(&[])),
+            tables.conducts("1.0", "minecraft:loom", &properties(&[("facing", "north")])),
+            tables.conducts("1.0", "minecraft:glass", &properties(&[])),
+        ],
+        [None, None, Some(false)],
+    );
+    assert!(tables.describes("1.0", "minecraft:mud"));
+    assert!(!tables.describes("1.0", "minecraft:glass"));
+    assert!(!tables.describes("2.0", "minecraft:mud"));
+}
+
+#[test]
+fn an_unsettled_row_with_a_lookup_or_defaults_is_refused() {
+    let problem = "an unsettled row gives no `conducts` lookup or `defaults`, since no source \
+                   settles which of its states conduct";
+    assert_eq!(
+        malformed(&serde_json::json!({
+            "mc_versions": ["1.0"], "ids": ["oak_slab"], "unsettled": true,
+            "defaults": {"type": "bottom"},
+            "conducts": {"reads": ["type"], "map": {"double": true}},
+        })),
+        problem,
+    );
+    assert_eq!(
+        malformed(&serde_json::json!({
+            "mc_versions": ["1.0"], "ids": ["oak_slab"], "unsettled": true,
+            "defaults": {"type": "bottom"},
+        })),
+        problem,
+    );
 }
 
 #[test]

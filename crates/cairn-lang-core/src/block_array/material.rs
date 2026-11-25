@@ -153,9 +153,9 @@ pub trait TargetRegistry {
         None
     }
 
-    /// Whether `state` conducts redstone power at the pinned target, so power a component or a
-    /// torch gives it whole reaches the blocks beside it (`spec/redstone` "Place-and-route"), or
-    /// `None` when the registry cannot say.
+    /// Whether `state` conducts redstone power at the target, so power given it whole reaches each
+    /// block next to it (`spec/redstone` "Place-and-route"), or `None` when the registry cannot
+    /// say.
     fn conducts(&self, state: &BlockState) -> Option<bool> {
         let _ = state;
         None

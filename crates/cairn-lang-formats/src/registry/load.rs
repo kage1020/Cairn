@@ -312,15 +312,17 @@ impl TargetRegistry for PackView<'_> {
 
     fn conducts(&self, state: &BlockState) -> Option<bool> {
         if let Some(version) = self.mc_version {
-            return self.conducts_at(version, state);
+            return self.conduction_at(version, state).settled();
         }
-        // Unpinned, a block conducts as every version that can say agrees it does.
+        // Unpinned, a state is read as every version that gives it agrees, and one that leaves it
+        // unsettled agrees with none (`spec/redstone` "Place-and-route").
         let mut said = self
             .conductors
             .versions()
-            .filter_map(|version| self.conducts_at(version, state));
+            .map(|version| self.conduction_at(version, state))
+            .filter(|said| *said != Conduction::Undeclared);
         let first = said.next()?;
-        said.all(|other| other == first).then_some(first)
+        said.all(|other| other == first).then_some(first)?.settled()
     }
 
     fn meant(&self, state: &BlockState) -> Option<BlockState> {
@@ -478,6 +480,33 @@ impl TargetRegistry for PackView<'_> {
 
 /// A block's canonical states at one version: each property with the values it takes.
 type Domain = IndexMap<String, Vec<String>>;
+
+/// Whether `domain` gives each property `properties` names the value it names.
+fn gives(domain: &Domain, properties: &IndexMap<String, String>) -> bool {
+    properties
+        .iter()
+        .all(|(key, value)| domain.get(key).is_some_and(|values| values.contains(value)))
+}
+
+/// What one version's tables say of whether a block state conducts redstone power.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Conduction {
+    /// The version gives no such block, or not this state of it.
+    Undeclared,
+    /// The version gives the state, and its tables do not settle whether it conducts.
+    Unsettled,
+    /// Whether it conducts.
+    Settled(bool),
+}
+
+impl Conduction {
+    fn settled(self) -> Option<bool> {
+        match self {
+            Self::Settled(conducts) => Some(conducts),
+            Self::Undeclared | Self::Unsettled => None,
+        }
+    }
+}
 
 impl<'a> PackView<'a> {
     /// This view, with `catalog`'s checks run on what it lowers (`spec/lint` "Constraint checks").
@@ -682,32 +711,42 @@ impl<'a> PackView<'a> {
         joins.all(|other| other == Some(first)).then_some(first)
     }
 
-    /// Whether `state` conducts at `version`, read as the canonical blocks its id names there, or
-    /// `None` when the version's tables do not declare it or those blocks disagree.
-    fn conducts_at(&self, version: &str, state: &BlockState) -> Option<bool> {
+    /// What `version`'s tables say of whether `state` conducts, read on Bedrock as the canonical
+    /// state of each block its id is written from there.
+    fn conduction_at(&self, version: &str, state: &BlockState) -> Conduction {
         let id = state.id.as_str();
-        let declared = || {
-            self.blocks
-                .ids_for(version)
-                .is_none_or(|ids| contains(ids, id))
-        };
-        let canonical: Vec<&str> = match self.edition {
-            Edition::Java => declared().then(|| vec![id])?,
-            Edition::Bedrock => self
-                .state_maps?
-                .at(version)?
-                .java_ids(id, &state.properties),
-        };
-        if canonical.is_empty() {
-            // A Bedrock block no canonical block is written as is in no table, and is taken to
-            // pass no power (`spec/redstone` "Place-and-route").
-            return (!self.blocks.is_empty() && declared()).then_some(false);
+        if self.conductors.ids_at(version).is_none() {
+            return Conduction::Unsettled;
         }
-        let mut answers = canonical
-            .into_iter()
-            .map(|java| self.conductors.conducts(version, java, &state.properties));
-        let first = answers.next()??;
-        answers.all(|other| other == Some(first)).then_some(first)
+        let declared = self.blocks.ids_for(version).map(|ids| contains(ids, id));
+        let outside = self
+            .domain_at(version, id)
+            .is_some_and(|domain| !gives(&domain, &state.properties));
+        // A Bedrock id its own table does not declare may still spell a canonical block.
+        if outside || (self.edition == Edition::Java && declared == Some(false)) {
+            return Conduction::Undeclared;
+        }
+        let canonical = match self.edition {
+            Edition::Java if declared.is_none() && !self.conductors.describes(version, id) => {
+                Vec::new()
+            }
+            Edition::Java => vec![(id, Some(state.properties.clone()))],
+            Edition::Bedrock => self
+                .state_maps
+                .and_then(|maps| maps.at(version))
+                .map(|states| states.canonical_states(id, &state.properties))
+                .unwrap_or_default(),
+        };
+        if canonical.is_empty() && declared == Some(false) {
+            return Conduction::Undeclared;
+        }
+        let mut answers = canonical.into_iter().map(|(java, full)| {
+            full.and_then(|full| self.conductors.conducts(version, java, &full))
+        });
+        match answers.next().flatten() {
+            Some(first) if answers.all(|other| other == Some(first)) => Conduction::Settled(first),
+            _ => Conduction::Unsettled,
+        }
     }
 
     /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
@@ -942,9 +981,9 @@ pub enum RegistryError {
         extra: String,
     },
     /// `conductors` describes a block that the table it is checked against, `blocks` on Java and
-    /// `states` on Bedrock, gives no states of at the version.
+    /// `states` on Bedrock, does not declare at the version.
     #[error(
-        "registry pack `conductors` describes `{id}`, of which `{table}` gives no states at `{mc_version}`"
+        "registry pack `conductors` describes `{id}`, which `{table}` does not declare at `{mc_version}`"
     )]
     ConductorsUnknownBlock {
         /// The version.
@@ -964,6 +1003,22 @@ pub enum RegistryError {
         /// The id.
         id: String,
         /// The state, `property=value`.
+        state: String,
+        /// `"blocks"` or `"states"`.
+        table: &'static str,
+    },
+    /// `conductors` looks a block up by state with a map that holds no key for a state the table
+    /// it is checked against gives the block.
+    #[error(
+        "registry pack `conductors` maps no `{state}` of `{id}`, which `{table}` gives it at \
+         `{mc_version}`; a lookup maps every state of the properties it reads"
+    )]
+    ConductorsUnmappedState {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// The state, each property the lookup reads as `property=value`, comma-joined.
         state: String,
         /// `"blocks"` or `"states"`.
         table: &'static str,
@@ -2075,17 +2130,19 @@ fn conductor_tables<'s>(
         ConductorIndex::from_catalog,
         ConductorIndex::empty,
     )?;
-    validate_conductors(&conductors, data_versions, blocks, states)?;
+    validate_conductors(&conductors, data_versions, blocks, states, manifest.edition)?;
     Ok((conductors, text))
 }
 
 /// Refuses conductor tables that miss a targetable version or describe one `data_versions` lacks,
-/// or that name a block or a state the tables they are read against do not give at the version.
+/// that name a block or a state the tables they are read against do not give at the version, or
+/// whose lookup maps no key for a state those tables give.
 fn validate_conductors(
     conductors: &ConductorIndex,
     data_versions: &DataVersionTable,
     blocks: &BlocksIndex,
     states: Option<&StateMapIndex>,
+    edition: Edition,
 ) -> Result<(), RegistryError> {
     if conductors.is_empty() {
         return Ok(());
@@ -2106,11 +2163,13 @@ fn validate_conductors(
             extra: extra.join(", "),
         });
     }
-    if blocks.is_empty() {
-        return Ok(());
-    }
     // A Bedrock pack's tables name the canonical blocks, which only its state map knows.
-    let table = if states.is_some() { "states" } else { "blocks" };
+    let (table, states) = match (edition, states) {
+        (Edition::Java, _) if blocks.is_empty() => return Ok(()),
+        (Edition::Java, _) => ("blocks", None),
+        (Edition::Bedrock, Some(states)) => ("states", Some(states)),
+        (Edition::Bedrock, None) => return Ok(()),
+    };
     let domain = |version: &str, id: &str| -> Option<Domain> {
         if let Some(states) = states {
             return states.at(version)?.canonical_domain(id);
@@ -2149,6 +2208,14 @@ fn validate_conductors(
                     table,
                 });
             }
+        }
+        if let Some((id, state)) = conductors.unmapped(version, |id| domain(version, id)) {
+            return Err(RegistryError::ConductorsUnmappedState {
+                mc_version: version.to_owned(),
+                id: id.to_owned(),
+                state,
+                table,
+            });
         }
     }
     Ok(())

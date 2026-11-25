@@ -8,7 +8,8 @@
     `delay` whose row of two repeaters a stage is longer than the struct is `E_ROUTE_CONGESTION`;
   - a sensor or actuator the circuit under the floor cannot reach, such as a lever above the floor
     row or a pressure plate at `y = 1` on a floor of glass, a slab that is not double or another
-    block that passes no power, is `E_ROUTE_UNREACHABLE_COMPONENT`;
+    block the target's `conductors` table says passes no power, is
+    `E_ROUTE_UNREACHABLE_COMPONENT`;
   - an `assert latency` the laid circuit misses is `E_SIM_ASSERTION_FAILED`;
   - a target whose pack declares no block for a circuit token, such as the new `@circuit.block`, is
     `E_UNKNOWN_ABSTRACT_TOKEN` on the `circuit` line.

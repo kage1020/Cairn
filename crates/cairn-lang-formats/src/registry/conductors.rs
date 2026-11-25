@@ -2,11 +2,10 @@
 //! per version, which decide where a circuit meets the struct over it (`spec/redstone`
 //! "Place-and-route").
 
-use std::collections::HashMap;
-
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use super::held::{self, Held};
 use super::namespaced;
 
 /// The highest `conductors.schema_version` this build reads.
@@ -24,7 +23,8 @@ pub struct ConductorsCatalog {
     pub rows: Vec<ConductorRow>,
 }
 
-/// One row of [`ConductorsCatalog::rows`]: blocks that conduct in the same states at some versions.
+/// One row of [`ConductorsCatalog::rows`]: blocks that conduct in the same states at some versions,
+/// or whose conduction no source settles there.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ConductorRow {
@@ -38,6 +38,9 @@ pub struct ConductorRow {
     /// Which of their states conduct, or none when every state does.
     #[serde(default)]
     pub conducts: Option<ConductsLookup>,
+    /// Whether no source settles which of their states conduct.
+    #[serde(default)]
+    pub unsettled: bool,
 }
 
 /// Whether a [`ConductorRow`]'s blocks conduct, looked up from the values of [`Self::reads`].
@@ -100,21 +103,15 @@ pub enum ConductorsError {
 #[derive(Debug, Clone, Default)]
 pub struct ConductorIndex {
     rows: Vec<Row>,
-    /// Per version, each id to its row.
-    by_version: IndexMap<String, HashMap<String, usize>>,
+    /// Per version, each id to its row, in the order the component names them.
+    by_version: IndexMap<String, IndexMap<String, usize>>,
 }
 
 #[derive(Debug, Clone)]
 struct Row {
     defaults: IndexMap<String, String>,
-    /// `None` when every state conducts.
-    lookup: Option<Lookup>,
-}
-
-#[derive(Debug, Clone)]
-struct Lookup {
-    reads: Vec<String>,
-    map: HashMap<String, bool>,
+    /// Which states conduct, `None` for a row no source settles.
+    conducts: Option<Held<bool>>,
 }
 
 impl ConductorIndex {
@@ -201,22 +198,48 @@ impl ConductorIndex {
             .flatten()
             .flat_map(|(id, &at)| {
                 let row = &self.rows[at];
-                let keyed = row.lookup.iter().flat_map(|lookup| {
-                    lookup
-                        .map
-                        .keys()
-                        .flat_map(|key| lookup.reads.iter().map(String::as_str).zip(key.split(',')))
-                });
                 row.defaults
                     .iter()
                     .map(|(key, value)| (key.as_str(), value.as_str()))
-                    .chain(keyed)
+                    .chain(row.conducts.iter().flat_map(Held::named))
                     .map(move |(key, value)| (id.as_str(), key, value))
             })
     }
 
+    /// Whether `mc_version`'s table has a row for `id`.
+    #[must_use]
+    pub fn describes(&self, mc_version: &str, id: &str) -> bool {
+        self.by_version
+            .get(mc_version)
+            .is_some_and(|ids| ids.contains_key(id))
+    }
+
+    /// The first block `mc_version`'s table looks up by state with a state its map holds no key
+    /// for, as the id and the state's `property=value` pairs, where `domain` gives the values
+    /// each property of a block takes there.
+    pub fn unmapped(
+        &self,
+        mc_version: &str,
+        domain: impl Fn(&str) -> Option<IndexMap<String, Vec<String>>>,
+    ) -> Option<(&str, String)> {
+        self.by_version
+            .get(mc_version)?
+            .iter()
+            .find_map(|(id, &at)| {
+                let lookup = self.rows[at].conducts.as_ref()?;
+                let domain = domain(id)?;
+                let state = lookup.unmapped(&domain)?;
+                let state: Vec<String> = state
+                    .into_iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect();
+                Some((id.as_str(), state.join(",")))
+            })
+    }
+
     /// Whether the canonical block `id` with `properties` conducts redstone power at
-    /// `mc_version`, or `None` when there is no table for the version.
+    /// `mc_version`, a block no row names conducting in no state; `None` when there is no table
+    /// for the version, its row is unsettled, or its lookup maps no key for those states.
     #[must_use]
     pub fn conducts(
         &self,
@@ -229,28 +252,29 @@ impl ConductorIndex {
             return Some(false);
         };
         let row = &self.rows[at];
-        let Some(lookup) = &row.lookup else {
-            return Some(true);
-        };
-        let values: Option<Vec<&str>> = lookup
-            .reads
-            .iter()
-            .map(|key| {
-                properties
-                    .get(key)
-                    .or_else(|| row.defaults.get(key))
-                    .map(String::as_str)
-            })
-            .collect();
-        Some(
-            values
-                .and_then(|values| lookup.map.get(&values.join(",")).copied())
-                .unwrap_or(false),
-        )
+        row.conducts.as_ref()?.at(|key| {
+            properties
+                .get(key)
+                .or_else(|| row.defaults.get(key))
+                .map(String::as_str)
+        })
     }
 }
 
 fn parse_row(row: &ConductorRow) -> Result<Row, String> {
+    if row.unsettled {
+        if row.conducts.is_some() || !row.defaults.is_empty() {
+            return Err(
+                "an unsettled row gives no `conducts` lookup or `defaults`, since no source \
+                 settles which of its states conduct"
+                    .to_owned(),
+            );
+        }
+        return Ok(Row {
+            defaults: IndexMap::new(),
+            conducts: None,
+        });
+    }
     let Some(lookup) = &row.conducts else {
         if let Some(unread) = row.defaults.keys().next() {
             return Err(format!(
@@ -259,16 +283,16 @@ fn parse_row(row: &ConductorRow) -> Result<Row, String> {
         }
         return Ok(Row {
             defaults: IndexMap::new(),
-            lookup: None,
+            conducts: Some(Held::Every(true)),
         });
     };
-    if lookup.reads.is_empty() || lookup.map.is_empty() {
-        return Err(
-            "the `conducts` lookup reads no property or maps no value; a row without one \
-             conducts in every state"
-                .to_owned(),
-        );
-    }
+    let held = held::lookup(
+        "conducts",
+        &lookup.reads,
+        &lookup.map,
+        "a row without one conducts in every state",
+        |conducts| Ok(*conducts),
+    )?;
     if let Some(missing) = lookup
         .reads
         .iter()
@@ -283,16 +307,6 @@ fn parse_row(row: &ConductorRow) -> Result<Row, String> {
             "`defaults` gives `{unread}`, which the lookup does not read"
         ));
     }
-    if let Some(key) = lookup
-        .map
-        .keys()
-        .find(|key| key.split(',').count() != lookup.reads.len())
-    {
-        return Err(format!(
-            "the `conducts` key `{key}` holds no value for each of {}",
-            lookup.reads.join(", ")
-        ));
-    }
     if !lookup.map.values().any(|conducts| *conducts) {
         return Err(
             "the lookup maps no state to `true`; a block that conducts in no state is left out"
@@ -301,14 +315,7 @@ fn parse_row(row: &ConductorRow) -> Result<Row, String> {
     }
     Ok(Row {
         defaults: row.defaults.clone(),
-        lookup: Some(Lookup {
-            reads: lookup.reads.clone(),
-            map: lookup
-                .map
-                .iter()
-                .map(|(key, conducts)| (key.clone(), *conducts))
-                .collect(),
-        }),
+        conducts: Some(held),
     })
 }
 

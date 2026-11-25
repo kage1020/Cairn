@@ -1807,7 +1807,7 @@ fn a_java_conductors_table_naming_a_block_or_a_state_its_version_lacks_is_refuse
     .expect_err("1.20.4 declares no stone");
     assert_eq!(
         unknown.to_string(),
-        "registry pack `conductors` describes `minecraft:stone`, of which `blocks` gives no states \
+        "registry pack `conductors` describes `minecraft:stone`, which `blocks` does not declare \
          at `1.20.4`",
     );
     let state = conductors_pack(&connections(
@@ -1865,6 +1865,25 @@ fn an_unpinned_view_reads_conduction_as_the_versions_declaring_the_block_agree()
 }
 
 #[test]
+fn an_unpinned_view_reads_a_block_some_version_leaves_unsettled_as_unsettled() {
+    let pack = conductors_pack(&connections(
+        r#"{ "mc_versions": ["1.20.4"], "ids": ["oak_slab"], "unsettled": true },
+           { "mc_versions": ["1.21.4"], "ids": ["stone"] }"#,
+    ))
+    .expect("loads");
+    assert_eq!(
+        [
+            pack.view(Some("1.20.4")).conducts(&slab(Some("double"))),
+            pack.view(Some("1.21.4")).conducts(&slab(Some("double"))),
+            pack.view(None).conducts(&slab(Some("double"))),
+            pack.view(None)
+                .conducts(&BlockState::bare("minecraft:stone")),
+        ],
+        [None, Some(false), None, Some(true)],
+    );
+}
+
+#[test]
 fn a_pack_without_conductor_tables_cannot_say_whether_a_block_conducts() {
     let pack = connections_pack(&connections(
         r#"{ "mc_versions": ["1.20.4", "1.21.4"], "ids": ["oak_slab"] }"#,
@@ -1885,8 +1904,162 @@ fn a_bedrock_conductors_table_naming_a_block_its_state_map_lacks_is_refused() {
     let err = load_pack(&files, Edition::Bedrock).expect_err("no map knows the block");
     assert_eq!(
         err.to_string(),
-        "registry pack `conductors` describes `minecraft:not_a_block`, of which `states` gives no \
-         states at `1.21.0`",
+        "registry pack `conductors` describes `minecraft:not_a_block`, which `states` does not \
+         declare at `1.21.0`",
+    );
+}
+
+#[test]
+fn a_conductors_lookup_that_maps_no_key_for_a_state_its_block_takes_is_refused() {
+    let err = conductors_pack(&connections(
+        r#"{ "mc_versions": ["1.20.4", "1.21.4"], "ids": ["oak_slab"], "defaults": { "type": "bottom" },
+             "conducts": { "reads": ["type"], "map": { "bottom": false, "double": true } } }"#,
+    ))
+    .expect_err("the lookup leaves out the top slab");
+    assert_eq!(
+        err.to_string(),
+        "registry pack `conductors` maps no `type=top` of `minecraft:oak_slab`, which `blocks` gives \
+         it at `1.20.4`; a lookup maps every state of the properties it reads",
+    );
+}
+
+#[test]
+fn the_conductors_bytes_reach_the_pack_hash() {
+    let hash = |ids: &str| {
+        conductors_pack(&connections(&format!(
+            r#"{{ "mc_versions": ["1.20.4", "1.21.4"], "ids": {ids} }}"#
+        )))
+        .expect("loads")
+        .bytes_hash()
+        .clone()
+    };
+    assert_ne!(hash(r#"["oak_slab"]"#), hash(r#"["minecraft:oak_slab"]"#));
+}
+
+#[test]
+fn a_java_pack_without_block_tables_says_only_what_a_conductors_row_says() {
+    let dir = pack_dir();
+    write_pack_with_materials(
+        dir.path(),
+        r#"{
+            "schema_version": 1,
+            "edition": "java",
+            "name": "test",
+            "description": "test",
+            "files": {
+                "data_versions": "data_versions.json",
+                "materials": "materials.json",
+                "conductors": "conductors.json"
+            }
+        }"#,
+        good_data_versions(),
+        &one_material(r#"{ "token": "a.b", "block": "stone" }"#),
+    );
+    std::fs::write(
+        dir.path().join("conductors.json"),
+        connections(r#"{ "mc_versions": ["1.20.4", "1.21.4"], "ids": ["stone"] }"#),
+    )
+    .expect("write conductors");
+    let pack = load_from_dir(dir.path()).expect("loads");
+    let view = pack.view(Some("1.21.4"));
+    assert_eq!(
+        [
+            view.conducts(&BlockState::bare("minecraft:stone")),
+            view.conducts(&BlockState::bare("minecraft:glass")),
+            pack.view(None)
+                .conducts(&BlockState::bare("minecraft:glass")),
+        ],
+        [Some(true), None, None],
+    );
+}
+
+/// The conductor rows of a Bedrock pack at `1.21.50` and `1.21.60`.
+fn bedrock_conductors(rows: &str) -> String {
+    connections(&rows.replace("VERSIONS", r#"["1.21.50", "1.21.60"]"#))
+}
+
+#[test]
+fn a_bedrock_pack_without_conductor_tables_cannot_say_whether_a_block_conducts() {
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            BOTH_STATE_FILES,
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+    })
+    .expect("pack");
+    let view = pack.view(Some("1.21.60"));
+    assert_eq!(
+        [
+            view.conducts(&log(&[])),
+            view.conducts(&BlockState::bare("minecraft:oak_planks")),
+        ],
+        [None, None],
+    );
+}
+
+#[test]
+fn a_bedrock_block_no_canonical_block_is_written_as_is_not_said_to_conduct_or_not() {
+    let pack = bedrock_dir(|dir| {
+        write_pack_with_states(
+            dir,
+            &format!(r#"{BOTH_STATE_FILES}, "conductors": "conductors.json""#),
+            &log_states(r#"["1.21.50", "1.21.60"]"#),
+            NO_SENSITIVITY,
+        );
+        std::fs::write(
+            dir.join("conductors.json"),
+            bedrock_conductors(r#"{ "mc_versions": VERSIONS, "ids": ["oak_log"] }"#),
+        )
+        .expect("write conductors");
+    })
+    .expect("pack");
+    let view = pack.view(Some("1.21.60"));
+    assert_eq!(
+        [
+            view.conducts(&log(&[("axis", "x")])),
+            view.conducts(&BlockState::bare("minecraft:oak_planks")),
+            view.conducts(&BlockState::bare("minecraft:not_a_block")),
+            pack.view(None)
+                .conducts(&BlockState::bare("minecraft:oak_planks")),
+        ],
+        [Some(true), None, None, None],
+    );
+}
+
+#[test]
+fn a_bedrock_pack_without_a_state_map_cannot_say_whether_a_block_conducts() {
+    let pack = bedrock_dir(|dir| {
+        write_pack(
+            dir,
+            r#"{
+                "schema_version": 1,
+                "edition": "bedrock",
+                "name": "test",
+                "description": "test",
+                "files": { "data_versions": "data_versions.json", "conductors": "conductors.json" }
+            }"#,
+            r#"{
+                "schema_version": 3,
+                "latest": "1.21.60",
+                "versions": [
+                    { "mc_version": "1.21.50", "data_version": 18166272, "block_version": 18166272 },
+                    { "mc_version": "1.21.60", "data_version": 18168832, "block_version": 18168832 }
+                ]
+            }"#,
+        );
+        std::fs::write(
+            dir.join("conductors.json"),
+            bedrock_conductors(r#"{ "mc_versions": VERSIONS, "ids": ["stone"] }"#),
+        )
+        .expect("write conductors");
+    })
+    .expect("a canonical id no table can check is no fault");
+    assert_eq!(
+        pack.view(Some("1.21.60"))
+            .conducts(&BlockState::bare("minecraft:stone")),
+        None,
     );
 }
 
