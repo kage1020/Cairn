@@ -101,11 +101,11 @@ pub fn lower_source(source: &str, edition: Edition, mc_version: Option<&str>) ->
 }
 
 /// The block-array IR `cairn compile` builds from `source` for `edition` at `mc_version`, its
-/// circuits laid, or the codes of what refuses the build.
+/// circuits laid, or what refuses the build.
 ///
 /// # Errors
 ///
-/// The codes, when `source` does not parse, a finding is an error, or the build is refused whole.
+/// The parse failure's message, else the refusing codes, `"a run-level refusal"` for one with none.
 pub fn compile_source(
     source: &str,
     edition: Edition,

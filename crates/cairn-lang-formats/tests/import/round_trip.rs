@@ -263,9 +263,14 @@ fn block_entities_reported(import: &RawImport, file: &Written<'_>, format: Impor
 #[test]
 fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
     let mut unbuilt: Vec<(String, Edition, String)> = Vec::new();
+    let mut compared = 0;
     for (name, source) in examples() {
         for edition in [Edition::Java, Edition::Bedrock] {
-            for version in admitted_versions(builtin_pack(edition), &source, edition) {
+            let versions = admitted_versions(builtin_pack(edition), &source, edition);
+            if versions.is_empty() {
+                unbuilt.push((name.clone(), edition, "no admitted version".to_owned()));
+            }
+            for version in versions {
                 let Ok(ir) = compile_source(&source, edition, &version) else {
                     unbuilt.push((name.clone(), edition, version));
                     continue;
@@ -295,6 +300,7 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
                                 });
                         let bodies = &import.transliteration.bodies;
                         assert_eq!(bodies.len(), file.arrays.len(), "{label}");
+                        compared += 1;
                         for (body, array) in bodies.iter().zip(&file.arrays) {
                             let parts = rebuilt(&built, body);
                             if edition == Edition::Java {
@@ -345,10 +351,12 @@ fn every_example_that_builds_imports_to_a_source_that_builds_the_same_blocks() {
         }
     }
     assert_eq!(unbuilt, Vec::<(String, Edition, String)>::new());
+    assert!(compared > 0, "no file was compared");
 }
 
 #[test]
 fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_and_its_source() {
+    let mut compared = 0;
     for (name, source) in examples() {
         for edition in [Edition::Java, Edition::Bedrock] {
             for version in admitted_versions(builtin_pack(edition), &source, edition) {
@@ -400,11 +408,13 @@ fn every_structure_file_an_example_writes_agrees_at_every_cell_with_its_import_a
                             (1, 1.0, 1.0),
                             "{label}: the source"
                         );
+                        compared += 1;
                     }
                 }
             }
         }
     }
+    assert!(compared > 0, "no file was compared");
 }
 
 #[test]
