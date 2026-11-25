@@ -235,7 +235,10 @@ jar and asks every state through `.github/scripts/RedstoneConductors.java`, whic
 source with the jar's classes on the class path, so it needs a JDK rather than a bare Java runtime,
 and for a release that obfuscates its names it reads the names from the server mappings Mojang
 publishes beside the jar. Bedrock's `conductors.json` is written by hand, by the rule
-[Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables) gives. It
+[Versioning and Editions §10.3](/spec/versioning-editions/#103-backend--data-tables) gives, and
+`cargo xtask lint bedrock-conductors` fails when a regenerated `states.json` names a Java conductor
+it leaves out: give the block a row, conducting or `"unsettled": true`, or record in
+`xtask/src/rules/bedrock_conductors.rs` the source that shows Bedrock makes it pass no power. It
 rewrites the edition's `blocks.json`, each targetable row's `data_version` on Java or
 `block_version` on Bedrock and `latest` in `data_versions.json`, Bedrock's `states.json`,
 `connections.json`, Java's `conductors.json`, and the `extracted` record in `pack.json`.
