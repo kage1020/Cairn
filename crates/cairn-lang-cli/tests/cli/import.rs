@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::common::{Run, cairn_argv, compile, example_in_tempdir, nbt_body, write_source};
+use crate::common::{
+    Run, cairn_argv, compile, example_in_tempdir, folds_case, nbt_body, write_source,
+};
 
 /// The warning every import prints first.
 const INTENT_LOSS: &str = "warning[W_SEMANTIC_LOSS]: an import recovers blocks and their \
@@ -284,4 +286,41 @@ fn a_structure_file_is_named_by_its_extension_in_any_case() {
              (1.21.4)"
         )
     );
+}
+
+#[test]
+fn an_out_reaching_the_imported_file_by_another_name_is_refused() {
+    let (tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let dir = tmp.path().join("built");
+    let original = fs::read(&artifact).expect("the artifact reads");
+    let mut outs = Vec::new();
+    #[cfg(unix)]
+    {
+        let twin = dir.join("twin.crn");
+        fs::hard_link(&artifact, &twin).expect("hard-link the artifact");
+        outs.push(twin);
+    }
+    if folds_case(&dir) {
+        outs.push(dir.join("COTTAGE.NBT"));
+    }
+    let before = entries(&dir);
+
+    for out in outs {
+        let run = import(&[&artifact, Path::new("--out"), &out]);
+        assert_eq!(
+            (run.code, run.stdout.as_str(), run.stderr.as_str()),
+            (
+                Some(2),
+                "",
+                format!(
+                    "error: `--out {}` names the file being imported\n  note: give `--out` a \
+                     `.crn` path, or leave it out to write `<stem>.raw.crn`\n",
+                    out.display()
+                )
+                .as_str()
+            ),
+        );
+    }
+    assert_eq!(entries(&dir), before);
+    assert_eq!(fs::read(&artifact).expect("the artifact reads"), original);
 }

@@ -169,7 +169,9 @@ pub(crate) enum Command {
             long,
             long_help = "Lockfile whose target the `verified target` row reports. Defaults to \
                 `<source>.lock` next to the source, the path `cairn compile` writes. A path with \
-                no file reports `(no lock)` rather than refusing the command"
+                no file reports `(no lock)` rather than refusing the command, and a path \
+                `cairn compile` refuses, the source itself, is read all the same, with a \
+                note saying what to pass instead"
         )]
         lock: Option<PathBuf>,
         /// Output format for the report.
@@ -251,7 +253,8 @@ pub(crate) enum Command {
             sits in its site (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on \
             success, 1 on parse, lowering, or I/O failure (including an unsupported `--target` \
             or a state literal outside its block's states), and 2 when the source file cannot \
-            be located or `--structure-format` is given with `--edition bedrock`"
+            be located, `--structure-format` is given with `--edition bedrock`, or `--lock` names \
+            the source"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -303,7 +306,9 @@ pub(crate) enum Command {
             long,
             long_help = "Lockfile path. Defaults to `<source>.lock` next to the source (so \
                 `cottage.crn` → `cottage.crn.lock`), keeping per-source locks unambiguous when \
-                several `.crn` files share an output directory"
+                several `.crn` files share an output directory. A lock is written beside its \
+                source, never over it: a path that reaches the source's file, through any \
+                spelling or symbolic link, is refused with exit 2 before the source is read"
         )]
         lock: Option<PathBuf>,
     },

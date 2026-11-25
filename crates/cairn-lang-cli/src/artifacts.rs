@@ -8,6 +8,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
 use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
 use cairn_lang_formats::data_version::{JavaTarget, ResolvedTarget};
+use cairn_lang_formats::file_identity::FileIdentity;
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
@@ -410,11 +411,10 @@ type EntryLocation = (DirIdentity, std::ffi::OsString);
 /// A directory as the file system tells it apart, so every spelling that reaches it is one key.
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum DirIdentity {
-    /// The device and inode of a directory that exists.
-    #[cfg(unix)]
-    Inode(u64, u64),
-    /// The canonical path of a directory that exists, or the absolute path of one that does not.
-    Path(PathBuf),
+    /// A directory that exists.
+    Existing(FileIdentity),
+    /// The absolute path of a directory that does not exist.
+    Absent(PathBuf),
 }
 
 /// The directory entry `path` names, as its parent's identity and its file name keyed by `case`.
@@ -435,27 +435,13 @@ fn dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
     } else {
         dir
     };
-    match existing_dir_identity(dir) {
+    match FileIdentity::of(dir) {
+        Ok(identity) => Ok(DirIdentity::Existing(identity)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            std::path::absolute(dir).map(DirIdentity::Path)
+            std::path::absolute(dir).map(DirIdentity::Absent)
         }
-        identity => identity,
+        Err(err) => Err(err),
     }
-}
-
-/// `dir`'s device and inode, which `canonicalize` cannot stand in for: on Linux it keeps each
-/// component's spelling, so `out` and `OUT` in a case-folding directory would be two keys.
-#[cfg(unix)]
-fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
-    use std::os::unix::fs::MetadataExt as _;
-    let metadata = std::fs::metadata(dir)?;
-    Ok(DirIdentity::Inode(metadata.dev(), metadata.ino()))
-}
-
-/// `dir`'s canonical path, which spells each component as the directory stores it.
-#[cfg(not(unix))]
-fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
-    dir.canonicalize().map(DirIdentity::Path)
 }
 
 /// Write the prepared structures and the lockfile as one set: all of them, or the directory as

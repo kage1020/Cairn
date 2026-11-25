@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use cairn_lang_core::{Edition, UnknownEdition};
 use serde_json::json;
@@ -230,4 +230,88 @@ fn a_failure_document_renders_each_finding_it_refuses() {
         .filter_map(|d| d["code"].as_str())
         .collect();
     assert_eq!(rendered, ["E_PARSE"]);
+}
+
+/// A directory holding [`HUT`] as `hut.crn`, removed when the test ends.
+fn hut_on_disk() -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let file = dir.path().join("hut.crn");
+    std::fs::write(&file, HUT).expect("write source");
+    (dir, file)
+}
+
+/// `info` on [`HUT`] at `file` with `--lock lock`, with what it sent its sink.
+fn run_at(file: &Path, lock: &Path) -> (InfoDocument, Vec<String>) {
+    let editions = RequestedEditions::default();
+    let request = InfoRequest {
+        file,
+        source: HUT,
+        editions: &editions,
+        lock: Some(lock),
+        format: ReportFormat::Json,
+    };
+    let mut sink = Recorded::default();
+    let document = info(&request, &mut sink).expect("a clean source is reported on");
+    (document, sink.0)
+}
+
+#[test]
+fn a_lock_path_reaching_the_source_is_refused_however_it_is_spelled() {
+    let (dir, file) = hut_on_disk();
+    std::fs::create_dir(dir.path().join("sub")).expect("make sub");
+    let refused = |lock: &Path| lock_path_refusal(&file, lock);
+
+    for lock in [
+        file.clone(),
+        dir.path().join(".").join("hut.crn"),
+        dir.path().join("sub").join("..").join("hut.crn"),
+    ] {
+        assert_eq!(refused(&lock), Some(LockPathRefusal::Source), "{lock:?}");
+    }
+    assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
+    std::fs::write(dir.path().join("hut.crn.lock"), "").expect("write lock");
+    assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_path_linked_to_the_source_is_refused() {
+    let (dir, file) = hut_on_disk();
+    std::os::unix::fs::symlink(dir.path(), dir.path().join("link")).expect("symlink dir");
+    std::os::unix::fs::symlink(&file, dir.path().join("soft.lock")).expect("symlink");
+    std::fs::hard_link(&file, dir.path().join("hard.lock")).expect("hard link");
+
+    for lock in ["link/hut.crn", "soft.lock", "hard.lock"] {
+        assert_eq!(
+            lock_path_refusal(&file, &dir.path().join(lock)),
+            Some(LockPathRefusal::Source),
+            "{lock}",
+        );
+    }
+}
+
+#[test]
+fn a_lock_flag_naming_the_source_gives_the_fix_rather_than_a_compile() {
+    let (_dir, file) = hut_on_disk();
+
+    let (document, sent) = run_at(&file, &file);
+
+    let LockReading::Unreadable {
+        kind: UnreadableKind::Invalid,
+        error,
+    } = &document.verified_target.reading
+    else {
+        panic!("the source is no lock: {:?}", document.verified_target);
+    };
+    let file = file.display();
+    assert_eq!(
+        sent,
+        [
+            format!("note: {file}: the lockfile could not be read ({error})"),
+            format!(
+                "note: `cairn compile` refuses `--lock {file}`, which names {file}, the source; \
+                 give `--lock` a `.lock` path, or leave it out to read {file}.lock"
+            ),
+        ],
+    );
 }

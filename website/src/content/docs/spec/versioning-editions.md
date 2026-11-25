@@ -1201,14 +1201,20 @@ A note promises only what a compile does. A compile writes a missing lock, so th
 compile, unless the path's directory does not exist, which the note then says instead. A compile
 replaces a document the schema refuses, so that note names the compile too. A file that cannot be
 read, such as a directory at the path, can stop the compile from writing there as well, so that
-note names the cause alone.
+note names the cause alone. A compile refuses a `--lock` that names the source
+([§10.6](#106-provenance-and-lock)) rather than write or replace anything there, so no note names
+a compile for such a path: each says what it says of the lock and stops there, and one more note
+says why the compile refuses the path and gives the fix, a `.lock` path, or no `--lock`, which
+reads `<source>.lock`.
 
 None of them refuses the command. A lock is the record of an earlier build rather than an input to
 this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
 no buildable target. A `--lock` naming a file that does not exist is `(no lock)`, like the default
 path, and so is a path through a directory that does not exist or through a file, on every
-platform. A newer schema is read no further than its version, because its field names need not mean
-what this release's do ([§10.6](#106-provenance-and-lock)).
+platform. A `--lock` a compile refuses is read as any other path is, so the source named as one is
+a document the schema refuses, `(unreadable lock)`. A newer schema is read no further than its
+version, because its field names need not mean what this release's do
+([§10.6](#106-provenance-and-lock)).
 
 `--format json` carries the row as `verified_target`, an object that always has `status` and
 `path`, the lock path as the note prints it, and by `status` also:
@@ -1279,6 +1285,12 @@ catalog's text ([§10.3](#103-backend--data-tables)). `member_version_sensitivit
 `semantic-sensitive` row](#the-semantic-sensitive-row) finds for the target's edition, reading the
 blocks as the target does, and each `reason` is the row's reason and boundary as `<reason> at
 <boundary>`.
+
+The lock is written beside its source and never over it. A `--lock` that names the source is a
+usage error, exit 2, refused before the source is read, so the compile writes nothing. Every path
+that reaches the source's file names it: relative or absolute, through a symbolic link, or spelled
+in another case where the directory folds case. On Linux and macOS, which tell one file from
+another by its device and inode, a hard link to the source names it too.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell or placed an

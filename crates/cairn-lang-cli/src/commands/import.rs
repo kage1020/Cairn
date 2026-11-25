@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::file_identity::same_file;
 use cairn_lang_formats::import::{ImportFormat, import_raw};
 
 use crate::report::report_diagnostics;
@@ -19,7 +20,7 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
         return ExitCode::from(2);
     };
     let out = out.map_or_else(|| default_out(file), Path::to_path_buf);
-    if names_one_file(file, &out) {
+    if same_file(file, &out) {
         eprintln!(
             "error: `--out {}` names the file being imported",
             out.display()
@@ -67,14 +68,6 @@ fn default_out(file: &Path) -> PathBuf {
         .file_stem()
         .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
     file.with_file_name(format!("{stem}.raw.crn"))
-}
-
-/// Whether `file` and `out` are one file on disk.
-fn names_one_file(file: &Path, out: &Path) -> bool {
-    match (std::fs::canonicalize(file), std::fs::canonicalize(out)) {
-        (Ok(file), Ok(out)) => file == out,
-        _ => false,
-    }
 }
 
 /// Write `source` to `out` whole or not at all, creating the directory it is in.

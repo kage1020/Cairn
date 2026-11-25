@@ -1,5 +1,6 @@
 //! Helpers the test modules share: running the binary, the examples, and temp directories.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -118,6 +119,22 @@ pub fn folds_case(dir: &Path) -> bool {
     };
     fs::remove_file(dir.join("case-oracle")).expect("remove the lower-case spelling");
     folds
+}
+
+/// Every regular file directly in `dir`, keyed by name, or none when `dir` cannot be read.
+pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_file() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            out.insert(name, fs::read(&path).expect("read artifact"));
+        }
+    }
+    out
 }
 
 /// Write `source` to `dir/name` and return the path.

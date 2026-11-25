@@ -1,7 +1,6 @@
 //! A failed `cairn compile` leaves the previous build exactly as it was, and a refused one writes
 //! nothing. Each failure is forced by a directory planted where a file has to go.
 
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -11,24 +10,8 @@ use tempfile::TempDir;
 use crate::check::parity::all_fixtures;
 use crate::common::{
     Fixture, assert_stream, cargo_bin, compile, compile_as, examples_dir, folds_case, nbt_body,
-    stderr_of,
+    snapshot, stderr_of,
 };
-
-/// Every regular file under `dir`, keyed by name.
-fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
-    let mut out = BTreeMap::new();
-    let Ok(entries) = fs::read_dir(dir) else {
-        return out;
-    };
-    for entry in entries.filter_map(Result::ok) {
-        let path = entry.path();
-        if path.is_file() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            out.insert(name, fs::read(&path).expect("read artifact"));
-        }
-    }
-    out
-}
 
 struct Build {
     _tmp: TempDir,

@@ -15,7 +15,11 @@ fn long_help_states_each_subcommands_exit_codes() {
              with exit 2",
         ),
         ("lower", "and 2 when the file cannot be located"),
-        ("compile", "and 2 when the source file cannot be located"),
+        (
+            "compile",
+            "and 2 when the source file cannot be located, `--structure-format` is given with \
+             `--edition bedrock`, or `--lock` names the source",
+        ),
         ("import", "and 2 when the file cannot be located"),
         (
             "install",

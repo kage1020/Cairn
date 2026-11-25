@@ -9,7 +9,7 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::lowering::BuildRefusal;
 use cairn_lang_formats::build::run_level::floor_refusal_message;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::info::default_lock_path;
+use cairn_lang_formats::info::{LockPathRefusal, default_lock_path, lock_path_refusal};
 
 use crate::artifacts::{
     Backend, PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
@@ -35,6 +35,12 @@ pub(crate) fn run_compile(
              `.mcstructure`"
         );
         eprintln!("  note: drop `--structure-format`, or compile with `--edition java`");
+        return ExitCode::from(2);
+    }
+    if let Some(lock) = lock
+        && let Some(refusal) = lock_path_refusal(file, lock)
+    {
+        report_lock_path_refusal(file, lock, refusal);
         return ExitCode::from(2);
     }
     let structure_format = structure_format.unwrap_or_default();
@@ -78,6 +84,21 @@ pub(crate) fn run_compile(
         &out_dir,
         &lock_path,
     )
+}
+
+/// Say why `--lock lock` cannot be the lockfile of `file`, and which paths it can be.
+fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) {
+    match refusal {
+        LockPathRefusal::Source => eprintln!(
+            "error: `--lock {}` names `{}`, the source being compiled",
+            lock.display(),
+            file.display(),
+        ),
+    }
+    eprintln!(
+        "  note: give `--lock` a `.lock` path, or leave it out to write `{}`",
+        default_lock_path(file).display(),
+    );
 }
 
 /// Check every structure, then write them all and the lockfile.

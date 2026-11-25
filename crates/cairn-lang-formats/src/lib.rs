@@ -15,6 +15,7 @@ pub mod build;
 pub mod data_version;
 pub mod diff_blocks;
 mod dims;
+pub mod file_identity;
 pub mod import;
 pub mod info;
 pub mod java_structure;
