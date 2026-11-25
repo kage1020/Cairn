@@ -1,7 +1,6 @@
 //! `spec/redstone` "Place-and-route": where each sensor's signal enters the circuit under the base
 //! plane, where each actuator's leaves it, and which columns the top layer may wire under.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 
 use cairn_lang_core::block_array::{
@@ -154,7 +153,7 @@ struct Component<'a> {
     named: String,
 }
 
-/// What the floor row holds under a component at `y = 1`.
+/// What the floor row holds under a cell of the row over it.
 #[derive(Debug, Clone, Copy)]
 enum Floor<'a> {
     Air,
@@ -257,8 +256,8 @@ pub(crate) fn couple(
     (coupled, diagnostics)
 }
 
-/// The riser column `(x, z)` of `component`, or why it cannot drive the component and the lines of
-/// the other components beside the block it powers.
+/// The riser column `(x, z)` of `component`, or, when the block the riser powers touches other
+/// components it would drive too, why and their lines.
 fn unshared<'a>(
     component: &Component<'_>,
     (x, z): (u32, u32),
@@ -413,31 +412,23 @@ fn component<'a>(
 
 /// Why a component cannot reach the circuit, and how to move it so it does.
 struct Unreachable<'a> {
-    reason: Cow<'static, str>,
+    reason: Reason<'a>,
     fix: &'static str,
-    /// The block under it that passes no power, and its cell.
-    insulated_by: Option<(&'a BlockState, Cell)>,
 }
 
-impl<'a> Unreachable<'a> {
+/// Why a component cannot reach the circuit.
+enum Reason<'a> {
+    /// A reason worded the same for every component it holds of.
+    Fixed(&'static str),
+    /// The floor block `block` at `cell` under it passes no power.
+    Insulated { block: &'a BlockState, cell: Cell },
+}
+
+impl Unreachable<'_> {
     fn new(reason: &'static str, fix: &'static str) -> Self {
         Self {
-            reason: Cow::Borrowed(reason),
+            reason: Reason::Fixed(reason),
             fix,
-            insulated_by: None,
-        }
-    }
-
-    /// The finding of a component met over the floor block `block` at `cell`, which passes no power.
-    fn insulated(block: &'a BlockState, cell: Cell, fix: &'static str) -> Self {
-        Self {
-            reason: Cow::Owned(format!(
-                "the floor block under it, `{}`, passes no power between it and the layer under \
-                 the floor",
-                block_named(block),
-            )),
-            fix,
-            insulated_by: Some((block, cell)),
         }
     }
 }
@@ -457,8 +448,8 @@ fn pad_for<'a>(
     floor: impl Fn(Cell) -> Floor<'a>,
 ) -> Result<(PadKind, (u32, u32)), Unreachable<'a>> {
     let (x, y, z) = sensor.cell;
-    let under = if y == 1 { floor((x, 0, z)) } else { Floor::Air };
-    let on_floor = !matches!(under, Floor::Air);
+    let under = (y == 1).then(|| floor((x, 0, z)));
+    let on_floor = matches!(under, Some(Floor::Passes | Floor::Insulates(_)));
     let kind = match sensor.keyword {
         "pressure_plate" if y == 0 => PadKind::Block,
         "pressure_plate" if on_floor => PadKind::Dust,
@@ -490,8 +481,14 @@ fn pad_for<'a>(
             ));
         }
     };
-    if let Floor::Insulates(block) = under {
-        return Err(Unreachable::insulated(block, (x, 0, z), FIX_OVER_INSULATOR));
+    if let Some(Floor::Insulates(block)) = under {
+        return Err(Unreachable {
+            reason: Reason::Insulated {
+                block,
+                cell: (x, 0, z),
+            },
+            fix: FIX_OVER_INSULATOR,
+        });
     }
     Ok((kind, (x, z)))
 }
@@ -512,8 +509,8 @@ fn riser_for<'a>(
             "turn the piston with another `facing=`",
         ));
     }
-    let under = if y == 1 { floor((x, 0, z)) } else { Floor::Air };
-    let on_floor = !matches!(under, Floor::Air);
+    let under = (y == 1).then(|| floor((x, 0, z)));
+    let on_floor = matches!(under, Some(Floor::Passes | Floor::Insulates(_)));
     let door = actuator.keyword == "door";
     if door && !on_floor {
         return Err(Unreachable::new(
@@ -527,13 +524,18 @@ fn riser_for<'a>(
             "set `y=0` on it, or `y=1` over a floor block that passes power",
         ));
     }
-    if let Floor::Insulates(block) = under {
-        let fix = if door {
-            "build the floor under the door of a block that passes power, such as `@stone`"
-        } else {
-            FIX_OVER_INSULATOR
-        };
-        return Err(Unreachable::insulated(block, (x, 0, z), fix));
+    if let Some(Floor::Insulates(block)) = under {
+        return Err(Unreachable {
+            reason: Reason::Insulated {
+                block,
+                cell: (x, 0, z),
+            },
+            fix: if door {
+                "build the floor under the door of a block that passes power, such as `@stone`"
+            } else {
+                FIX_OVER_INSULATOR
+            },
+        });
     }
     Ok((x, z))
 }
@@ -547,6 +549,14 @@ fn unreachable(
     resolved: &[ResolvedMember],
     sharing: &[&Span],
 ) -> Diagnostic {
+    let reason = match why.reason {
+        Reason::Fixed(reason) => reason.to_owned(),
+        Reason::Insulated { block, .. } => format!(
+            "the floor block under it, `{}`, passes no power between it and the layer under the \
+             floor",
+            block_named(block),
+        ),
+    };
     let mut diagnostic = Diagnostic::new(
         DiagnosticCode::RouteUnreachableComponent,
         component.span.clone(),
@@ -554,10 +564,9 @@ fn unreachable(
             "{scope} {named} at y={y} cannot reach the circuit under the floor: {reason}",
             named = component.named,
             y = component.cell.1,
-            reason = why.reason,
         ),
     );
-    if let Some((block, cell)) = why.insulated_by
+    if let Reason::Insulated { block, cell } = why.reason
         && let Some(layer) = laid_by(resolved, block, cell)
     {
         diagnostic = diagnostic.with_note(
