@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
 use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
 use cairn_lang_formats::data_version::{JavaTarget, ResolvedTarget};
-use cairn_lang_formats::file_identity::FileIdentity;
+use cairn_lang_formats::file_identity::{FileIdentity, NamedFile, Reach, Unidentified};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
@@ -364,19 +364,40 @@ pub(crate) fn check_source_is_left_alone(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,
 ) -> Result<(), ExitCode> {
-    // A source that reaches no file any more is one no write can reach either.
-    let Ok(source) = FileIdentity::of(file) else {
-        return Ok(());
+    let source = match NamedFile::at(file) {
+        Ok(Some(source)) => source,
+        // A source no longer there is one no write can reach.
+        Ok(None) => return Ok(()),
+        Err(unidentified) => {
+            report_unidentified(
+                "this build's files",
+                file,
+                &unidentified,
+                ", then compile again",
+            );
+            return Err(ExitCode::from(1));
+        }
     };
     let artifacts = prepared
         .iter()
         .map(|(path, _)| (staging::Kind::Artifact, path.as_path()));
     for (kind, output) in artifacts.chain([(staging::Kind::Lockfile, lock_path)]) {
-        let Some(reaching) = WritePath::reaching(&source, output) else {
-            continue;
+        let shown = output.display();
+        let elsewhere = match kind {
+            staging::Kind::Lockfile => "give `--lock` a `.lock` path elsewhere",
+            _ => "compile with `--out` naming another directory",
         };
-        let (shown, file) = (output.display(), file.display());
-        match reaching {
+        let reached = match WritePath::reaching(&source, output) {
+            Ok(None) => continue,
+            Ok(Some(reached)) => reached,
+            Err(unidentified) => {
+                let what = format!("{kind} `{shown}`");
+                report_unidentified(&what, file, &unidentified, &format!(", or {elsewhere}"));
+                return Err(ExitCode::from(1));
+            }
+        };
+        let file = file.display();
+        match reached.path {
             WritePath::Final => {
                 eprintln!("error: {kind} `{shown}` names `{file}`, the source being compiled");
             }
@@ -386,18 +407,33 @@ pub(crate) fn check_source_is_left_alone(
                 scratch.of(output).display(),
             ),
         }
-        if kind == staging::Kind::Lockfile {
-            // `--lock` reaching the source is refused before reading, so only a link gets here.
-            eprintln!("  note: a link makes them one file; give `--lock` a `.lock` path elsewhere");
-        } else {
-            eprintln!(
-                "  note: compile with `--out` naming another directory, or give the source a \
-                 name ending in `.crn`"
-            );
+        // A `--lock` reaching the source is refused before reading, and `<source>.lock` is named
+        // apart from it, so a lockfile gets here only through a link.
+        match (kind, reached.by) {
+            (staging::Kind::Lockfile, _) | (_, Reach::Link) => {
+                eprintln!("  note: a link makes them one file; {elsewhere}");
+            }
+            (_, Reach::Name) => {
+                eprintln!("  note: {elsewhere}, or give the source a name ending in `.crn`");
+            }
         }
         return Err(ExitCode::from(1));
     }
     Ok(())
+}
+
+/// Say that the file system cannot tell `unidentified`'s path, one `what` is written through, from
+/// the source `file`, and that the path should be readable, with `fix` after.
+pub(crate) fn report_unidentified(what: &str, file: &Path, unidentified: &Unidentified, fix: &str) {
+    eprintln!(
+        "error: cannot tell whether {what} would be written over `{}`, the source being \
+         compiled: {unidentified}",
+        file.display(),
+    );
+    eprintln!(
+        "  note: check that `{}` can be read{fix}",
+        unidentified.path.display()
+    );
 }
 
 /// Refuse a `--lock` that would land on a path the artifacts already own, scratch names included.

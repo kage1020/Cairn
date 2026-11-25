@@ -18,8 +18,8 @@ fn long_help_states_each_subcommands_exit_codes() {
         (
             "compile",
             "and 2 when the source file cannot be located, `--structure-format` is given with \
-             `--edition bedrock`, or `--lock` names a `.crn`, or it or a scratch file beside it \
-             names the source",
+             `--edition bedrock`, or `--lock` ends in `.crn` or reaches the source, itself or \
+             through its `.tmp` or `.bak` scratch path",
         ),
         ("import", "and 2 when the file cannot be located"),
         (

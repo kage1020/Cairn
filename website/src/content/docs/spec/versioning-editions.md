@@ -1201,12 +1201,13 @@ A note promises only what a compile does. A compile writes a missing lock, so th
 compile, unless the path's directory does not exist, which the note then says instead. A compile
 replaces a document the schema refuses, so that note names the compile too. A file that cannot be
 read, such as a directory at the path, can stop the compile from writing there as well, so that
-note names the cause alone. A compile refuses a lock one of whose paths names the source, and a
-`--lock` that names a `.crn` ([§10.6](#106-provenance-and-lock)), rather than write or replace
-anything there, so no note names a compile for such a path: each says what it says of the lock and
-stops there, and one more note says why the compile refuses the path and gives the fix. For a
-`--lock`, that is a `.lock` path, or no `--lock`, which reads `<source>.lock`. For
-`<source>.lock`, whose paths name the source only through a link, it is a `.lock` path elsewhere.
+note names the cause alone. A compile refuses a lock one of whose paths names the source, a
+`--lock` whose file name ends in `.crn`, and a lock path the file system cannot tell from the source
+([§10.6](#106-provenance-and-lock)), rather than write or replace anything there, so no note names a
+compile for such a path: each says what it says of the lock and stops there, and one more note says
+why the compile refuses the path and gives the fix the compile's own refusal gives. For a `--lock`,
+it also offers leaving the flag out to read `<source>.lock`, unless the compile refuses that path
+too.
 
 None of them refuses the command. A lock is the record of an earlier build rather than an input to
 this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
@@ -1296,7 +1297,9 @@ A compile never writes over the source it compiles. No path it writes a file thr
 own or either scratch path, may name the source, and every path that reaches the source's file
 names it: relative or absolute, through a symbolic link or a hard link, or spelled in another case
 where the directory folds case. The file system says which file a path reaches, by its device and
-inode, or on Windows by its volume and file index, so every link to one file is that file.
+inode, or on Windows by its volume and file index, so every link to one file is that file. A path
+names the source by name when it is the source's own entry in the source's directory, however it is
+spelled, and through a link when it is another entry for the same file.
 
 A `--lock` one of whose paths names the source, such as the source itself, or `notes` when the
 source is `notes.tmp`, is a usage error, exit 2, refused before the source is read. Where each
@@ -1304,6 +1307,20 @@ artifact goes is known only once the source is lowered, so an artifact one of wh
 source, such as `hut.nbt` when the source is `hut.nbt` and builds `struct hut`, is refused then,
 exit 1, as is `<source>.lock` when a link makes one of its paths the source. Either way the
 compile writes no artifact and no lock, and the source is left as it was.
+
+A path that reaches nothing, because a component is missing or is a file, does not name the source.
+One the file system cannot answer for, such as a loop of symbolic links or a file it refuses to
+open, is never taken for another file: the compile is refused with exit 1 where a path naming the
+source would be, before the source is read for a `--lock` and once it is lowered for an artifact or
+`<source>.lock`, and the refusal names the path and the file system's answer.
+
+Each refusal's note gives a fix that works for the way the path names the source. A path that names
+it by name takes another name: a `.lock` path for a `--lock`, and for an artifact an `--out` naming
+another directory, or a source name ending in `.crn`, which no artifact has. A path a link makes the
+source has such a name already, so its note says that a link makes them one file and gives a path
+elsewhere: a `.lock` path elsewhere for a lock, an `--out` naming another directory for an artifact.
+A note under a `--lock` offers leaving the flag out only when the compile would write
+`<source>.lock`.
 
 A `--lock` whose file name ends in `.crn`, in any case, is the same usage error, exit 2 before the
 source is read, whatever file it names or none: a lock is never a source, and `other.crn` is most

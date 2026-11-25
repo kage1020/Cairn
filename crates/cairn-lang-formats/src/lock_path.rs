@@ -1,10 +1,11 @@
 //! Where `cairn compile` writes a source's lock, and the paths it refuses to write it at
 //! (`spec/versioning-editions` "Provenance and lock").
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
-use crate::file_identity::FileIdentity;
-use crate::write_path::WritePath;
+use crate::file_identity::{NamedFile, Unidentified};
+use crate::write_path::{Reached, WritePath};
 
 /// `<source>.lock`, keeping `.crn` so no two sources share a lock.
 #[must_use]
@@ -17,41 +18,57 @@ pub fn default_lock_path(source: &Path) -> PathBuf {
 /// Why `cairn compile` refuses a `--lock` path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LockPathRefusal {
-    /// The lock would be written through this path, which reaches the source's file.
-    Source(WritePath),
+    /// The lock would be written through a path that reaches the source's file.
+    Source(Reached),
     /// The path's file name ends in `.crn`, as a source's does.
     SourceName,
 }
 
 /// Why `cairn compile` refuses `--lock lock` for `source`, or `None` when it writes there.
-#[must_use]
-pub fn lock_path_refusal(source: &Path, lock: &Path) -> Option<LockPathRefusal> {
-    if let Some(path) = reaching_source(source, lock) {
-        return Some(LockPathRefusal::Source(path));
+///
+/// # Errors
+///
+/// An [`Unidentified`] when the file system cannot say whether a path the lock is written through
+/// reaches the source.
+pub fn lock_path_refusal(
+    source: &Path,
+    lock: &Path,
+) -> Result<Option<LockPathRefusal>, Unidentified> {
+    if let Some(reached) = reaching_source(source, lock)? {
+        return Ok(Some(LockPathRefusal::Source(reached)));
     }
-    lock.file_name()
-        .is_some_and(|name| {
-            name.to_string_lossy()
-                .to_ascii_lowercase()
-                .ends_with(".crn")
-        })
-        .then_some(LockPathRefusal::SourceName)
+    Ok(lock
+        .file_name()
+        .is_some_and(names_a_source)
+        .then_some(LockPathRefusal::SourceName))
 }
 
 /// The path through which `cairn compile` would write `<source>.lock` over the source, or `None`
 /// when it writes there.
-#[must_use]
-pub fn default_lock_refusal(source: &Path) -> Option<WritePath> {
+///
+/// # Errors
+///
+/// An [`Unidentified`] when the file system cannot say whether one of those paths reaches the
+/// source.
+pub fn default_lock_refusal(source: &Path) -> Result<Option<WritePath>, Unidentified> {
     // Every path `<source>.lock` is written through is named apart from the source, so only a
     // link makes one of them the source.
-    reaching_source(source, &default_lock_path(source))
+    Ok(reaching_source(source, &default_lock_path(source))?.map(|reached| reached.path))
+}
+
+/// Whether a file `name` ends in `.crn`, in any case.
+fn names_a_source(name: &OsStr) -> bool {
+    name.to_string_lossy()
+        .to_ascii_lowercase()
+        .ends_with(".crn")
 }
 
 /// The first path a lock at `lock` is written through that reaches `source`'s file.
-fn reaching_source(source: &Path, lock: &Path) -> Option<WritePath> {
-    FileIdentity::of(source)
-        .ok()
-        .and_then(|source| WritePath::reaching(&source, lock))
+fn reaching_source(source: &Path, lock: &Path) -> Result<Option<Reached>, Unidentified> {
+    match NamedFile::at(source)? {
+        Some(source) => WritePath::reaching(&source, lock),
+        None => Ok(None),
+    }
 }
 
 #[cfg(test)]

@@ -280,29 +280,6 @@ fn a_lock_flag_whose_scratch_file_is_the_source_gives_the_fix_rather_than_a_comp
 }
 
 #[test]
-fn a_default_lock_linked_to_the_source_gives_the_fix_rather_than_a_compile() {
-    let (dir, file) = hut_on_disk();
-    let scratch = dir.path().join("hut.crn.lock.tmp");
-    std::fs::hard_link(&file, &scratch).expect("hard link");
-
-    let (document, sent) = run_on_disk(&file, None);
-
-    assert_eq!(document.verified_target.reading, LockReading::Missing);
-    let (file, scratch) = (file.display(), scratch.display());
-    assert_eq!(
-        sent,
-        [
-            format!("note: no lockfile at {file}.lock, so no target is verified"),
-            format!(
-                "note: `cairn compile` refuses to write {file}.lock, whose scratch file {scratch} \
-                 names {file}, the source; a link makes them one file, so give `--lock` a `.lock` \
-                 path elsewhere"
-            ),
-        ],
-    );
-}
-
-#[test]
 fn a_lock_flag_naming_the_source_gives_the_fix_rather_than_a_compile() {
     let (_dir, file) = hut_on_disk();
 
@@ -380,6 +357,93 @@ fn a_lock_flag_ending_in_crn_gives_the_fix_rather_than_a_compile() {
                 lock.display(),
             ),
             fix,
+        ],
+    );
+}
+
+#[test]
+fn a_default_lock_linked_to_the_source_gives_the_link_fix_rather_than_a_compile() {
+    let (dir, file) = hut_on_disk();
+    let scratch = dir.path().join("hut.crn.lock.tmp");
+    std::fs::hard_link(&file, &scratch).expect("hard link");
+
+    let (document, sent) = run_on_disk(&file, None);
+
+    assert_eq!(document.verified_target.reading, LockReading::Missing);
+    let (file, scratch) = (file.display(), scratch.display());
+    assert_eq!(
+        sent,
+        [
+            format!("note: no lockfile at {file}.lock, so no target is verified"),
+            format!(
+                "note: `cairn compile` refuses to write {file}.lock, whose scratch file {scratch} \
+                 names {file}, the source; a link makes them one file, so give `--lock` a `.lock` \
+                 path elsewhere"
+            ),
+        ],
+    );
+}
+
+#[test]
+fn a_lock_flag_linked_to_the_source_gives_the_link_fix_and_offers_the_default_only_when_free() {
+    let (dir, file) = hut_on_disk();
+    let hard = dir.path().join("hard.lock");
+    std::fs::hard_link(&file, &hard).expect("hard link");
+    let refused = |lock: &Path, leave_out: &str| {
+        let (document, sent) = run_at(&file, lock);
+        let LockReading::Unreadable {
+            kind: UnreadableKind::Invalid,
+            error,
+        } = &document.verified_target.reading
+        else {
+            panic!("the source is no lock: {:?}", document.verified_target);
+        };
+        let (shown, file) = (lock.display(), file.display());
+        assert_eq!(
+            sent,
+            [
+                format!("note: {shown}: the lockfile could not be read ({error})"),
+                format!(
+                    "note: `cairn compile` refuses `--lock {shown}`, which names {file}, the \
+                     source; a link makes them one file, so give `--lock` a `.lock` path \
+                     elsewhere{leave_out}"
+                ),
+            ],
+            "--lock {shown}",
+        );
+    };
+
+    refused(
+        &hard,
+        &format!(", or leave it out to read {}.lock", file.display()),
+    );
+    let default = default_lock_path(&file);
+    std::fs::hard_link(&file, &default).expect("hard link");
+    refused(&default, "");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lock_path_the_file_system_cannot_answer_for_names_no_compile() {
+    let (dir, file) = hut_on_disk();
+    let lock = dir.path().join("notes");
+    let looped = dir.path().join("notes.tmp");
+    std::os::unix::fs::symlink(&looped, &looped).expect("symlink to itself");
+    let error = std::fs::metadata(&looped).expect_err("a loop reaches no file");
+
+    let (document, sent) = run_at(&file, &lock);
+
+    assert_eq!(document.verified_target.reading, LockReading::Missing);
+    let (file, lock, looped) = (file.display(), lock.display(), looped.display());
+    assert_eq!(
+        sent,
+        [
+            format!("note: no lockfile at {lock}, so no target is verified"),
+            format!(
+                "note: `cairn compile` refuses to write {lock}, since it cannot tell {looped} \
+                 from {file}, the source ({error}); check that {looped} can be read, or give \
+                 `--lock` a `.lock` path elsewhere"
+            ),
         ],
     );
 }

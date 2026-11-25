@@ -140,10 +140,10 @@ implementations and authors SHOULD use these exact spellings. The vocabulary is 
   verification record, since the record lives in the lock. Still weighed against the file's own
   floor: an intent the floor refuses is reported rather than left to be discovered at compile time.
 - **Lock (`*.crn.lock`).** Compiler-generated reproducibility record, written next to the source
-  as `<source>.lock` (`cottage.crn.lock`) unless `--lock` names another path, which may be neither
-  the source nor a `.crn`. Carries `lock_schema_version`, `source_hash`, `cairn_version`, `target`
-  (`edition`, `mc_version`, `data_version`), `inputs` (`registry_pack_hash`,
-  `constraint_catalog_hash`), `resolved_ir_hash`, `verified: true` and
+  as `<source>.lock` (`cottage.crn.lock`) unless `--lock` names another path, which may neither
+  reach the source nor have a file name ending in `.crn`. Carries `lock_schema_version`,
+  `source_hash`, `cairn_version`, `target` (`edition`, `mc_version`, `data_version`), `inputs`
+  (`registry_pack_hash`, `constraint_catalog_hash`), `resolved_ir_hash`, `verified: true` and
   `member_version_sensitivity`, plus `placements` and `walkways` for a source with a `site`.
   `cairn info` reports the target a lock records as its `verified target` row. See
   [versioning-editions §10.6](/spec/versioning-editions/#106-provenance-and-lock).

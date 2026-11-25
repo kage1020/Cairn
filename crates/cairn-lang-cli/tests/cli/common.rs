@@ -148,6 +148,57 @@ pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     out
 }
 
+/// A directory holding [`HUT`] under each of `names`, in its subdirectory `sub`.
+pub fn sources_in(sub: &str, names: &[&str]) -> TempDir {
+    let dir = TempDir::new().expect("tempdir");
+    fs::create_dir(dir.path().join(sub)).expect("make the source directory");
+    for name in names {
+        fs::write(dir.path().join(sub).join(name), HUT).expect("write source");
+    }
+    dir
+}
+
+/// `cairn compile <source> --edition java <flags>`, run from `dir` with each path as spelled.
+pub fn compile_in(dir: &Path, source: &str, flags: &[&str]) -> Run {
+    Run::from(
+        Command::new(cargo_bin())
+            .current_dir(dir)
+            .args(["compile", source, "--edition", "java"])
+            .args(flags)
+            .output()
+            .expect("run cairn"),
+    )
+}
+
+/// Assert that [`compile_in`] exits `code` with `stderr` alone, leaving every file in `dir/sub`
+/// for each of `subs` as it was, and the source byte for byte as it was.
+pub fn assert_compile_refused(
+    dir: &Path,
+    source: &str,
+    flags: &[&str],
+    code: i32,
+    stderr: &str,
+    subs: &[&str],
+) {
+    let before: Vec<_> = subs.iter().map(|sub| snapshot(&dir.join(sub))).collect();
+    let text = fs::read(dir.join(source)).expect("read source");
+
+    let run = compile_in(dir, source, flags);
+
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(code), "", stderr),
+        "{source} {flags:?}",
+    );
+    let after: Vec<_> = subs.iter().map(|sub| snapshot(&dir.join(sub))).collect();
+    assert_eq!(after, before, "{source} {flags:?}");
+    assert_eq!(
+        fs::read(dir.join(source)).expect("read source"),
+        text,
+        "{source} {flags:?}"
+    );
+}
+
 /// Write `source` to `dir/name` and return the path.
 pub fn write_source(dir: &Path, name: &str, source: &str) -> PathBuf {
     let path = dir.join(name);

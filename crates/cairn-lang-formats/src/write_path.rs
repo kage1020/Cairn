@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::file_identity::FileIdentity;
+use crate::file_identity::{NamedFile, Reach, Unidentified};
 
 /// One of the paths a file is written through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,18 +40,33 @@ impl Scratch {
     }
 }
 
+/// One of the paths a file is written through that reaches another file, and how it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reached {
+    /// The path that reaches the file.
+    pub path: WritePath,
+    /// Whether it reaches the file by name or through a link.
+    pub by: Reach,
+}
+
 impl WritePath {
     /// The first path the file at `final_path` is written through that reaches `file`, its own
-    /// path first.
-    #[must_use]
-    pub fn reaching(file: &FileIdentity, final_path: &Path) -> Option<Self> {
+    /// path first, and how.
+    ///
+    /// # Errors
+    ///
+    /// An [`Unidentified`] when the file system cannot say what one of those paths reaches.
+    pub fn reaching(file: &NamedFile, final_path: &Path) -> Result<Option<Reached>, Unidentified> {
         let scratch = Scratch::ALL.map(|scratch| (Self::Scratch(scratch), scratch.of(final_path)));
-        // An error asking of a path means no file is there, or one a write would fail at as well.
-        [(Self::Final, final_path.to_path_buf())]
+        for (path, at) in [(Self::Final, final_path.to_path_buf())]
             .into_iter()
             .chain(scratch)
-            .find(|(_, at)| FileIdentity::of(at).is_ok_and(|reached| reached == *file))
-            .map(|(path, _)| path)
+        {
+            if let Some(by) = file.reached_by(&at)? {
+                return Ok(Some(Reached { path, by }));
+            }
+        }
+        Ok(None)
     }
 }
 
@@ -98,21 +113,46 @@ mod tests {
             std::fs::write(dir.path().join(name), "").expect("write file");
         }
         let reached = |file: &str, final_path: &str| {
-            let file = FileIdentity::of(&dir.path().join(file)).expect("identity");
-            WritePath::reaching(&file, &dir.path().join(final_path))
+            let file = NamedFile::at(&dir.path().join(file))
+                .expect("identified")
+                .expect("there");
+            WritePath::reaching(&file, &dir.path().join(final_path)).expect("identified")
+        };
+        let by_name = |path| {
+            Some(Reached {
+                path,
+                by: Reach::Name,
+            })
         };
 
-        assert_eq!(reached("hut.nbt", "hut.nbt"), Some(WritePath::Final));
+        assert_eq!(reached("hut.nbt", "hut.nbt"), by_name(WritePath::Final));
         assert_eq!(
             reached("notes.tmp", "notes"),
-            Some(WritePath::Scratch(Scratch::Staged))
+            by_name(WritePath::Scratch(Scratch::Staged))
         );
         assert_eq!(
             reached("notes.bak", "notes"),
-            Some(WritePath::Scratch(Scratch::Backup))
+            by_name(WritePath::Scratch(Scratch::Backup))
         );
-        assert_eq!(reached("hut.nbt", "./hut.nbt"), Some(WritePath::Final));
+        assert_eq!(reached("hut.nbt", "./hut.nbt"), by_name(WritePath::Final));
         assert_eq!(reached("hut.nbt", "hut"), None);
-        assert_eq!(reached("notes.tmp", "notes.tmp"), Some(WritePath::Final));
+        assert_eq!(reached("notes.tmp", "notes.tmp"), by_name(WritePath::Final));
+    }
+
+    #[test]
+    fn a_scratch_path_linked_to_a_file_reaches_it_through_the_link() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("hut.crn");
+        std::fs::write(&source, "").expect("write file");
+        std::fs::hard_link(&source, dir.path().join("hut.nbt.tmp")).expect("hard link");
+        let source = NamedFile::at(&source).expect("identified").expect("there");
+
+        assert_eq!(
+            WritePath::reaching(&source, &dir.path().join("hut.nbt")).expect("identified"),
+            Some(Reached {
+                path: WritePath::Scratch(Scratch::Staged),
+                by: Reach::Link,
+            }),
+        );
     }
 }

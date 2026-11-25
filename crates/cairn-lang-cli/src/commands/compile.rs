@@ -9,12 +9,15 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::lowering::BuildRefusal;
 use cairn_lang_formats::build::run_level::floor_refusal_message;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::lock_path::{LockPathRefusal, default_lock_path, lock_path_refusal};
+use cairn_lang_formats::file_identity::Reach;
+use cairn_lang_formats::lock_path::{
+    LockPathRefusal, default_lock_path, default_lock_refusal, lock_path_refusal,
+};
 use cairn_lang_formats::write_path::WritePath;
 
 use crate::artifacts::{
     Backend, PrepareRefusal, check_lock_path_is_free, check_source_is_left_alone,
-    prepare_artifacts, prepare_out_dir, write_artifacts_and_lock,
+    prepare_artifacts, prepare_out_dir, report_unidentified, write_artifacts_and_lock,
 };
 use crate::cli::StructureFormat;
 use crate::lockfile::{report_previous_target, sensitive_members};
@@ -38,11 +41,23 @@ pub(crate) fn run_compile(
         eprintln!("  note: drop `--structure-format`, or compile with `--edition java`");
         return ExitCode::from(2);
     }
-    if let Some(lock) = lock
-        && let Some(refusal) = lock_path_refusal(file, lock)
-    {
-        report_lock_path_refusal(file, lock, refusal);
-        return ExitCode::from(2);
+    if let Some(lock) = lock {
+        match lock_path_refusal(file, lock) {
+            Ok(None) => {}
+            Ok(Some(refusal)) => {
+                report_lock_path_refusal(file, lock, refusal);
+                return ExitCode::from(2);
+            }
+            Err(unidentified) => {
+                report_unidentified(
+                    &format!("lockfile `{}`", lock.display()),
+                    file,
+                    &unidentified,
+                    ", or give `--lock` a `.lock` path elsewhere",
+                );
+                return ExitCode::from(1);
+            }
+        }
     }
     let structure_format = structure_format.unwrap_or_default();
     // Resolved before lowering, which checks ids against it, but reported after the source's
@@ -90,31 +105,46 @@ pub(crate) fn run_compile(
 /// Say why `--lock lock` cannot be the lockfile of `file`, and which paths it can be.
 fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) {
     let (shown, source) = (lock.display(), file.display());
-    let instead = match refusal {
-        LockPathRefusal::Source(WritePath::Final) => {
-            eprintln!("error: `--lock {shown}` names `{source}`, the source being compiled");
-            String::new()
-        }
-        LockPathRefusal::Source(WritePath::Scratch(scratch)) => {
-            eprintln!(
-                "error: `--lock {shown}` would put its scratch file `{}` over `{source}`, the \
-                 source being compiled",
-                scratch.of(lock).display(),
-            );
-            String::new()
+    let fix = match refusal {
+        LockPathRefusal::Source(reached) => {
+            match reached.path {
+                WritePath::Final => {
+                    eprintln!(
+                        "error: `--lock {shown}` names `{source}`, the source being compiled"
+                    );
+                }
+                WritePath::Scratch(scratch) => eprintln!(
+                    "error: `--lock {shown}` would put its scratch file `{}` over `{source}`, the \
+                     source being compiled",
+                    scratch.of(lock).display(),
+                ),
+            }
+            match reached.by {
+                Reach::Name => "give `--lock` a `.lock` path".to_owned(),
+                Reach::Link => {
+                    "a link makes them one file; give `--lock` a `.lock` path elsewhere".to_owned()
+                }
+            }
         }
         LockPathRefusal::SourceName => {
             eprintln!(
                 "error: `--lock {shown}` names a `.crn` file, and a lockfile is never a Cairn \
                  source"
             );
-            format!(", such as `{}`", default_lock_path(lock).display())
+            format!(
+                "give `--lock` a `.lock` path, such as `{}`",
+                default_lock_path(lock).display(),
+            )
         }
     };
-    eprintln!(
-        "  note: give `--lock` a `.lock` path{instead}, or leave it out to write `{}`",
-        default_lock_path(file).display(),
-    );
+    let leave_out = match default_lock_refusal(file) {
+        Ok(None) => format!(
+            ", or leave it out to write `{}`",
+            default_lock_path(file).display()
+        ),
+        Ok(Some(_)) | Err(_) => String::new(),
+    };
+    eprintln!("  note: {fix}{leave_out}");
 }
 
 /// Check every structure, then write them all and the lockfile of `file`.
