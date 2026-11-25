@@ -8,10 +8,7 @@ use std::process::Command;
 
 use tempfile::TempDir;
 
-use crate::common::{Run, cargo_bin, folds_case, snapshot};
-
-const HUT: &str = "@cairn 2026.06\n\ntheme t:\n  slot w -> @stone\n\nstruct hut size=3x3\n  walls \
-                   mat_slot=w height=2\n";
+use crate::common::{HUT, Run, cargo_bin, folds_case, snapshot};
 
 /// `cairn compile <source> --edition java --lock <lock>` from `dir`, both passed as spelled.
 fn compile_from(dir: &Path, source: &str, lock: &str) -> Run {

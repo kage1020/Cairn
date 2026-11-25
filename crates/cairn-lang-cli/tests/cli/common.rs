@@ -17,6 +17,17 @@ pub fn cargo_bin() -> PathBuf {
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 17;
 
+/// One `struct hut` of walls, which builds cleanly on either edition and writes `hut.nbt` on Java.
+pub const HUT: &str = concat!(
+    "@cairn 2026.06\n",
+    "\n",
+    "theme t:\n",
+    "  slot w -> @stone\n",
+    "\n",
+    "struct hut size=3x3\n",
+    "  walls mat_slot=w height=2\n",
+);
+
 /// A lever too high on the wall for the circuit under the floor to read, on either edition: line
 /// 8 is the lever's.
 pub const WALL_LEVER: &str = concat!(

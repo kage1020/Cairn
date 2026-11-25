@@ -9,6 +9,7 @@ mod edition_guard;
 mod edition_theme;
 mod lock_path;
 mod lock_readback;
+mod over_source;
 mod requires_conflict;
 mod respelled;
 mod roof_material;

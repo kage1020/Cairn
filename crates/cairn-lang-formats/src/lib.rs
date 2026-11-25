@@ -30,6 +30,7 @@ pub mod target;
 mod villager;
 pub mod volume;
 pub mod world;
+pub mod write_path;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{

@@ -14,9 +14,10 @@ use cairn_lang_formats::world::{
     StructureFileError, StructureId, StructureIdError, WorldVersion, read_level_dat,
     read_structure_data_version, recompile_target, worlds_in,
 };
+use cairn_lang_formats::write_path::reserved_paths;
 
 use crate::cli::InstallArgs;
-use crate::staging::{Kind, StagedSet, reserved_paths};
+use crate::staging::{Kind, StagedSet};
 
 /// The exit code of a refused file or world.
 const REFUSED: u8 = 1;

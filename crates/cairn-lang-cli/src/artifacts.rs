@@ -13,6 +13,7 @@ use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
 use cairn_lang_formats::target::PreparedStructure;
+use cairn_lang_formats::write_path::{self, WritePath};
 
 use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
@@ -356,6 +357,49 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
     }
 }
 
+/// Refuse a build that would write any of its files through a path reaching the source `file`
+/// (`spec/versioning-editions` "Provenance and lock").
+pub(crate) fn check_source_is_left_alone(
+    file: &Path,
+    prepared: &[(PathBuf, PreparedStructure<'_>)],
+    lock_path: &Path,
+) -> Result<(), ExitCode> {
+    // A source that reaches no file any more is one no write can reach either.
+    let Ok(source) = FileIdentity::of(file) else {
+        return Ok(());
+    };
+    let artifacts = prepared
+        .iter()
+        .map(|(path, _)| (staging::Kind::Artifact, path.as_path()));
+    for (kind, output) in artifacts.chain([(staging::Kind::Lockfile, lock_path)]) {
+        let Some(reaching) = WritePath::reaching(&source, output) else {
+            continue;
+        };
+        let (shown, file) = (output.display(), file.display());
+        match reaching {
+            WritePath::Final => {
+                eprintln!("error: {kind} `{shown}` names `{file}`, the source being compiled");
+            }
+            scratch => eprintln!(
+                "error: {kind} `{shown}` would put its scratch file `{}` over `{file}`, the \
+                 source being compiled",
+                scratch.of(output).display(),
+            ),
+        }
+        if kind == staging::Kind::Lockfile {
+            // `--lock` reaching the source is refused before reading, so only a link gets here.
+            eprintln!("  note: a link makes them one file; give `--lock` a `.lock` path elsewhere");
+        } else {
+            eprintln!(
+                "  note: compile with `--out` naming another directory, or give the source a \
+                 name ending in `.crn`"
+            );
+        }
+        return Err(ExitCode::from(1));
+    }
+    Ok(())
+}
+
 /// Refuse a `--lock` that would land on a path the artifacts already own, scratch names included.
 pub(crate) fn check_lock_path_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
@@ -365,7 +409,7 @@ pub(crate) fn check_lock_path_is_free(
     let mut reserved_paths: std::collections::HashMap<EntryLocation, &Path> =
         std::collections::HashMap::with_capacity(prepared.len() * 3);
     for (artifact, _) in prepared {
-        for reserved in staging::reserved_paths(artifact) {
+        for reserved in write_path::reserved_paths(artifact) {
             let location = entry_location(&reserved, case).map_err(|err| {
                 eprintln!(
                     "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -377,7 +421,7 @@ pub(crate) fn check_lock_path_is_free(
             reserved_paths.insert(location, artifact);
         }
     }
-    for reserved in staging::reserved_paths(lock_path) {
+    for reserved in write_path::reserved_paths(lock_path) {
         let location = match entry_location(&reserved, case) {
             Ok(location) => location,
             Err(err) => {

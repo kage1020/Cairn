@@ -386,7 +386,10 @@ The site is not part of the name. The same directory holds every `struct`, writt
 name (`E_INVALID_STRUCT_NAME` when that name spells such a device), and every walkway
 ([§9.3.5](#935-ports-and-connect)). Two artifacts that would share a file name, compared ignoring
 case, are `E_OUTPUT_NAME_COLLISION`: a `place` named after a `struct`, or one `id=` placed in two
-sites, is refused rather than written over the other.
+sites, is refused rather than written over the other. Nor is an artifact written over the source
+being compiled: one whose path, or a scratch path it is written through, names the source, as
+`hut.nbt` does when the source is `hut.nbt` and builds `struct hut`, refuses the compile
+([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 
 `cairn compile --structure-format litematic` writes a site as one `.litematic` named after the site
 instead, each placement and walkway a region in it named as its `.nbt` file would be. A `struct`

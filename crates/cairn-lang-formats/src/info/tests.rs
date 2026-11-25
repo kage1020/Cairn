@@ -4,6 +4,7 @@ use cairn_lang_core::{Edition, UnknownEdition};
 use serde_json::json;
 
 use super::*;
+use crate::write_path::WritePath;
 
 /// A source two editions lower apart: Bedrock's theme variant leaves a slot unbound.
 const EDITION_SPECIFIC: &str = "@cairn 2026.06\n\n\
@@ -242,12 +243,17 @@ fn hut_on_disk() -> (tempfile::TempDir, PathBuf) {
 
 /// `info` on [`HUT`] at `file` with `--lock lock`, with what it sent its sink.
 fn run_at(file: &Path, lock: &Path) -> (InfoDocument, Vec<String>) {
+    run_on_disk(file, Some(lock))
+}
+
+/// `info` on [`HUT`] at `file`, with `--lock` when `lock` is given, and what it sent its sink.
+fn run_on_disk(file: &Path, lock: Option<&Path>) -> (InfoDocument, Vec<String>) {
     let editions = RequestedEditions::default();
     let request = InfoRequest {
         file,
         source: HUT,
         editions: &editions,
-        lock: Some(lock),
+        lock,
         format: ReportFormat::Json,
     };
     let mut sink = Recorded::default();
@@ -266,7 +272,11 @@ fn a_lock_path_reaching_the_source_is_refused_however_it_is_spelled() {
         dir.path().join(".").join("hut.crn"),
         dir.path().join("sub").join("..").join("hut.crn"),
     ] {
-        assert_eq!(refused(&lock), Some(LockPathRefusal::Source), "{lock:?}");
+        assert_eq!(
+            refused(&lock),
+            Some(LockPathRefusal::Source(WritePath::Final)),
+            "{lock:?}",
+        );
     }
     assert_eq!(refused(&dir.path().join("hut.crn.lock")), None);
     std::fs::write(dir.path().join("hut.crn.lock"), "").expect("write lock");
@@ -284,10 +294,79 @@ fn a_lock_path_linked_to_the_source_is_refused() {
     for lock in ["link/hut.crn", "soft.lock", "hard.lock"] {
         assert_eq!(
             lock_path_refusal(&file, &dir.path().join(lock)),
-            Some(LockPathRefusal::Source),
+            Some(LockPathRefusal::Source(WritePath::Final)),
             "{lock}",
         );
     }
+}
+
+#[test]
+fn a_lock_path_whose_scratch_file_reaches_the_source_is_refused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let lock = dir.path().join("notes");
+    let refused = |source: &str| {
+        let file = dir.path().join(source);
+        std::fs::write(&file, HUT).expect("write source");
+        lock_path_refusal(&file, &lock)
+    };
+
+    assert_eq!(
+        refused("notes.tmp"),
+        Some(LockPathRefusal::Source(WritePath::Staged)),
+    );
+    assert_eq!(
+        refused("notes.bak"),
+        Some(LockPathRefusal::Source(WritePath::Backup)),
+    );
+    assert_eq!(refused("notes.crn"), None);
+}
+
+#[test]
+fn a_lock_flag_whose_scratch_file_is_the_source_gives_the_fix_rather_than_a_compile() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let file = dir.path().join("notes.tmp");
+    std::fs::write(&file, HUT).expect("write source");
+    let lock = dir.path().join("notes");
+
+    let (document, sent) = run_at(&file, &lock);
+
+    assert_eq!(document.verified_target.reading, LockReading::Missing);
+    let (file, lock) = (file.display(), lock.display());
+    assert_eq!(
+        sent,
+        [
+            format!("note: no lockfile at {lock}, so no target is verified"),
+            format!(
+                "note: `cairn compile` refuses `--lock {lock}`, whose scratch file {file} names \
+                 {file}, the source; give `--lock` a `.lock` path, or leave it out to read \
+                 {file}.lock"
+            ),
+        ],
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_default_lock_linked_to_the_source_gives_the_fix_rather_than_a_compile() {
+    let (dir, file) = hut_on_disk();
+    let scratch = dir.path().join("hut.crn.lock.tmp");
+    std::os::unix::fs::symlink(&file, &scratch).expect("symlink");
+
+    let (document, sent) = run_on_disk(&file, None);
+
+    assert_eq!(document.verified_target.reading, LockReading::Missing);
+    let (file, scratch) = (file.display(), scratch.display());
+    assert_eq!(
+        sent,
+        [
+            format!("note: no lockfile at {file}.lock, so no target is verified"),
+            format!(
+                "note: `cairn compile` refuses to write {file}.lock, whose scratch file {scratch} \
+                 names {file}, the source; a link makes them one file, so give `--lock` a `.lock` \
+                 path elsewhere"
+            ),
+        ],
+    );
 }
 
 #[test]

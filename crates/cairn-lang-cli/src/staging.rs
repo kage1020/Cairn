@@ -6,6 +6,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use cairn_lang_formats::write_path::WritePath;
+
 /// What a staged file is going to become, so a failure can name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -83,22 +85,6 @@ pub struct StagedSet {
     entries: Vec<Staged>,
 }
 
-/// `path` with `suffix` appended to the whole file name, extension included.
-fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
-    let mut raw = path.as_os_str().to_owned();
-    raw.push(suffix);
-    PathBuf::from(raw)
-}
-
-/// Every path the set will create or rename for `final_path`, staging scratch included.
-pub fn reserved_paths(final_path: &Path) -> [PathBuf; 3] {
-    [
-        final_path.to_path_buf(),
-        with_suffix(final_path, ".tmp"),
-        with_suffix(final_path, ".bak"),
-    ]
-}
-
 /// What is sitting at a destination right now.
 enum Occupant {
     Vacant,
@@ -132,7 +118,7 @@ impl StagedSet {
     ) -> io::Result<()> {
         use std::io::Write as _;
 
-        let tmp_path = with_suffix(final_path, ".tmp");
+        let tmp_path = WritePath::Staged.of(final_path);
         let result = (|| {
             let mut file = io::BufWriter::new(fs::File::create(&tmp_path)?);
             write(&mut file)?;
@@ -170,7 +156,7 @@ impl StagedSet {
         for entry in &self.entries {
             match occupant(&entry.final_path) {
                 Ok(Occupant::Movable) => {
-                    let backup_path = with_suffix(&entry.final_path, ".bak");
+                    let backup_path = WritePath::Backup.of(&entry.final_path);
                     if let Err(err) = fs::rename(&entry.final_path, &backup_path) {
                         undo(&displaced, &committed);
                         self.discard_scratch();

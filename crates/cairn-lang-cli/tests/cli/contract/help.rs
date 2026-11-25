@@ -18,7 +18,7 @@ fn long_help_states_each_subcommands_exit_codes() {
         (
             "compile",
             "and 2 when the source file cannot be located, `--structure-format` is given with \
-             `--edition bedrock`, or `--lock` names the source",
+             `--edition bedrock`, or `--lock`, or a scratch file beside it, names the source",
         ),
         ("import", "and 2 when the file cannot be located"),
         (
