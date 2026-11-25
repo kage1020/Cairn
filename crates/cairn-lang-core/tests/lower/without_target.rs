@@ -239,7 +239,7 @@ fn a_token_an_edition_writes_under_another_id_is_weighed_as_its_block() {
 fn signs_of(token: &str) -> String {
     format!(
         "theme t:\n  slot wall -> @cobblestone\n  slot board -> @{token}\n\n\
-         struct hut size=5x5\n  walls mat_slot=wall height=3\n  \
+         struct hut size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
          sign at=2,1,2 mat_slot=board\n  sign at=inside.front offset=1 y=1 mat_slot=board\n"
     )
 }

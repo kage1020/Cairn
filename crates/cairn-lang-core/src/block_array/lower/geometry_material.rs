@@ -47,8 +47,8 @@ fn wall_sign_of(id: &str) -> String {
     }
 }
 
-/// The block the standing sign `id` hangs as: its wall sign, written as the canonical token naming
-/// it is (`spec/materials-themes` "Mappings across version and edition").
+/// The id the standing sign `id` hangs as: its wall sign, resolved as a canonical token
+/// (`spec/materials-themes` "Mappings across version and edition").
 ///
 /// # Errors
 ///
@@ -129,7 +129,7 @@ fn is_chest(id: &str, registry: Option<&dyn TargetRegistry>) -> bool {
 
 /// Why a block is not of the family a member's geometry needs.
 enum Misfit {
-    /// The block is of another family.
+    /// The block is outside the family.
     Outside,
     /// The block is a standing sign whose wall sign the pinned target does not have.
     NoWallSign(Box<UnknownId>),
@@ -289,7 +289,8 @@ pub(super) fn geometry_material_id<E>(
     Ok(state.id.clone())
 }
 
-/// A member whose geometry attaches blockstates was bound to a material that cannot carry them.
+/// A member whose geometry attaches blockstates was bound to a material outside the family it
+/// needs at the target.
 ///
 /// Anchored on the theme's slot value when there is one, since that is where the fix goes.
 fn diag_incompatible_material(

@@ -20,7 +20,7 @@ use crate::common::{compile_source, note_fields, states_for, supported_versions,
 fn signs_of(token: &str) -> String {
     format!(
         "theme t:\n  slot wall -> @cobblestone\n  slot board -> @{token}\n\n\
-         struct s size=5x5\n  walls mat_slot=wall height=3\n  \
+         struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
          sign at=2,1,2 mat_slot=board\n  sign at=inside.front offset=1 y=1 mat_slot=board\n"
     )
 }
@@ -61,50 +61,15 @@ fn woods_at(edition: Edition, version: &str) -> Vec<&'static str> {
     WOODS.into_iter().chain(later).collect()
 }
 
-#[test]
-fn bedrock_writes_an_oak_or_dark_oak_sign_as_its_own_standing_and_wall_sign() {
-    for version in supported_versions(builtin_pack(Edition::Bedrock)) {
-        for (wood, standing, wall) in [
-            ("oak", "minecraft:standing_sign", "minecraft:wall_sign"),
-            (
-                "dark_oak",
-                "minecraft:darkoak_standing_sign",
-                "minecraft:darkoak_wall_sign",
-            ),
-        ] {
-            let built = compile_source(
-                &signs_of(&format!("{wood}_sign")),
-                Edition::Bedrock,
-                version,
-            )
-            .unwrap_or_else(|codes| panic!("{wood} at {version} refused: {codes:?}"));
-            assert_eq!(
-                placed(&built),
-                [
-                    format!("minecraft:{wood}_sign[rotation=0]"),
-                    format!("minecraft:{wood}_wall_sign[facing=north]"),
-                ],
-                "{wood} at {version}",
-            );
-            let target = resolve_bedrock_target(version).expect("a shipped target");
-            let (root, notes) = build_mcstructure_tag(
-                &built.structures["struct::s"],
-                &target,
-                &states_for(&target),
-            )
-            .unwrap_or_else(|err| panic!("{wood} at {version} not written: {err}"));
-            assert_eq!(note_fields(&notes), [], "{wood} at {version}");
-            assert_eq!(
-                written_palette(&root),
-                [
-                    "minecraft:air[]".to_owned(),
-                    "minecraft:cobblestone[]".to_owned(),
-                    format!("{standing}[ground_sign_direction=0]"),
-                    format!("{wall}[facing_direction=2]"),
-                ],
-                "{wood} at {version}",
-            );
-        }
+/// The ids Bedrock writes `wood`'s standing and wall sign under.
+fn bedrock_signs(wood: &str) -> (String, String) {
+    match wood {
+        "oak" => ("standing_sign".to_owned(), "wall_sign".to_owned()),
+        "dark_oak" => (
+            "darkoak_standing_sign".to_owned(),
+            "darkoak_wall_sign".to_owned(),
+        ),
+        _ => (format!("{wood}_standing_sign"), format!("{wood}_wall_sign")),
     }
 }
 
@@ -127,13 +92,22 @@ fn every_wood_stands_and_hangs_its_sign_at_every_target_that_has_it() {
                 );
                 if edition == Edition::Bedrock {
                     let target = resolve_bedrock_target(version).expect("a shipped target");
-                    let (_, notes) = build_mcstructure_tag(
+                    let (root, notes) = build_mcstructure_tag(
                         &built.structures["struct::s"],
                         &target,
                         &states_for(&target),
                     )
                     .unwrap_or_else(|err| panic!("{wood} at {version} not written: {err}"));
                     assert_eq!(note_fields(&notes), [], "{wood} at {version}");
+                    let (standing, wall) = bedrock_signs(wood);
+                    let mut palette = vec![
+                        "minecraft:air[]".to_owned(),
+                        "minecraft:cobblestone[]".to_owned(),
+                        format!("minecraft:{standing}[ground_sign_direction=0]"),
+                        format!("minecraft:{wall}[facing_direction=2]"),
+                    ];
+                    palette.sort();
+                    assert_eq!(written_palette(&root), palette, "{wood} at {version}");
                 }
             }
         }
