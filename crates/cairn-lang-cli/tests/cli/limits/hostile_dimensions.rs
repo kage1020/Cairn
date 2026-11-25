@@ -76,7 +76,7 @@ const THEME: &str = "theme t:\n\
 \x20\x20slot roof  -> @spruce_stairs\n\
 \x20\x20slot path  -> @gravel\n\n";
 
-const HUT: &str = "def hut size=3x3:\n\
+const HUT_DEF: &str = "def hut size=3x3:\n\
 \x20\x20floor id=floor mat_slot=floor\n\
 \x20\x20walls id=walls mat_slot=wall height=3\n\
 \x20\x20door  id=entry side=front at=center\n\n";
@@ -87,13 +87,13 @@ fn source(body: &str) -> String {
 
 fn place(id: &str) -> String {
     source(&format!(
-        "{HUT}site hamlet:\n  place id={id} use=hut theme=t at=origin\n"
+        "{HUT_DEF}site hamlet:\n  place id={id} use=hut theme=t at=origin\n"
     ))
 }
 
 fn connected(gap: &str) -> String {
     source(&format!(
-        "{HUT}site duo:\n  place id=a use=hut theme=t at=origin\n\
+        "{HUT_DEF}site duo:\n  place id=a use=hut theme=t at=origin\n\
          \x20\x20place id=b use=hut theme=t east_of=a gap={gap}\n\
          \x20\x20connect a.entry to b.entry path=@path\n"
     ))
@@ -128,7 +128,7 @@ fn connected_back_to_back(gap: &str) -> String {
 /// Two ports offset on both axes, which tells a length bound apart from an area one.
 fn connected_diagonally(gap: &str) -> String {
     source(&format!(
-        "{HUT}site duo:\n\
+        "{HUT_DEF}site duo:\n\
          \x20\x20place id=a use=hut theme=t at=origin\n\
          \x20\x20place id=b use=hut theme=t east_of=a gap={gap}\n\
          \x20\x20place id=c use=hut theme=t north_of=b gap={gap}\n\
