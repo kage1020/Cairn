@@ -8,10 +8,12 @@ use cairn_lang_core::block_array::BlockArrayIr;
 use cairn_lang_formats::build::artifact::{PreparedArtifact, prepare_artifact};
 use cairn_lang_formats::build::run_level::{RunLevelNote, artifact_collision, backend_refusal};
 use cairn_lang_formats::data_version::{JavaTarget, ResolvedTarget};
+use cairn_lang_formats::file_identity::{FileIdentity, NamedFile, Reach, Unidentified};
 use cairn_lang_formats::java_structure::{OutputExt, output_filename};
 use cairn_lang_formats::litematic::{LitematicError, litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{SchemError, prepare_schem, schem_files};
 use cairn_lang_formats::target::PreparedStructure;
+use cairn_lang_formats::write_path::{self, WritePath};
 
 use crate::cli::StructureFormat;
 use crate::lockfile::build_lockfile;
@@ -355,6 +357,85 @@ fn artifact_path(out_dir: &Path, scope: &str, file_name: &str) -> Result<PathBuf
     }
 }
 
+/// Refuse a build that would write any of its files through a path reaching the source `file`
+/// (`spec/versioning-editions` "Provenance and lock").
+pub(crate) fn check_source_is_left_alone(
+    file: &Path,
+    prepared: &[(PathBuf, PreparedStructure<'_>)],
+    lock_path: &Path,
+) -> Result<(), ExitCode> {
+    let source = match NamedFile::at(file) {
+        Ok(Some(source)) => source,
+        // A source no longer there is one no write can reach.
+        Ok(None) => return Ok(()),
+        Err(unidentified) => {
+            report_unidentified(
+                "this build's files",
+                file,
+                &unidentified,
+                ", then compile again",
+            );
+            return Err(ExitCode::from(1));
+        }
+    };
+    let artifacts = prepared
+        .iter()
+        .map(|(path, _)| (staging::Kind::Artifact, path.as_path()));
+    for (kind, output) in artifacts.chain([(staging::Kind::Lockfile, lock_path)]) {
+        let shown = output.display();
+        let elsewhere = match kind {
+            staging::Kind::Lockfile => "give `--lock` a `.lock` path elsewhere",
+            _ => "compile with `--out` naming another directory",
+        };
+        let reached = match WritePath::reaching(&source, output) {
+            Ok(None) => continue,
+            Ok(Some(reached)) => reached,
+            Err(unidentified) => {
+                let what = format!("{kind} `{shown}`");
+                report_unidentified(&what, file, &unidentified, &format!(", or {elsewhere}"));
+                return Err(ExitCode::from(1));
+            }
+        };
+        let file = file.display();
+        match reached.path {
+            WritePath::Final => {
+                eprintln!("error: {kind} `{shown}` names `{file}`, the source being compiled");
+            }
+            WritePath::Scratch(scratch) => eprintln!(
+                "error: {kind} `{shown}` would put its scratch file `{}` over `{file}`, the \
+                 source being compiled",
+                scratch.of(output).display(),
+            ),
+        }
+        // A `--lock` reaching the source is refused before reading, and `<source>.lock` is named
+        // apart from it, so a lockfile gets here only through a link.
+        match (kind, reached.by) {
+            (staging::Kind::Lockfile, _) | (_, Reach::Link) => {
+                eprintln!("  note: a link makes them one file; {elsewhere}");
+            }
+            (_, Reach::Name) => {
+                eprintln!("  note: {elsewhere}, or give the source a name ending in `.crn`");
+            }
+        }
+        return Err(ExitCode::from(1));
+    }
+    Ok(())
+}
+
+/// Say that the file system cannot tell `unidentified`'s path, one `what` is written through, from
+/// the source `file`, and that the path should be readable, with `fix` after.
+pub(crate) fn report_unidentified(what: &str, file: &Path, unidentified: &Unidentified, fix: &str) {
+    eprintln!(
+        "error: cannot tell whether {what} would be written over `{}`, the source being \
+         compiled: {unidentified}",
+        file.display(),
+    );
+    eprintln!(
+        "  note: check that `{}` can be read{fix}",
+        unidentified.path.display()
+    );
+}
+
 /// Refuse a `--lock` that would land on a path the artifacts already own, scratch names included.
 pub(crate) fn check_lock_path_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
@@ -364,7 +445,7 @@ pub(crate) fn check_lock_path_is_free(
     let mut reserved_paths: std::collections::HashMap<EntryLocation, &Path> =
         std::collections::HashMap::with_capacity(prepared.len() * 3);
     for (artifact, _) in prepared {
-        for reserved in staging::reserved_paths(artifact) {
+        for reserved in write_path::reserved_paths(artifact) {
             let location = entry_location(&reserved, case).map_err(|err| {
                 eprintln!(
                     "error: cannot resolve where artifact `{}` would be written: {err}",
@@ -376,7 +457,7 @@ pub(crate) fn check_lock_path_is_free(
             reserved_paths.insert(location, artifact);
         }
     }
-    for reserved in staging::reserved_paths(lock_path) {
+    for reserved in write_path::reserved_paths(lock_path) {
         let location = match entry_location(&reserved, case) {
             Ok(location) => location,
             Err(err) => {
@@ -410,11 +491,10 @@ type EntryLocation = (DirIdentity, std::ffi::OsString);
 /// A directory as the file system tells it apart, so every spelling that reaches it is one key.
 #[derive(Debug, PartialEq, Eq, Hash)]
 enum DirIdentity {
-    /// The device and inode of a directory that exists.
-    #[cfg(unix)]
-    Inode(u64, u64),
-    /// The canonical path of a directory that exists, or the absolute path of one that does not.
-    Path(PathBuf),
+    /// A directory that exists.
+    Existing(FileIdentity),
+    /// The absolute path of a directory that does not exist.
+    Absent(PathBuf),
 }
 
 /// The directory entry `path` names, as its parent's identity and its file name keyed by `case`.
@@ -435,27 +515,13 @@ fn dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
     } else {
         dir
     };
-    match existing_dir_identity(dir) {
+    match FileIdentity::of(dir) {
+        Ok(identity) => Ok(DirIdentity::Existing(identity)),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            std::path::absolute(dir).map(DirIdentity::Path)
+            std::path::absolute(dir).map(DirIdentity::Absent)
         }
-        identity => identity,
+        Err(err) => Err(err),
     }
-}
-
-/// `dir`'s device and inode, which `canonicalize` cannot stand in for: on Linux it keeps each
-/// component's spelling, so `out` and `OUT` in a case-folding directory would be two keys.
-#[cfg(unix)]
-fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
-    use std::os::unix::fs::MetadataExt as _;
-    let metadata = std::fs::metadata(dir)?;
-    Ok(DirIdentity::Inode(metadata.dev(), metadata.ino()))
-}
-
-/// `dir`'s canonical path, which spells each component as the directory stores it.
-#[cfg(not(unix))]
-fn existing_dir_identity(dir: &Path) -> std::io::Result<DirIdentity> {
-    dir.canonicalize().map(DirIdentity::Path)
 }
 
 /// Write the prepared structures and the lockfile as one set: all of them, or the directory as

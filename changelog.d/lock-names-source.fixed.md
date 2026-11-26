@@ -1,0 +1,41 @@
+- *(cli)* `cairn compile --lock` naming the source being compiled is refused with exit 2 before the
+  source is read, where the compile moved the source aside, wrote the lockfile in its place and
+  exited 0, leaving no copy. Every path that reaches the source counts, whatever its spelling
+  (`hut.crn`, `./hut.crn`, an absolute path, a symlinked directory, or another letter case where
+  the directory folds case), and a symbolic link or a hard link to it:
+
+  ```text
+  error: `--lock hut.crn` names `hut.crn`, the source being compiled
+    note: give `--lock` a `.lock` path, or leave it out to write `hut.crn.lock`
+  ```
+
+  For a `--lock` that reaches the source through a link, the note says that a link makes them one
+  file and gives a `.lock` path elsewhere, and a note offers leaving the flag out only when
+  `<source>.lock` is not refused too.
+- *(cli)* `cairn compile` writes no artifact over the source it compiles, and no lock or artifact
+  through a `.tmp` or `.bak` scratch file that is the source. A source named as one of its
+  artifacts (`hut.nbt` building `struct hut`) was replaced by the structure file, a source named as
+  a scratch file (`notes.tmp` with `--lock notes`) was deleted, and a `.tmp` scratch file linked to
+  the source had the artifact or the lockfile written into the source. A `--lock` whose scratch
+  file is the source is refused with exit 2 before the source is read, as the source itself is; an
+  artifact, or a linked `<source>.lock`, is refused with exit 1 once the build knows where its
+  files go, and no artifact or lock is written:
+
+  ```text
+  error: artifact `./hut.nbt` names `hut.nbt`, the source being compiled
+    note: compile with `--out` naming another directory, or give the source a name ending in `.crn`
+  ```
+
+  An artifact a link makes the source gets `note: a link makes them one file; compile with --out
+  naming another directory` instead. A path the file system cannot answer for, such as a loop of
+  symbolic links, is refused with exit 1, naming the path and the file system's answer, rather
+  than taken for a file other than the source.
+- *(cli)* `cairn info` on a lock path `cairn compile` refuses to write, `--lock` naming the source
+  or a path whose scratch file is the source, says that the compile refuses it and what to pass
+  instead, where its note named the compile that would have overwritten the source as the remedy.
+- *(cli)* `cairn import --out` reaching the file being imported, by a hard link, in another letter
+  case where the directory folds case, or through the `.tmp` or `.bak` scratch path the source is
+  written through, is refused with exit 2 as the file's own path is, and so is a `<stem>.raw.crn`
+  a link makes the file. On Linux a name differing only in case let the import write its `.crn`
+  over the structure file, and an `--out` whose `.tmp` was a link to the file wrote the source into
+  it.

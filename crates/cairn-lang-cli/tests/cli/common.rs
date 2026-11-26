@@ -1,5 +1,6 @@
 //! Helpers the test modules share: running the binary, the examples, and temp directories.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -15,6 +16,17 @@ pub fn cargo_bin() -> PathBuf {
 
 /// The number of `.crn` files `examples/` ships; bump it with the next example.
 pub const SHIPPED_EXAMPLES: usize = 17;
+
+/// One `struct hut` of walls, which builds cleanly on either edition and writes `hut.nbt` on Java.
+pub const HUT: &str = concat!(
+    "@cairn 2026.06\n",
+    "\n",
+    "theme t:\n",
+    "  slot w -> @stone\n",
+    "\n",
+    "struct hut size=3x3\n",
+    "  walls mat_slot=w height=2\n",
+);
 
 /// A lever too high on the wall for the circuit under the floor to read, on either edition: line
 /// 8 is the lever's.
@@ -118,6 +130,73 @@ pub fn folds_case(dir: &Path) -> bool {
     };
     fs::remove_file(dir.join("case-oracle")).expect("remove the lower-case spelling");
     folds
+}
+
+/// Every regular file directly in `dir`, keyed by name, or none when `dir` cannot be read.
+pub fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let Ok(entries) = fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.is_file() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            out.insert(name, fs::read(&path).expect("read artifact"));
+        }
+    }
+    out
+}
+
+/// A directory holding [`HUT`] under each of `names`, in its subdirectory `sub`.
+pub fn sources_in(sub: &str, names: &[&str]) -> TempDir {
+    let dir = TempDir::new().expect("tempdir");
+    fs::create_dir(dir.path().join(sub)).expect("make the source directory");
+    for name in names {
+        fs::write(dir.path().join(sub).join(name), HUT).expect("write source");
+    }
+    dir
+}
+
+/// `cairn compile <source> --edition java <flags>`, run from `dir` with each path as spelled.
+pub fn compile_in(dir: &Path, source: &str, flags: &[&str]) -> Run {
+    Run::from(
+        Command::new(cargo_bin())
+            .current_dir(dir)
+            .args(["compile", source, "--edition", "java"])
+            .args(flags)
+            .output()
+            .expect("run cairn"),
+    )
+}
+
+/// Assert that [`compile_in`] exits `code` with `stderr` alone, leaving every file in `dir/sub`
+/// for each of `subs` as it was, and the source byte for byte as it was.
+pub fn assert_compile_refused(
+    dir: &Path,
+    source: &str,
+    flags: &[&str],
+    code: i32,
+    stderr: &str,
+    subs: &[&str],
+) {
+    let before: Vec<_> = subs.iter().map(|sub| snapshot(&dir.join(sub))).collect();
+    let text = fs::read(dir.join(source)).expect("read source");
+
+    let run = compile_in(dir, source, flags);
+
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(code), "", stderr),
+        "{source} {flags:?}",
+    );
+    let after: Vec<_> = subs.iter().map(|sub| snapshot(&dir.join(sub))).collect();
+    assert_eq!(after, before, "{source} {flags:?}");
+    assert_eq!(
+        fs::read(dir.join(source)).expect("read source"),
+        text,
+        "{source} {flags:?}"
+    );
 }
 
 /// Write `source` to `dir/name` and return the path.

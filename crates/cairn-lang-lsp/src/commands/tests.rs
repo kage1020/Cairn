@@ -8,7 +8,8 @@ use cairn_lang_core::{CAIRN_VERSION, Edition, parse};
 use cairn_lang_formats::build::artifact::prepare_artifact;
 use cairn_lang_formats::build::lowering::lower_for_target;
 use cairn_lang_formats::data_version::resolve_target;
-use cairn_lang_formats::info::{InfoDocument, default_lock_path};
+use cairn_lang_formats::info::InfoDocument;
+use cairn_lang_formats::lock_path::default_lock_path;
 use serde_json::json;
 
 use super::*;

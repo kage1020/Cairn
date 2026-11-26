@@ -9,7 +9,9 @@ use cairn_lang_formats::registry::builtin_pack;
 
 use crate::common::{Fixture, Run, cairn_argv, compile, compile_as};
 
-const HUT: &str = "theme t:\n  slot a -> @cobblestone\n\nstruct hut size=3x3\n  floor mat_slot=a\n";
+/// A 3x3 hut of a floor alone, which a test grows walls on.
+const FLOOR_HUT: &str =
+    "theme t:\n  slot a -> @cobblestone\n\nstruct hut size=3x3\n  floor mat_slot=a\n";
 
 /// `cairn info` of the fixture's source for Java alone, with `extra` arguments.
 fn info(fixture: &Fixture, extra: &[&str]) -> Run {
@@ -38,7 +40,7 @@ fn verified_row(run: &Run) -> &str {
 }
 
 fn compiled(edition: &str, target: &str) -> Fixture {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let run = Run::from(compile_as(&fixture, edition, target));
     assert_eq!(
         run.code,
@@ -85,7 +87,7 @@ fn a_source_edited_since_its_compile_reports_the_change() {
     let fixture = compiled("java", "1.21.4");
     fs::write(
         fixture.source(),
-        format!("{HUT}  walls mat_slot=a height=2\n"),
+        format!("{FLOOR_HUT}  walls mat_slot=a height=2\n"),
     )
     .expect("edit");
     let run = info(&fixture, &[]);
@@ -107,7 +109,7 @@ fn a_source_edited_since_its_compile_reports_the_change() {
 
 #[test]
 fn a_source_never_compiled_has_no_lock() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let run = info(&fixture, &[]);
     assert_eq!(
         run.code,
@@ -127,7 +129,7 @@ fn a_source_never_compiled_has_no_lock() {
 
 #[test]
 fn the_lock_flag_names_the_lock_read() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let elsewhere = fixture.out().with_extension("lock");
     let run = Run::from(compile(
         &fixture.source(),
@@ -185,7 +187,7 @@ fn a_lock_of_a_newer_schema_is_named_and_not_read() {
 
 #[test]
 fn a_lock_the_schema_refuses_is_unreadable() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     fs::write(fixture.lock(), "verified: maybe\n").expect("write lock");
     let run = info(&fixture, &[]);
     assert_eq!(
@@ -268,7 +270,7 @@ fn json_carries_the_row_as_verified_target_with_its_path() {
         }),
     );
 
-    let never = Fixture::new(HUT);
+    let never = Fixture::new(FLOOR_HUT);
     let run = info(&never, &["--format", "json"]);
     let report: serde_json::Value = serde_json::from_str(&run.stdout).expect("valid JSON");
     assert_eq!(
@@ -292,7 +294,7 @@ fn a_refused_identifier_is_noted_before_an_edited_source() {
     fs::write(fixture.lock(), with_refused_placement(&body)).expect("write lock");
     fs::write(
         fixture.source(),
-        format!("{HUT}  walls mat_slot=a height=2\n"),
+        format!("{FLOOR_HUT}  walls mat_slot=a height=2\n"),
     )
     .expect("edit");
     let run = info(&fixture, &[]);
@@ -316,7 +318,7 @@ fn a_refused_identifier_is_noted_before_an_edited_source() {
 
 /// The fixture compiled for java 1.21.4 with its lock at `out.lock`, not `<source>.lock`.
 fn compiled_elsewhere() -> (Fixture, PathBuf) {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let elsewhere = fixture.out().with_extension("lock");
     let run = Run::from(compile(
         &fixture.source(),
@@ -342,7 +344,7 @@ fn notes_on_a_lock_the_flag_names_say_to_compile_with_the_flag() {
     fs::write(&elsewhere, with_refused_placement(&body)).expect("write lock");
     fs::write(
         fixture.source(),
-        format!("{HUT}  walls mat_slot=a height=2\n"),
+        format!("{FLOOR_HUT}  walls mat_slot=a height=2\n"),
     )
     .expect("edit");
     let run = info(&fixture, &["--lock", &lock]);
@@ -374,7 +376,7 @@ fn notes_on_a_lock_the_flag_names_say_to_compile_with_the_flag() {
 
 #[test]
 fn a_lock_flag_naming_no_file_reports_no_lock() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let lock = display(&fixture.out().with_extension("lock"));
     let run = info(&fixture, &["--lock", &lock]);
     assert_eq!(
@@ -395,7 +397,7 @@ fn a_lock_flag_naming_no_file_reports_no_lock() {
 
 #[test]
 fn a_lock_flag_naming_the_default_path_still_says_to_compile_with_the_flag() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     let lock = display(&fixture.lock());
     let run = info(&fixture, &["--lock", &lock]);
     assert_eq!(verified_row(&run), "(no lock)");
@@ -410,7 +412,7 @@ fn a_lock_flag_naming_the_default_path_still_says_to_compile_with_the_flag() {
 
 #[test]
 fn a_lock_flag_through_no_directory_says_no_compile_can_write_there() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     for (dir, label) in [
         (fixture.out(), "a directory that does not exist"),
         (fixture.source(), "a file in place of a directory"),
@@ -433,7 +435,7 @@ fn a_lock_flag_through_no_directory_says_no_compile_can_write_there() {
 
 #[test]
 fn a_directory_at_the_lock_path_is_unreadable_with_no_replacement_promised() {
-    let fixture = Fixture::new(HUT);
+    let fixture = Fixture::new(FLOOR_HUT);
     fs::create_dir(fixture.out()).expect("create directory");
     let lock = display(&fixture.out());
     let run = info(&fixture, &["--lock", &lock]);

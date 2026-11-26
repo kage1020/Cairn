@@ -14,9 +14,10 @@ use cairn_lang_formats::world::{
     StructureFileError, StructureId, StructureIdError, WorldVersion, read_level_dat,
     read_structure_data_version, recompile_target, worlds_in,
 };
+use cairn_lang_formats::write_path::scratch_paths;
 
 use crate::cli::InstallArgs;
-use crate::staging::{Kind, StagedSet, reserved_paths};
+use crate::staging::{Kind, StagedSet};
 
 /// The exit code of a refused file or world.
 const REFUSED: u8 = 1;
@@ -266,7 +267,7 @@ fn check_target(path: &Path, id: &StructureId, target: &Path, args: &InstallArgs
             return None;
         }
     };
-    for scratch in &reserved_paths(target)[1..] {
+    for scratch in &scratch_paths(target) {
         match fs::symlink_metadata(scratch) {
             Err(err) if err.kind() == io::ErrorKind::NotFound => {}
             Ok(_) => {

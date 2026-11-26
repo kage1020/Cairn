@@ -45,13 +45,13 @@ fn compiled(dir: &Path, src: &Path, edition: &str, target: &str, name: &str) -> 
 }
 
 /// A 5x5 hut of a floor and 3-high walls.
-const HUT: &str = "theme t:\n  slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n\n\
+const WALLED_HUT: &str = "theme t:\n  slot floor -> @oak_planks\n  slot wall  -> @cobblestone\n\n\
                    struct hut size=5x5\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n";
 
-/// [`HUT`] compiled for Java 1.21.4, as [`built`] gives the cottage.
+/// [`WALLED_HUT`] compiled for Java 1.21.4, as [`built`] gives the cottage.
 fn built_hut() -> (tempfile::TempDir, PathBuf, PathBuf) {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let src = write_source(tmp.path(), "hut.crn", HUT);
+    let src = write_source(tmp.path(), "hut.crn", WALLED_HUT);
     let artifact = compiled(tmp.path(), &src, "java", "1.21.4", "hut.nbt");
     (tmp, src, artifact)
 }
@@ -105,7 +105,7 @@ fn a_source_that_builds_the_structure_converges_on_each_edition() {
 fn an_item_frame_on_bedrock_compares_as_the_block_it_is_saved_as() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let source = format!(
-        "{HUT}  item_frame id=plain at=2,1,2 facing=up\n  \
+        "{WALLED_HUT}  item_frame id=plain at=2,1,2 facing=up\n  \
          item_frame id=lit at=1,1,1 facing=up item=diamond glowing=true\n"
     );
     let src = write_source(tmp.path(), "hut.crn", &source);

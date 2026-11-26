@@ -15,10 +15,12 @@ pub mod build;
 pub mod data_version;
 pub mod diff_blocks;
 mod dims;
+pub mod file_identity;
 pub mod import;
 pub mod info;
 pub mod java_structure;
 pub mod litematic;
+pub mod lock_path;
 mod nbt_text;
 pub mod portability;
 mod read_stream;
@@ -29,6 +31,7 @@ pub mod target;
 mod villager;
 pub mod volume;
 pub mod world;
+pub mod write_path;
 
 pub use bedrock_state::{BedrockStateError, StateEntity, StateTranslation, translate_states};
 pub use bedrock_structure::{

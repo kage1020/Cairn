@@ -9,11 +9,16 @@ use cairn_lang_core::check::LineStarts;
 use cairn_lang_formats::build::lowering::BuildRefusal;
 use cairn_lang_formats::build::run_level::floor_refusal_message;
 use cairn_lang_formats::data_version::{ResolvedTarget, resolve_target};
-use cairn_lang_formats::info::default_lock_path;
+use cairn_lang_formats::file_identity::Reach;
+use cairn_lang_formats::lock_path::{
+    LockPathRefusal, default_lock_path, default_lock_refusal, lock_path_refusal,
+    suggested_lock_path,
+};
+use cairn_lang_formats::write_path::WritePath;
 
 use crate::artifacts::{
-    Backend, PrepareRefusal, check_lock_path_is_free, prepare_artifacts, prepare_out_dir,
-    write_artifacts_and_lock,
+    Backend, PrepareRefusal, check_lock_path_is_free, check_source_is_left_alone,
+    prepare_artifacts, prepare_out_dir, report_unidentified, write_artifacts_and_lock,
 };
 use crate::cli::StructureFormat;
 use crate::lockfile::{report_previous_target, sensitive_members};
@@ -36,6 +41,24 @@ pub(crate) fn run_compile(
         );
         eprintln!("  note: drop `--structure-format`, or compile with `--edition java`");
         return ExitCode::from(2);
+    }
+    if let Some(lock) = lock {
+        match lock_path_refusal(file, lock) {
+            Ok(None) => {}
+            Ok(Some(refusal)) => {
+                report_lock_path_refusal(file, lock, refusal);
+                return ExitCode::from(2);
+            }
+            Err(unidentified) => {
+                report_unidentified(
+                    &format!("lockfile `{}`", lock.display()),
+                    file,
+                    &unidentified,
+                    ", or give `--lock` a `.lock` path elsewhere",
+                );
+                return ExitCode::from(1);
+            }
+        }
     }
     let structure_format = structure_format.unwrap_or_default();
     // Resolved before lowering, which checks ids against it, but reported after the source's
@@ -70,9 +93,9 @@ pub(crate) fn run_compile(
 
     let lock_path = lock.map_or_else(|| default_lock_path(file), Path::to_path_buf);
     check_and_write(
+        file,
         &lowered.block_ir,
         &source,
-        edition,
         target,
         structure_format,
         &out_dir,
@@ -80,16 +103,62 @@ pub(crate) fn run_compile(
     )
 }
 
-/// Check every structure, then write them all and the lockfile.
+/// Say why `--lock lock` cannot be the lockfile of `file`, and which paths it can be.
+fn report_lock_path_refusal(file: &Path, lock: &Path, refusal: LockPathRefusal) {
+    let (shown, source) = (lock.display(), file.display());
+    let fix = match refusal {
+        LockPathRefusal::Source(reached) => {
+            match reached.path {
+                WritePath::Final => {
+                    eprintln!(
+                        "error: `--lock {shown}` names `{source}`, the source being compiled"
+                    );
+                }
+                WritePath::Scratch(scratch) => eprintln!(
+                    "error: `--lock {shown}` would put its scratch file `{}` over `{source}`, the \
+                     source being compiled",
+                    scratch.of(lock).display(),
+                ),
+            }
+            match reached.by {
+                Reach::Name => "give `--lock` a `.lock` path".to_owned(),
+                Reach::Link => {
+                    "a link makes them one file; give `--lock` a `.lock` path elsewhere".to_owned()
+                }
+            }
+        }
+        LockPathRefusal::SourceName => {
+            eprintln!(
+                "error: `--lock {shown}` names a `.crn` file, and a lockfile is never a Cairn \
+                 source"
+            );
+            format!(
+                "give `--lock` a `.lock` path, such as `{}`",
+                suggested_lock_path(lock).display(),
+            )
+        }
+    };
+    let leave_out = match default_lock_refusal(file) {
+        Ok(None) => format!(
+            ", or leave it out to write `{}`",
+            default_lock_path(file).display()
+        ),
+        Ok(Some(_)) | Err(_) => String::new(),
+    };
+    eprintln!("  note: {fix}{leave_out}");
+}
+
+/// Check every structure, then write them all and the lockfile of `file`.
 fn check_and_write(
+    file: &Path,
     block_ir: &BlockArrayIr,
     source: &str,
-    edition: Edition,
     target: &ResolvedTarget,
     structure_format: StructureFormat,
     out_dir: &Path,
     lock_path: &Path,
 ) -> ExitCode {
+    let edition = target.edition();
     // A lock can share an entry with an artifact only inside `--out`, so `--out` alone is probed.
     let case = NameCase::of_dir(out_dir);
     let backend = Backend::new(target, structure_format);
@@ -101,6 +170,9 @@ fn check_and_write(
         }
         Err(PrepareRefusal::Other(code)) => return code,
     };
+    if let Err(code) = check_source_is_left_alone(file, &prepared, lock_path) {
+        return code;
+    }
     if let Err(code) = check_lock_path_is_free(&prepared, lock_path, case) {
         return code;
     }
@@ -143,9 +215,9 @@ mod tests {
         let lock_path = dir.path().join("probe.crn.lock");
 
         let code = check_and_write(
+            &dir.path().join("probe.crn"),
             &block_ir,
             "",
-            Edition::Java,
             &target,
             StructureFormat::Nbt,
             dir.path(),

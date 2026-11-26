@@ -202,7 +202,7 @@ site のすべての `place` 行は `id=`、`use=`、`theme=` を宣言します
 - Windows のファイル名に使えない文字を含む id。Windows では書き出せません。
 - `CON` や `NUL` のように Windows が予約しているデバイス名の id。Windows ではデバイスとして開かれることがあります。
 
-ファイル名に site の名前は含めません。同じディレクトリには、すべての `struct` (自身の名前で書き出し、その名前がこうしたデバイス名なら `E_INVALID_STRUCT_NAME`) と、すべての通路 ([§9.3.5](#935-ポートと-connect)) も書き出します。大文字と小文字を区別せずに比べて同じファイル名になる 2 つの成果物は、`E_OUTPUT_NAME_COLLISION` です。`struct` と同じ名前の `place` や、2 つの site に置いた同じ `id=` は、片方でもう片方を上書きするのではなく拒否します。
+ファイル名に site の名前は含めません。同じディレクトリには、すべての `struct` (自身の名前で書き出し、その名前がこうしたデバイス名なら `E_INVALID_STRUCT_NAME`) と、すべての通路 ([§9.3.5](#935-ポートと-connect)) も書き出します。大文字と小文字を区別せずに比べて同じファイル名になる 2 つの成果物は、`E_OUTPUT_NAME_COLLISION` です。`struct` と同じ名前の `place` や、2 つの site に置いた同じ `id=` は、片方でもう片方を上書きするのではなく拒否します。成果物をコンパイル中のソースの上に書き出すこともありません。パス、または書き出すときに通る一時パスがソースを指す成果物 (ソースが `hut.nbt` で `struct hut` を組み上げるときの `hut.nbt` など) があれば、コンパイルを拒否します ([バージョンとエディション §10.6](/ja/spec/versioning-editions/#106-来歴-provenance-とロック))。
 
 `cairn compile --structure-format litematic` の場合は、site を site の名前を付けた 1 つの `.litematic` に書き出し、各配置と各通路は、その `.nbt` のファイル名を付けたリージョンになります。site と同じ名前の `struct` は同じファイルに書き出すことになるので、コンパイルはこれを拒否します ([§12.1.1](/ja/spec/ecosystem-interop/#1211-litematica))。こうしたデバイス名を名前に持つ site は、ビルドがどの形式で書き出すかに関係なく `E_INVALID_SITE_NAME` です。`--structure-format schem` の場合は `.nbt` と同じ名前でファイルを書き出し、各 `.schem` は、その配置や通路の原点を `Offset` に持ちます ([§12.1.2](/ja/spec/ecosystem-interop/#1212-sponge-schematic))。
 

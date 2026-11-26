@@ -6,7 +6,7 @@ mod inferred;
 mod respelled;
 mod rows;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use cairn_lang_core::block_array::lower_to_block_array;
 use cairn_lang_core::check::{LineStarts, RenderedDiagnostic};
@@ -18,7 +18,13 @@ use serde::Serialize;
 use crate::build::finding::{Finding, Found};
 use crate::build::gate::build_diagnostics;
 use crate::build::run_level::RunLevelMessage;
+use crate::file_identity::{Reach, Unidentified};
+use crate::lock_path::{
+    LockPathRefusal, default_lock_path, default_lock_refusal, lock_path_refusal,
+    suggested_lock_path,
+};
 use crate::registry::builtin_pack;
+use crate::write_path::{Reached, WritePath};
 
 pub use requested::{EditionsRefused, RequestedEditions, requested_editions};
 
@@ -180,14 +186,6 @@ impl FailureDocument {
     }
 }
 
-/// `<source>.lock`, keeping `.crn` so no two sources share a lock.
-#[must_use]
-pub fn default_lock_path(source: &Path) -> PathBuf {
-    let mut path = source.as_os_str().to_owned();
-    path.push(".lock");
-    PathBuf::from(path)
-}
-
 /// The report `cairn info` gives on `request`, its side findings and notes sent to `sink`.
 ///
 /// # Errors
@@ -238,8 +236,8 @@ pub fn info(request: &InfoRequest<'_>, sink: &mut dyn InfoSink) -> Result<InfoDo
         .lock
         .map_or_else(|| default_lock_path(request.file), Path::to_path_buf);
     let reading = LockReading::of(&lock, source);
-    let named = request.lock.is_some();
-    for note in verified_target_notes(request.file, &lock, named, &reading) {
+    let writer = LockWriter::of(request.file, request.lock);
+    for note in verified_target_notes(request.file, &lock, &writer, &reading) {
         out.line(&note);
     }
     Ok(InfoDocument {
@@ -251,38 +249,78 @@ pub fn info(request: &InfoRequest<'_>, sink: &mut dyn InfoSink) -> Result<InfoDo
     })
 }
 
+/// The compile that writes the lock a run read, which its notes name, or why none does.
+#[derive(Debug)]
+enum LockWriter {
+    /// `cairn compile`, for `<source>.lock`.
+    Plain,
+    /// `cairn compile --lock <path>`, since a compile without the flag writes only `<source>.lock`.
+    Flagged,
+    /// None: `cairn compile` would write `<source>.lock` through this path, a link to the source.
+    DefaultRefused(WritePath),
+    /// None: `cairn compile` refuses the path `--lock` names.
+    FlagRefused(LockPathRefusal),
+    /// None: `cairn compile` cannot tell a path the lock is written through from the source.
+    Unidentified(Unidentified),
+}
+
+impl LockWriter {
+    /// What writes the lock of `source` at `lock`, the path `--lock` names, or at
+    /// `<source>.lock` without one.
+    fn of(source: &Path, lock: Option<&Path>) -> Self {
+        let refused = match lock {
+            None => default_lock_refusal(source).map(|path| path.map(Self::DefaultRefused)),
+            Some(lock) => {
+                lock_path_refusal(source, lock).map(|refusal| refusal.map(Self::FlagRefused))
+            }
+        };
+        match (refused, lock) {
+            (Ok(Some(refused)), _) => refused,
+            (Ok(None), None) => Self::Plain,
+            (Ok(None), Some(_)) => Self::Flagged,
+            (Err(unidentified), _) => Self::Unidentified(unidentified),
+        }
+    }
+}
+
 /// The `note:` lines saying what the row alone does not: why there is no target, why the one it
-/// names does not certify this source, and which identifier the lock records that this Cairn
-/// refuses.
+/// names does not certify this source, which identifier the lock records that this Cairn refuses,
+/// and why no compile writes the lock at its path.
 fn verified_target_notes(
     file: &Path,
     lock: &Path,
-    named: bool,
+    writer: &LockWriter,
     reading: &LockReading,
 ) -> Vec<String> {
     let path = lock.display();
-    // A plain compile writes `<source>.lock` and leaves the path `--lock` named alone.
-    let compile = if named {
-        format!("`cairn compile --lock {path}`")
-    } else {
-        "`cairn compile`".to_owned()
+    let compile = match writer {
+        LockWriter::Plain => Some("`cairn compile`".to_owned()),
+        LockWriter::Flagged => Some(format!("`cairn compile --lock {path}`")),
+        LockWriter::DefaultRefused(_)
+        | LockWriter::FlagRefused(_)
+        | LockWriter::Unidentified(_) => None,
     };
-    match reading {
+    let next = |does: &str| {
+        compile.as_ref().map_or_else(String::new, |compile| {
+            format!("; the next {compile} {does}")
+        })
+    };
+    let mut notes = match reading {
         LockReading::Missing => {
             let dir = lock
                 .parent()
                 .filter(|dir| !dir.as_os_str().is_empty())
                 .unwrap_or(Path::new("."));
-            let remedy = if dir.is_dir() {
-                format!("{compile} writes one")
-            } else {
-                format!(
-                    "{} is not a directory, so {compile} cannot write one there",
+            let remedy = match &compile {
+                None => String::new(),
+                Some(compile) if dir.is_dir() => format!("; {compile} writes one"),
+                Some(compile) => format!(
+                    "; {} is not a directory, so {compile} cannot write one there",
                     dir.display()
-                )
+                ),
             };
             vec![format!(
-                "note: no lockfile at {path}, so no target is verified; {remedy}"
+                "note: no lockfile at {path}, so no target is verified{remedy}"
             )]
         }
         LockReading::Read {
@@ -292,15 +330,16 @@ fn verified_target_notes(
         } => {
             let refused = refused_identifier.iter().map(|refused| {
                 format!(
-                    "note: {path} records an identifier this Cairn refuses ({refused}); the next \
-                     {compile} replaces it"
+                    "note: {path} records an identifier this Cairn refuses ({refused}){}",
+                    next("replaces it"),
                 )
             });
             let changed = (!source_unchanged).then(|| {
                 format!(
                     "note: {} has changed since {path} was written, so its target was verified \
-                     for another revision of the file; the next {compile} rewrites the lock",
+                     for another revision of the file{}",
                     file.display(),
+                    next("rewrites the lock"),
                 )
             });
             refused.chain(changed).collect()
@@ -316,8 +355,8 @@ fn verified_target_notes(
             kind: UnreadableKind::Invalid,
             error,
         } => vec![format!(
-            "note: {path}: the lockfile could not be read ({error}); the next {compile} replaces \
-             it"
+            "note: {path}: the lockfile could not be read ({error}){}",
+            next("replaces it"),
         )],
         LockReading::Unreadable {
             kind: UnreadableKind::Io,
@@ -325,7 +364,65 @@ fn verified_target_notes(
         } => vec![format!(
             "note: {path}: the lockfile could not be read ({error})"
         )],
-    }
+    };
+    notes.extend(refused_lock_note(file, lock, writer));
+    notes
+}
+
+/// The note saying why `cairn compile` writes no lock of `file` at `lock`, and what to pass
+/// instead, or `None` when it writes one there.
+fn refused_lock_note(file: &Path, lock: &Path, writer: &LockWriter) -> Option<String> {
+    let (shown, source) = (lock.display(), file.display());
+    let names = |path: WritePath| match path {
+        WritePath::Final => format!("which names {source}, the source"),
+        WritePath::Scratch(scratch) => format!(
+            "whose scratch file {} names {source}, the source",
+            scratch.of(lock).display(),
+        ),
+    };
+    let linked = "a link makes them one file, so give `--lock` a `.lock` path elsewhere";
+    let (why, fix) = match writer {
+        LockWriter::Plain | LockWriter::Flagged => return None,
+        LockWriter::Unidentified(Unidentified { path, error }) => {
+            return Some(format!(
+                "note: `cairn compile` refuses to write {shown}, since it cannot tell {} from \
+                 {source}, the source ({error}); check that {} can be read, or give `--lock` a \
+                 `.lock` path elsewhere",
+                path.display(),
+                path.display(),
+            ));
+        }
+        LockWriter::DefaultRefused(path) => {
+            return Some(format!(
+                "note: `cairn compile` refuses to write {shown}, {}; {linked}",
+                names(*path),
+            ));
+        }
+        LockWriter::FlagRefused(LockPathRefusal::Source(Reached { path, by })) => (
+            names(*path),
+            match by {
+                Reach::Name => "give `--lock` a `.lock` path".to_owned(),
+                Reach::Link => linked.to_owned(),
+            },
+        ),
+        LockWriter::FlagRefused(LockPathRefusal::SourceName) => (
+            "which ends in `.crn` as a source does".to_owned(),
+            format!(
+                "give `--lock` a `.lock` path, such as {}",
+                suggested_lock_path(lock).display(),
+            ),
+        ),
+    };
+    let leave_out = match default_lock_refusal(file) {
+        Ok(None) => format!(
+            ", or leave it out to read {}",
+            default_lock_path(file).display()
+        ),
+        Ok(Some(_)) | Err(_) => String::new(),
+    };
+    Some(format!(
+        "note: `cairn compile` refuses `--lock {shown}`, {why}; {fix}{leave_out}"
+    ))
 }
 
 /// Its own module, so [`requested_editions`] is the only way to build a [`RequestedEditions`].

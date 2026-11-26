@@ -7,7 +7,9 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use cairn_lang_core::check::LineStarts;
+use cairn_lang_formats::file_identity::{NamedFile, Reach, Unidentified};
 use cairn_lang_formats::import::{ImportFormat, import_raw};
+use cairn_lang_formats::write_path::WritePath;
 
 use crate::report::report_diagnostics;
 use crate::staging::{Kind, StagedSet};
@@ -18,14 +20,10 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
         refuse_extension(file, "import");
         return ExitCode::from(2);
     };
+    let flag = out;
     let out = out.map_or_else(|| default_out(file), Path::to_path_buf);
-    if names_one_file(file, &out) {
-        eprintln!(
-            "error: `--out {}` names the file being imported",
-            out.display()
-        );
-        eprintln!("  note: give `--out` a `.crn` path, or leave it out to write `<stem>.raw.crn`");
-        return ExitCode::from(2);
+    if let Err(code) = check_file_is_left_alone(file, flag, &out) {
+        return code;
     }
     let reader = match open_structure(file) {
         Ok(reader) => reader,
@@ -61,20 +59,68 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Refuse an import that would write its source at `out`, which `--out` names when `flag` is
+/// given, through a path reaching `file`, the structure file it reads.
+fn check_file_is_left_alone(file: &Path, flag: Option<&Path>, out: &Path) -> Result<(), ExitCode> {
+    let structure = match NamedFile::at(file) {
+        Ok(Some(structure)) => structure,
+        Ok(None) => return Ok(()),
+        Err(unidentified) => return Err(report_unidentified(file, out, &unidentified)),
+    };
+    let reached = match WritePath::reaching(&structure, out) {
+        Ok(None) => return Ok(()),
+        Ok(Some(reached)) => reached,
+        Err(unidentified) => return Err(report_unidentified(file, out, &unidentified)),
+    };
+    let shown = match flag {
+        Some(_) => format!("`--out {}`", out.display()),
+        None => format!("source `{}`", out.display()),
+    };
+    match reached.path {
+        WritePath::Final => eprintln!("error: {shown} names the file being imported"),
+        WritePath::Scratch(scratch) => eprintln!(
+            "error: {shown} would put its scratch file `{}` over the file being imported",
+            scratch.of(out).display(),
+        ),
+    }
+    let fix = match reached.by {
+        Reach::Name => "give `--out` a `.crn` path",
+        Reach::Link => "a link makes them one file; give `--out` a `.crn` path elsewhere",
+    };
+    let default_free = flag.is_some()
+        && WritePath::reaching(&structure, &default_out(file))
+            .is_ok_and(|reached| reached.is_none());
+    let leave_out = if default_free {
+        ", or leave it out to write `<stem>.raw.crn`"
+    } else {
+        ""
+    };
+    eprintln!("  note: {fix}{leave_out}");
+    Err(ExitCode::from(2))
+}
+
+/// Say that the file system cannot tell `unidentified`'s path, one the source at `out` is written
+/// through, from `file`, the structure file being imported.
+fn report_unidentified(file: &Path, out: &Path, unidentified: &Unidentified) -> ExitCode {
+    eprintln!(
+        "error: cannot tell whether source `{}` would be written over `{}`, the file being \
+         imported: {unidentified}",
+        out.display(),
+        file.display(),
+    );
+    eprintln!(
+        "  note: check that `{}` can be read, or give `--out` a `.crn` path elsewhere",
+        unidentified.path.display(),
+    );
+    ExitCode::from(1)
+}
+
 /// `<stem>.raw.crn` beside `file`.
 fn default_out(file: &Path) -> PathBuf {
     let stem = file
         .file_stem()
         .map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
     file.with_file_name(format!("{stem}.raw.crn"))
-}
-
-/// Whether `file` and `out` are one file on disk.
-fn names_one_file(file: &Path, out: &Path) -> bool {
-    match (std::fs::canonicalize(file), std::fs::canonicalize(out)) {
-        (Ok(file), Ok(out)) => file == out,
-        _ => false,
-    }
 }
 
 /// Write `source` to `out` whole or not at all, creating the directory it is in.

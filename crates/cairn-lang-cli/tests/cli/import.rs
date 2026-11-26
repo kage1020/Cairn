@@ -8,7 +8,9 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 
-use crate::common::{Run, cairn_argv, compile, example_in_tempdir, nbt_body, write_source};
+use crate::common::{
+    Run, cairn_argv, compile, example_in_tempdir, folds_case, nbt_body, write_source,
+};
 
 /// The warning every import prints first.
 const INTENT_LOSS: &str = "warning[W_SEMANTIC_LOSS]: an import recovers blocks and their \
@@ -283,5 +285,152 @@ fn a_structure_file_is_named_by_its_extension_in_any_case() {
             "# imported from `COTTAGE.NBT`, a Java structure file saved at DataVersion 4189 \
              (1.21.4)"
         )
+    );
+}
+
+/// The note under an `--out` a link makes the file being imported, then `leave_out`.
+fn linked_out_fix(leave_out: &str) -> String {
+    format!("  note: a link makes them one file; give `--out` a `.crn` path elsewhere{leave_out}\n")
+}
+
+/// What leaving `--out` out writes, when nothing links it to the file.
+const LEAVE_OUT: &str = ", or leave it out to write `<stem>.raw.crn`";
+
+/// Import `artifact` with `args` after it, and assert it is refused with exit `code` and `stderr`,
+/// writing nothing in its directory and leaving the file as it was.
+fn assert_import_refused(artifact: &Path, args: &[&Path], code: i32, stderr: &str) {
+    let dir = artifact.parent().expect("the artifact has a directory");
+    let original = fs::read(artifact).expect("the artifact reads");
+    let before = entries(dir);
+
+    let run = import(&[[artifact].as_slice(), args].concat());
+
+    assert_eq!(
+        (run.code, run.stdout.as_str(), run.stderr.as_str()),
+        (Some(code), "", stderr),
+        "{args:?}",
+    );
+    assert_eq!(entries(dir), before, "{args:?}");
+    assert_eq!(
+        fs::read(artifact).expect("the artifact reads"),
+        original,
+        "{args:?}"
+    );
+}
+
+#[test]
+fn an_out_reaching_the_imported_file_by_another_name_is_refused() {
+    let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let dir = artifact.parent().expect("built").to_path_buf();
+    let twin = dir.join("twin.crn");
+    fs::hard_link(&artifact, &twin).expect("hard-link the artifact");
+    let names = |out: &Path| {
+        format!(
+            "error: `--out {}` names the file being imported\n",
+            out.display()
+        )
+    };
+
+    assert_import_refused(
+        &artifact,
+        &[Path::new("--out"), &twin],
+        2,
+        &format!("{}{}", names(&twin), linked_out_fix(LEAVE_OUT)),
+    );
+    let upper = dir.join("COTTAGE.NBT");
+    if folds_case(&dir) {
+        assert_import_refused(
+            &artifact,
+            &[Path::new("--out"), &upper],
+            2,
+            &format!(
+                "{}  note: give `--out` a `.crn` path{LEAVE_OUT}\n",
+                names(&upper)
+            ),
+        );
+    }
+}
+
+#[test]
+fn an_out_whose_scratch_file_reaches_the_imported_file_is_refused() {
+    let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let dir = artifact.parent().expect("built").to_path_buf();
+    for name in ["staged.crn.tmp", "backup.crn.bak"] {
+        fs::hard_link(&artifact, dir.join(name)).expect("hard-link the artifact");
+    }
+
+    for (out, scratch) in [
+        ("staged.crn", "staged.crn.tmp"),
+        ("backup.crn", "backup.crn.bak"),
+    ] {
+        let (out, scratch) = (dir.join(out), dir.join(scratch));
+        assert_import_refused(
+            &artifact,
+            &[Path::new("--out"), &out],
+            2,
+            &format!(
+                "error: `--out {}` would put its scratch file `{}` over the file being \
+                 imported\n{}",
+                out.display(),
+                scratch.display(),
+                linked_out_fix(LEAVE_OUT),
+            ),
+        );
+    }
+}
+
+#[test]
+fn a_default_out_linked_to_the_imported_file_is_refused_with_no_default_offered() {
+    let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let out = artifact.with_file_name("cottage.raw.crn");
+    let scratch = artifact.with_file_name("cottage.raw.crn.tmp");
+    fs::hard_link(&artifact, &scratch).expect("hard-link the artifact");
+
+    assert_import_refused(
+        &artifact,
+        &[],
+        2,
+        &format!(
+            "error: source `{}` would put its scratch file `{}` over the file being imported\n{}",
+            out.display(),
+            scratch.display(),
+            linked_out_fix(""),
+        ),
+    );
+    assert_import_refused(
+        &artifact,
+        &[Path::new("--out"), &out],
+        2,
+        &format!(
+            "error: `--out {}` would put its scratch file `{}` over the file being imported\n{}",
+            out.display(),
+            scratch.display(),
+            linked_out_fix(""),
+        ),
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_out_the_file_system_cannot_answer_for_is_refused() {
+    let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let out = artifact.with_file_name("raw.crn");
+    let looped = artifact.with_file_name("raw.crn.tmp");
+    std::os::unix::fs::symlink("raw.crn.tmp", &looped).expect("symlink to itself");
+    let error = fs::metadata(&looped).expect_err("a loop reaches no file");
+
+    assert_import_refused(
+        &artifact,
+        &[Path::new("--out"), &out],
+        1,
+        &format!(
+            "error: cannot tell whether source `{}` would be written over `{}`, the file being \
+             imported: `{}`: {error}\n  note: check that `{}` can be read, or give `--out` a \
+             `.crn` path elsewhere\n",
+            out.display(),
+            artifact.display(),
+            looped.display(),
+            looped.display(),
+        ),
     );
 }

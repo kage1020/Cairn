@@ -169,7 +169,10 @@ pub(crate) enum Command {
             long,
             long_help = "Lockfile whose target the `verified target` row reports. Defaults to \
                 `<source>.lock` next to the source, the path `cairn compile` writes. A path with \
-                no file reports `(no lock)` rather than refusing the command"
+                no file reports `(no lock)` rather than refusing the command, and a path \
+                `cairn compile` refuses (a file name ending in `.crn`, or a path that reaches the \
+                source itself or through its `.tmp` or `.bak` scratch path) is still read, with a \
+                note saying what to pass instead"
         )]
         lock: Option<PathBuf>,
         /// Output format for the report.
@@ -248,10 +251,15 @@ pub(crate) enum Command {
             site to one file with a region per placement and walkway (`spec/ecosystem-interop` \
             \"Litematica\"); `--structure-format schem` writes them as Sponge Schematic version \
             3 `.schem` files, one per struct, placement and walkway, each offset by where it \
-            sits in its site (`spec/ecosystem-interop` \"Sponge Schematic\"). Exits 0 on \
-            success, 1 on parse, lowering, or I/O failure (including an unsupported `--target` \
-            or a state literal outside its block's states), and 2 when the source file cannot \
-            be located or `--structure-format` is given with `--edition bedrock`"
+            sits in its site (`spec/ecosystem-interop` \"Sponge Schematic\"). No file is \
+            written over the source, whether an artifact, the lock, or the `.tmp` or `.bak` \
+            scratch file each is written through (`spec/versioning-editions` \"Provenance and \
+            lock\"). Exits 0 on success, 1 on parse, lowering, or I/O failure (including an \
+            unsupported `--target`, a state literal outside its block's states, an artifact or a \
+            `<source>.lock` linked to the source that would be written over it, or a path the \
+            file system cannot tell from the source), and 2 when the source file cannot be \
+            located, `--structure-format` is given with `--edition bedrock`, or `--lock` ends in \
+            `.crn` or reaches the source, itself or through its `.tmp` or `.bak` scratch path"
     )]
     Compile {
         /// Path to the .crn file to compile.
@@ -303,7 +311,12 @@ pub(crate) enum Command {
             long,
             long_help = "Lockfile path. Defaults to `<source>.lock` next to the source (so \
                 `cottage.crn` → `cottage.crn.lock`), keeping per-source locks unambiguous when \
-                several `.crn` files share an output directory"
+                several `.crn` files share an output directory. A lock is never written over the \
+                source being compiled: a path that reaches the source's file (any spelling, a \
+                symbolic link or a hard link), one whose `.tmp` or `.bak` scratch path does \
+                (`notes` for `notes.tmp`), or one whose file name ends in `.crn`, is refused with \
+                exit 2 before the source is read, and one the file system cannot tell from the \
+                source with exit 1"
         )]
         lock: Option<PathBuf>,
     },
@@ -331,8 +344,10 @@ pub(crate) enum Command {
             Exits 0 when the source is written, warnings included; 1 when the file cannot be \
             read as its format, is saved past every shipped target, holds blocks the stamped \
             target refuses or that no raw member builds, or cannot be read or written for a \
-            reason other than absence; and 2 when the file cannot be located, its extension names no format this command \
-            reads, or `--out` names the file itself"
+            reason other than absence, or when the file system cannot tell a path the source is \
+            written through from the file; and 2 when the file cannot be located, its \
+            extension names no format this command reads, or the source would be written over \
+            the file, its path or its `.tmp` or `.bak` scratch path reaching it"
     )]
     Import {
         /// Path to the structure file to import.
@@ -354,7 +369,9 @@ pub(crate) enum Command {
             long,
             long_help = "Path to write the `.crn` to, its directory created if missing. Defaults \
                 to `<stem>.raw.crn` beside the file, so `house.litematic` → `house.raw.crn`. An \
-                existing file there is replaced"
+                existing file there is replaced, but a path that reaches the file being imported, \
+                itself or through its `.tmp` or `.bak` scratch path, by any spelling or link, is \
+                refused with exit 2"
         )]
         out: Option<PathBuf>,
     },

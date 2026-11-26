@@ -1240,14 +1240,22 @@ A note promises only what a compile does. A compile writes a missing lock, so th
 compile, unless the path's directory does not exist, which the note then says instead. A compile
 replaces a document the schema refuses, so that note names the compile too. A file that cannot be
 read, such as a directory at the path, can stop the compile from writing there as well, so that
-note names the cause alone.
+note names the cause alone. A compile refuses a lock one of whose paths names the source, a
+`--lock` whose file name ends in `.crn`, and a lock path the file system cannot tell from the source
+([§10.6](#106-provenance-and-lock)), rather than write or replace anything there, so no note names a
+compile for such a path: each says what it says of the lock and stops there, and one more note says
+why the compile refuses the path and gives the fix the compile's own refusal gives. For a `--lock`,
+it also offers leaving the flag out to read `<source>.lock`, unless the compile refuses that path
+too.
 
 None of them refuses the command. A lock is the record of an earlier build rather than an input to
 this report, so `cairn info` exits 0 with the placeholder in the row, as it does for an edition with
 no buildable target. A `--lock` naming a file that does not exist is `(no lock)`, like the default
 path, and so is a path through a directory that does not exist or through a file, on every
-platform. A newer schema is read no further than its version, because its field names need not mean
-what this release's do ([§10.6](#106-provenance-and-lock)).
+platform. A lock path a compile refuses is read as any other path is, so one that names the source
+reads a document the schema refuses, `(unreadable lock)`. A newer schema is read no further than
+its version, because its field names need not mean what this release's do
+([§10.6](#106-provenance-and-lock)).
 
 `--format json` carries the row as `verified_target`, an object that always has `status` and
 `path`, the lock path as the note prints it, and by `status` also:
@@ -1318,6 +1326,46 @@ catalog's text ([§10.3](#103-backend--data-tables)). `member_version_sensitivit
 `semantic-sensitive` row](#the-semantic-sensitive-row) finds for the target's edition, reading the
 blocks as the target does, and each `reason` is the row's reason and boundary as `<reason> at
 <boundary>`.
+
+A compile writes each of its files, every artifact and the lock, through two scratch paths beside
+it: the file is written at its path with `.tmp` added and renamed into place, and a file already at
+its path is moved aside to the path with `.bak` added until the new one is there. A build that
+fails partway puts the directory back as it was.
+
+A compile never writes over the source it compiles. No path it writes a file through, the file's
+own or either scratch path, may name the source, and every path that reaches the source's file
+names it: relative or absolute, through a symbolic link or a hard link, or spelled in another case
+where the directory folds case. The file system says which file a path reaches, by its device and
+inode, or on Windows by its volume and file index, so every link to one file is that file. A path
+names the source by name when it is the source's own entry in the source's directory, however it is
+spelled, and through a link when it is another entry for the same file.
+
+A `--lock` one of whose paths names the source, such as the source itself, or `notes` when the
+source is `notes.tmp`, is a usage error, exit 2, refused before the source is read. Where each
+artifact goes is known only once the source is lowered, so an artifact one of whose paths names the
+source, such as `hut.nbt` when the source is `hut.nbt` and builds `struct hut`, is refused then,
+exit 1, as is `<source>.lock` when a link makes one of its paths the source. Either way the
+compile writes no artifact and no lock, and the source is left as it was.
+
+A path that reaches nothing, because a component is missing or is a file, does not name the source.
+One the file system cannot answer for, such as a loop of symbolic links or a file it refuses to
+open, is never taken for another file: the compile is refused with exit 1 where a path naming the
+source would be, before the source is read for a `--lock` and once it is lowered for an artifact or
+`<source>.lock`, and the refusal names the path and the file system's answer.
+
+Each refusal's note gives a fix that works for the way the path names the source. A path that names
+it by name takes another name: a `.lock` path for a `--lock`, and for an artifact an `--out` naming
+another directory, or a source name ending in `.crn`, which no artifact has. A path a link makes the
+source has such a name already, so its note says that a link makes them one file and gives a path
+elsewhere: a `.lock` path elsewhere for a lock, an `--out` naming another directory for an artifact.
+A note under a `--lock` offers leaving the flag out only when the compile would write
+`<source>.lock`.
+
+A `--lock` whose file name ends in `.crn`, in any case and with any trailing dots and spaces, which
+Windows drops from a file name, is the same usage error, exit 2 before the source is read, whatever
+file it names or none: a lock is never a source, and `other.crn` is most likely `other.crn.lock`
+that a shell completed only as far as the source's name. Its note gives that path with the trailing
+dots and spaces dropped and `.lock` added.
 
 `resolved_ir_hash` is the core of reproducibility: it fixes the IR after macro expansion, default
 filling, and address assignment. The `members` record of each member that built a cell or placed an
