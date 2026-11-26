@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockArrayIr, Dims, Face, PaletteIndex, ResolvedBlock, ResolvedMember,
+    TargetRegistry,
 };
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{Actuator, IntentModule, Member, SENSOR_HOSTS};
@@ -19,12 +20,14 @@ type Cell = (u32, u32, u32);
 
 /// An `E_NO_PORTABLE_IMPL` for each component of `built` whose behaviour on `edition` depends on
 /// block-update order: an observer reading back an actuator the circuit drives, and on Java a
-/// driven piston or dispenser that a sensor powers through the cell above it.
+/// driven piston or dispenser that a sensor powers through the cell above it, `registry` saying
+/// which blocks pass that power on.
 #[must_use]
 pub fn verify_portable(
     module: &IntentModule,
     built: &BlockArrayIr,
     edition: Edition,
+    registry: Option<&dyn TargetRegistry>,
 ) -> Vec<Diagnostic> {
     let lines = DeclaredLines::of(module);
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
@@ -33,7 +36,7 @@ pub fn verify_portable(
         let Some(array) = built.structures.get(key) else {
             continue;
         };
-        let body = Body::of(members, array, &lines);
+        let body = Body::of(members, array, &lines, registry);
         for diagnostic in body.findings(edition) {
             if seen.insert((diagnostic.span.start, diagnostic.span.end)) {
                 diagnostics.push(diagnostic);
@@ -129,6 +132,7 @@ impl Component<'_> {
 struct Body<'a> {
     components: Vec<Component<'a>>,
     array: &'a BlockArray,
+    registry: Option<&'a dyn TargetRegistry>,
 }
 
 impl<'a> Body<'a> {
@@ -136,6 +140,7 @@ impl<'a> Body<'a> {
         members: &'a [ResolvedMember],
         array: &'a BlockArray,
         lines: &'a DeclaredLines<'_>,
+        registry: Option<&'a dyn TargetRegistry>,
     ) -> Self {
         let components = members
             .iter()
@@ -167,7 +172,11 @@ impl<'a> Body<'a> {
                 })
             })
             .collect();
-        Self { components, array }
+        Self {
+            components,
+            array,
+            registry,
+        }
     }
 
     fn findings(&self, edition: Edition) -> Vec<Diagnostic> {
@@ -312,20 +321,25 @@ impl<'a> Body<'a> {
         sources
     }
 
-    /// Whether the block at `cell` passes on the power a sensor gives it: any block but air, a
-    /// sensor, a piston and a door.
+    /// Whether the block at `cell` passes on the power a sensor gives it, as the registry says,
+    /// or where it cannot say, any block but air, a sensor, a piston and a door.
     fn conducts(&self, cell: Cell) -> bool {
-        let filled = self
+        let Some(slot) = self
             .array
             .dims
             .index(cell.0, cell.1, cell.2)
             .and_then(|i| self.array.voxels.get(i))
-            .is_some_and(|slot| *slot != PaletteIndex::AIR);
-        filled
-            && !self.components.iter().any(|component| {
-                component.cells.contains(&cell)
-                    && !matches!(component.keyword(), "lamp" | "dispenser")
-            })
+            .filter(|slot| **slot != PaletteIndex::AIR)
+        else {
+            return false;
+        };
+        let state = self.array.palette.entries.get(usize::from(slot.0));
+        if let Some(conducts) = state.and_then(|state| self.registry?.conducts(state)) {
+            return conducts;
+        }
+        !self.components.iter().any(|component| {
+            component.cells.contains(&cell) && !matches!(component.keyword(), "lamp" | "dispenser")
+        })
     }
 }
 

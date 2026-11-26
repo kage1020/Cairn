@@ -58,7 +58,7 @@ fn place_and_route(c: &mut Criterion) {
             let synth = synthesize(&intent);
             assert_clean("synthesis", &synth.diagnostics);
             let netlist = compile_edition_netlist(&compile_netlist(&synth.scoped), edition);
-            let placement = compile_placement(&netlist, &intent, &built);
+            let placement = compile_placement(&netlist, &intent, &built, None);
             assert_clean("placement", &placement.diagnostics);
             let routing = compile_routing(&placement.scoped);
             assert_clean("routing", &routing.diagnostics);
@@ -72,7 +72,7 @@ fn place_and_route(c: &mut Criterion) {
 
             let label = format!("{name}/{}", edition.as_str());
             group.bench_function(format!("placement/{label}"), |b| {
-                b.iter(|| compile_placement(black_box(&netlist), &intent, &built));
+                b.iter(|| compile_placement(black_box(&netlist), &intent, &built, None));
             });
             group.bench_function(format!("routing/{label}"), |b| {
                 b.iter(|| compile_routing(black_box(&placement.scoped)));

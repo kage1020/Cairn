@@ -62,6 +62,7 @@ pub(crate) fn placed(source: &str, edition: Edition) -> (ScopedCircuitLayout, Ve
         &netlist(&module, edition),
         &module,
         &built(&module, edition),
+        Some(&Named),
     );
     (out.scoped, out.diagnostics)
 }

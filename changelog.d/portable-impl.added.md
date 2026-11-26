@@ -6,8 +6,9 @@
     `edge_rising(sig.x) or edge_falling(sig.x)`;
   - on Java, a driven `piston` or `dispenser` that a sensor powers through the cell above it and
     not directly, by giving off a signal into that cell or by powering whole a block beside it,
-    which any block but air, a sensor, a piston and a door passes on. It is reported at the
-    actuator, with a note at the sensor.
+    which a block passes on when the target's `conductors` table says it conducts, or where the
+    target cannot say, when it is any block but air, a sensor, a piston and a door. It is reported
+    at the actuator, with a note at the sensor.
 
   Tier 0 parts and raw members are not checked.
 - *(cli)* `cairn synth --experimental-logic-synth` runs the check at every edition-tagged stage and

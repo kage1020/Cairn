@@ -349,7 +349,7 @@ fn dumps(ir: &IntentModule, edition: Edition) -> Vec<Dump> {
     let registry = builtin_pack(edition).view(None);
     let built = lower_to_block_array(ir, &resolve(ir, Some(edition)), Some(&registry));
     assert!(built.diagnostics.is_empty(), "{:?}", built.diagnostics);
-    let placement = compile_placement(&edition_netlist, ir, &built);
+    let placement = compile_placement(&edition_netlist, ir, &built, Some(&registry));
     let placed = findings(&mut so_far, &placement.diagnostics);
     let routing = compile_routing(&placement.scoped);
     let routed = findings(&mut so_far, &routing.diagnostics);

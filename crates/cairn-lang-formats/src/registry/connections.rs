@@ -8,6 +8,7 @@ use cairn_lang_core::block_array::{Covers, Face, Faces, JoinKind, Joins};
 use indexmap::IndexMap;
 use serde::Deserialize;
 
+use super::held::{self, Held};
 use super::namespaced;
 
 /// The highest `connections.schema_version` this build reads.
@@ -181,42 +182,6 @@ enum RowKind {
     },
 }
 
-/// What holds of a row's blocks, parsed from a [`ByState`].
-#[derive(Debug, Clone)]
-enum Held<T> {
-    Every(T),
-    Lookup {
-        reads: Vec<String>,
-        map: HashMap<String, T>,
-    },
-}
-
-impl<T: Copy + Default> Held<T> {
-    /// What holds where `value` gives each property's value; nothing for values the map lacks.
-    fn at<'v>(&self, value: impl Fn(&str) -> Option<&'v str>) -> T {
-        match self {
-            Self::Every(held) => *held,
-            Self::Lookup { reads, map } => {
-                let values: Option<Vec<&str>> = reads.iter().map(|key| value(key)).collect();
-                values
-                    .and_then(|values| map.get(&values.join(",")).copied())
-                    .unwrap_or_default()
-            }
-        }
-    }
-
-    /// Each property the lookup reads, paired with every value one of its keys names.
-    fn named(&self) -> impl Iterator<Item = (&str, &str)> {
-        let (reads, map): (&[String], Option<&HashMap<String, T>>) = match self {
-            Self::Every(_) => (&[], None),
-            Self::Lookup { reads, map } => (reads, Some(map)),
-        };
-        map.into_iter()
-            .flat_map(HashMap::keys)
-            .flat_map(move |key| reads.iter().map(String::as_str).zip(key.split(',')))
-    }
-}
-
 impl ConnectionIndex {
     /// An index with no table, for a pack without the component.
     #[must_use]
@@ -352,11 +317,11 @@ impl ConnectionIndex {
         });
         Some(Joins {
             kind,
-            sturdy: row.sturdy.at(value),
-            covers: row.covers.at(value),
+            sturdy: row.sturdy.at(value).unwrap_or_default(),
+            covers: row.covers.at(value).unwrap_or_default(),
             never_joined_by_face: row.never_joined_by_face,
             raises_post: row.raises_post,
-            dust: row.dust.at(value),
+            dust: row.dust.at(value).unwrap_or_default(),
         })
     }
 }
@@ -402,31 +367,17 @@ fn held<T: Default>(
     written: Option<&ByState>,
     parse: impl Fn(&[String]) -> Result<T, String>,
 ) -> Result<Held<T>, String> {
-    let lookup = match written {
-        None => return Ok(Held::Every(T::default())),
-        Some(ByState::Every(names)) => return Ok(Held::Every(parse(names)?)),
-        Some(ByState::Lookup(lookup)) => lookup,
-    };
-    if lookup.reads.is_empty() || lookup.map.is_empty() {
-        return Err(format!(
-            "the `{field}` lookup reads no property or maps no value; a list says what holds in \
-             every state"
-        ));
+    match written {
+        None => Ok(Held::Every(T::default())),
+        Some(ByState::Every(names)) => Ok(Held::Every(parse(names)?)),
+        Some(ByState::Lookup(lookup)) => held::lookup(
+            field,
+            &lookup.reads,
+            &lookup.map,
+            "a list says what holds in every state",
+            |names| parse(names),
+        ),
     }
-    let mut map = HashMap::with_capacity(lookup.map.len());
-    for (key, names) in &lookup.map {
-        if key.split(',').count() != lookup.reads.len() {
-            return Err(format!(
-                "the `{field}` key `{key}` holds no value for each of {}",
-                lookup.reads.join(", ")
-            ));
-        }
-        map.insert(key.clone(), parse(names)?);
-    }
-    Ok(Held::Lookup {
-        reads: lookup.reads.clone(),
-        map,
-    })
 }
 
 fn parse_row(row: &ConnectionRow) -> Result<Row, String> {

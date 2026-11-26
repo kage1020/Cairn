@@ -24,7 +24,8 @@ use thiserror::Error;
 
 use super::absent::{AbsentError, AbsentIndex};
 use super::aliases::{AliasError, AliasIndex};
-use super::blocks::{BlocksError, BlocksIndex};
+use super::blocks::{BlockStates, BlocksError, BlocksIndex};
+use super::conductors::{ConductorIndex, ConductorsError};
 use super::connections::{ConnectionIndex, ConnectionsError};
 use super::constraints::{ConstraintIndex, ConstraintsCatalog, ConstraintsError};
 use super::data_versions::{
@@ -52,6 +53,7 @@ struct BuiltinFiles {
     absent: &'static str,
     meanings: &'static str,
     connections: &'static str,
+    conductors: &'static str,
     paintings: &'static str,
     states: Option<&'static str>,
     sensitivity: Option<&'static str>,
@@ -90,6 +92,7 @@ macro_rules! builtin_files {
             absent: include_str!(concat!("../../registry-data/", $dir, "/absent.json")),
             meanings: include_str!(concat!("../../registry-data/", $dir, "/meanings.json")),
             connections: include_str!(concat!("../../registry-data/", $dir, "/connections.json")),
+            conductors: include_str!(concat!("../../registry-data/", $dir, "/conductors.json")),
             paintings: include_str!(concat!("../../registry-data/", $dir, "/paintings.json")),
             states: $states,
             sensitivity: $sensitivity,
@@ -129,6 +132,7 @@ pub struct RegistryPack {
     meanings: MeaningIndex,
     states: Option<StateMapIndex>,
     connections: ConnectionIndex,
+    conductors: ConductorIndex,
     paintings: PaintingIndex,
     bytes_hash: HashHex,
     source: PackSource,
@@ -154,6 +158,7 @@ pub struct PackView<'a> {
     /// The targetable versions, which alone a note may offer as a `--target`.
     targetable: Vec<&'a str>,
     connections: &'a ConnectionIndex,
+    conductors: &'a ConductorIndex,
     paintings: &'a PaintingIndex,
     /// The constraint catalog the view's checks read; `None` runs none.
     constraints: Option<&'a ConstraintIndex>,
@@ -303,6 +308,21 @@ impl TargetRegistry for PackView<'_> {
         let mut said = versions.into_iter().filter_map(holds_at);
         let first = said.next()?;
         said.all(|holds| holds == first).then_some(first)
+    }
+
+    fn conducts(&self, state: &BlockState) -> Option<bool> {
+        if let Some(version) = self.mc_version {
+            return self.conduction_at(version, state).settled();
+        }
+        // Unpinned, a state is read as every version that gives it agrees, and one that leaves it
+        // unsettled agrees with none (`spec/redstone` "Place-and-route").
+        let mut said = self
+            .conductors
+            .versions()
+            .map(|version| self.conduction_at(version, state))
+            .filter(|said| *said != Conduction::Undeclared);
+        let first = said.next()?;
+        said.all(|other| other == first).then_some(first)?.settled()
     }
 
     fn meant(&self, state: &BlockState) -> Option<BlockState> {
@@ -460,6 +480,33 @@ impl TargetRegistry for PackView<'_> {
 
 /// A block's canonical states at one version: each property with the values it takes.
 type Domain = IndexMap<String, Vec<String>>;
+
+/// Whether `domain` gives each property `properties` names the value it names.
+fn gives(domain: &Domain, properties: &IndexMap<String, String>) -> bool {
+    properties
+        .iter()
+        .all(|(key, value)| domain.get(key).is_some_and(|values| values.contains(value)))
+}
+
+/// What one version's tables say of whether a block state conducts redstone power.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Conduction {
+    /// The version gives no such block, or not this state of it.
+    Undeclared,
+    /// The version gives the state, and its tables do not settle whether it conducts.
+    Unsettled,
+    /// Whether it conducts.
+    Settled(bool),
+}
+
+impl Conduction {
+    fn settled(self) -> Option<bool> {
+        match self {
+            Self::Settled(conducts) => Some(conducts),
+            Self::Undeclared | Self::Unsettled => None,
+        }
+    }
+}
 
 impl<'a> PackView<'a> {
     /// This view, with `catalog`'s checks run on what it lowers (`spec/lint` "Constraint checks").
@@ -664,19 +711,49 @@ impl<'a> PackView<'a> {
         joins.all(|other| other == Some(first)).then_some(first)
     }
 
+    /// What `version`'s tables say of whether `state` conducts, read on Bedrock as the canonical
+    /// state of each block its id is written from there.
+    fn conduction_at(&self, version: &str, state: &BlockState) -> Conduction {
+        let id = state.id.as_str();
+        if self.conductors.ids_at(version).is_none() {
+            return Conduction::Unsettled;
+        }
+        let declared = self.blocks.ids_for(version).map(|ids| contains(ids, id));
+        let outside = self
+            .domain_at(version, id)
+            .is_some_and(|domain| !gives(&domain, &state.properties));
+        // A Bedrock id its own table does not declare may still spell a canonical block.
+        if outside || (self.edition == Edition::Java && declared == Some(false)) {
+            return Conduction::Undeclared;
+        }
+        let canonical = match self.edition {
+            Edition::Java if declared.is_none() && !self.conductors.describes(version, id) => {
+                Vec::new()
+            }
+            Edition::Java => vec![(id, Some(state.properties.clone()))],
+            Edition::Bedrock => self
+                .state_maps
+                .and_then(|maps| maps.at(version))
+                .map(|states| states.canonical_states(id, &state.properties))
+                .unwrap_or_default(),
+        };
+        if canonical.is_empty() && declared == Some(false) {
+            return Conduction::Undeclared;
+        }
+        let mut answers = canonical.into_iter().map(|(java, full)| {
+            full.and_then(|full| self.conductors.conducts(version, java, &full))
+        });
+        match answers.next().flatten() {
+            Some(first) if answers.all(|other| other == Some(first)) => Conduction::Settled(first),
+            _ => Conduction::Unsettled,
+        }
+    }
+
     /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
     /// check against there.
     fn domain_at(&self, version: &str, id: &str) -> Option<Domain> {
         match self.edition {
-            Edition::Java => self.blocks.states_of(version, id).map(|states| {
-                states
-                    .properties()
-                    .map(|(property, values)| {
-                        let values = values.iter().map(ToString::to_string).collect();
-                        (property.to_owned(), values)
-                    })
-                    .collect()
-            }),
+            Edition::Java => self.blocks.states_of(version, id).map(domain_of),
             Edition::Bedrock => self.state_maps?.at(version)?.canonical_domain(id),
         }
     }
@@ -712,6 +789,17 @@ pub struct Respelling {
 /// Whether the sorted `ids` hold `id`.
 fn contains(ids: &[String], id: &str) -> bool {
     ids.binary_search_by(|known| known.as_str().cmp(id)).is_ok()
+}
+
+/// The values `states` gives each property, as text.
+fn domain_of(states: &BlockStates) -> Domain {
+    states
+        .properties()
+        .map(|(property, values)| {
+            let values = values.iter().map(ToString::to_string).collect();
+            (property.to_owned(), values)
+        })
+        .collect()
 }
 
 /// A registry pack that could not be read or failed validation.
@@ -873,6 +961,67 @@ pub enum RegistryError {
         /// The validation error.
         #[from]
         source: PaintingsError,
+    },
+    /// The pack's `conductors` component failed to validate.
+    #[error(transparent)]
+    Conductors {
+        /// The validation error.
+        #[from]
+        source: ConductorsError,
+    },
+    /// `conductors` lacks a table for a targetable version, or has one for a version not in the
+    /// table.
+    #[error(
+        "registry pack `conductors` and `data_versions` disagree: no table for [{missing}], and a table for unsupported [{extra}]"
+    )]
+    ConductorsVersionMismatch {
+        /// Versions only `data_versions` declares, comma-joined.
+        missing: String,
+        /// Versions only `conductors` describes, comma-joined.
+        extra: String,
+    },
+    /// `conductors` describes a block that the table it is checked against, `blocks` on Java and
+    /// `states` on Bedrock, does not declare at the version.
+    #[error(
+        "registry pack `conductors` describes `{id}`, which `{table}` does not declare at `{mc_version}`"
+    )]
+    ConductorsUnknownBlock {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// `"blocks"` or `"states"`.
+        table: &'static str,
+    },
+    /// `conductors` names a state that the table it is checked against does not give the block.
+    #[error(
+        "registry pack `conductors` names `{state}` of `{id}`, which `{table}` does not give it at `{mc_version}`"
+    )]
+    ConductorsUnknownState {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// The state, `property=value`.
+        state: String,
+        /// `"blocks"` or `"states"`.
+        table: &'static str,
+    },
+    /// `conductors` looks a block up by state with a map that holds no key for a state the table
+    /// it is checked against gives the block.
+    #[error(
+        "registry pack `conductors` maps no `{state}` of `{id}`, which `{table}` gives it at \
+         `{mc_version}`; a lookup maps every state of the properties it reads"
+    )]
+    ConductorsUnmappedState {
+        /// The version.
+        mc_version: String,
+        /// The id.
+        id: String,
+        /// The state, each property the lookup reads as `property=value`, comma-joined.
+        state: String,
+        /// `"blocks"` or `"states"`.
+        table: &'static str,
     },
     /// `connections` lacks a table for a targetable version, or has one for a version not in the
     /// table.
@@ -1129,6 +1278,12 @@ impl RegistryPack {
         &self.connections
     }
 
+    /// The conductor tables, empty without the component.
+    #[must_use]
+    pub fn conductors(&self) -> &ConductorIndex {
+        &self.conductors
+    }
+
     /// The painting tables, empty without the component.
     #[must_use]
     pub fn paintings(&self) -> &PaintingIndex {
@@ -1316,6 +1471,7 @@ impl RegistryPack {
                 .map(|e| e.mc_version.as_str())
                 .collect(),
             connections: &self.connections,
+            conductors: &self.conductors,
             paintings: &self.paintings,
             constraints: None,
             label: match mc_version {
@@ -1487,6 +1643,7 @@ enum Component {
     States,
     Sensitivity,
     Connections,
+    Conductors,
     Paintings,
 }
 
@@ -1503,6 +1660,7 @@ impl Component {
             Component::States => "states",
             Component::Sensitivity => "sensitivity",
             Component::Connections => "connections",
+            Component::Conductors => "conductors",
             Component::Paintings => "paintings",
         };
         RegistryError::File {
@@ -1536,6 +1694,7 @@ impl ComponentSource for BuiltinFiles {
             Component::States => embedded(self.states, "states")?,
             Component::Sensitivity => embedded(self.sensitivity, "sensitivity")?,
             Component::Connections => self.connections,
+            Component::Conductors => self.conductors,
             Component::Paintings => self.paintings,
         }))
     }
@@ -1635,6 +1794,8 @@ fn load_pack(
         ConnectionIndex::empty,
     )?;
     validate_connections(&connections, &data_versions, &blocks, expected_edition)?;
+    let (conductors, conductors_text) =
+        conductor_tables(source, &manifest, &data_versions, &blocks, states.as_ref())?;
     let (paintings, paintings_text) = optional_component(
         source,
         Component::Paintings,
@@ -1655,6 +1816,7 @@ fn load_pack(
             (&manifest.files.states, &states_text),
             (&manifest.files.sensitivity, &sensitivity_text),
             (&manifest.files.connections, &connections_text),
+            (&manifest.files.conductors, &conductors_text),
             (&manifest.files.paintings, &paintings_text),
         ],
     );
@@ -1668,6 +1830,7 @@ fn load_pack(
         meanings,
         states,
         connections,
+        conductors,
         paintings,
         bytes_hash,
         source: source.provenance(),
@@ -1947,6 +2110,112 @@ fn validate_connections(
                     state: format!("{key}={value}"),
                 });
             }
+        }
+    }
+    Ok(())
+}
+
+/// The pack's conductor tables and their text.
+fn conductor_tables<'s>(
+    source: &'s impl ComponentSource,
+    manifest: &PackManifest,
+    data_versions: &DataVersionTable,
+    blocks: &BlocksIndex,
+    states: Option<&StateMapIndex>,
+) -> Result<(ConductorIndex, ComponentText<'s>), RegistryError> {
+    let (conductors, text) = optional_component(
+        source,
+        Component::Conductors,
+        manifest.files.conductors.as_deref(),
+        ConductorIndex::from_catalog,
+        ConductorIndex::empty,
+    )?;
+    validate_conductors(&conductors, data_versions, blocks, states, manifest.edition)?;
+    Ok((conductors, text))
+}
+
+/// Refuses conductor tables that miss a targetable version or describe one `data_versions` lacks,
+/// that name a block or a state the tables they are read against do not give at the version, or
+/// whose lookup maps no key for a state those tables give.
+fn validate_conductors(
+    conductors: &ConductorIndex,
+    data_versions: &DataVersionTable,
+    blocks: &BlocksIndex,
+    states: Option<&StateMapIndex>,
+    edition: Edition,
+) -> Result<(), RegistryError> {
+    if conductors.is_empty() {
+        return Ok(());
+    }
+    let missing: Vec<&str> = data_versions
+        .versions
+        .iter()
+        .filter(|e| e.targetable && conductors.ids_at(&e.mc_version).is_none())
+        .map(|e| e.mc_version.as_str())
+        .collect();
+    let extra: Vec<&str> = conductors
+        .versions()
+        .filter(|v| !data_versions.versions.iter().any(|e| e.mc_version == *v))
+        .collect();
+    if !missing.is_empty() || !extra.is_empty() {
+        return Err(RegistryError::ConductorsVersionMismatch {
+            missing: missing.join(", "),
+            extra: extra.join(", "),
+        });
+    }
+    // A Bedrock pack's tables name the canonical blocks, which only its state map knows.
+    let (table, states) = match (edition, states) {
+        (Edition::Java, _) if blocks.is_empty() => return Ok(()),
+        (Edition::Java, _) => ("blocks", None),
+        (Edition::Bedrock, Some(states)) => ("states", Some(states)),
+        (Edition::Bedrock, None) => return Ok(()),
+    };
+    let domain = |version: &str, id: &str| -> Option<Domain> {
+        if let Some(states) = states {
+            return states.at(version)?.canonical_domain(id);
+        }
+        contains(blocks.ids_for(version)?, id).then(|| {
+            blocks
+                .states_of(version, id)
+                .map_or_else(Domain::new, domain_of)
+        })
+    };
+    for version in conductors.versions() {
+        let Some(described) = conductors.ids_at(version) else {
+            continue;
+        };
+        if let Some(unknown) = described
+            .into_iter()
+            .find(|id| domain(version, id).is_none())
+        {
+            return Err(RegistryError::ConductorsUnknownBlock {
+                mc_version: version.to_owned(),
+                id: unknown.to_owned(),
+                table,
+            });
+        }
+        for (id, key, value) in conductors.named_states(version) {
+            let held = domain(version, id).is_some_and(|domain| {
+                domain
+                    .get(key)
+                    .is_some_and(|values| values.iter().any(|held| held == value))
+            });
+            if !held {
+                return Err(RegistryError::ConductorsUnknownState {
+                    mc_version: version.to_owned(),
+                    id: id.to_owned(),
+                    state: format!("{key}={value}"),
+                    table,
+                });
+            }
+        }
+        if let Some((id, state)) = conductors.unmapped(version, |id| domain(version, id)) {
+            return Err(RegistryError::ConductorsUnmappedState {
+                mc_version: version.to_owned(),
+                id: id.to_owned(),
+                state,
+                table,
+            });
         }
     }
     Ok(())

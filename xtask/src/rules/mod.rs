@@ -1,5 +1,6 @@
 //! The rules `cargo xtask lint` runs, and the finding each one reports.
 
+mod bedrock_conductors;
 mod circuit_advice;
 mod comment_length;
 mod diagnostic_catalog;
@@ -54,6 +55,7 @@ pub const RULES: &[Rule] = &[
     module_cycles::RULE,
     circuit_advice::RULE,
     state_keys::RULE,
+    bedrock_conductors::RULE,
     furniture_library::RULE,
 ];
 

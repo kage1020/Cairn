@@ -1,34 +1,16 @@
 //! `E_NO_PORTABLE_IMPL`: a component of the built struct that reads another through a block
 //! update (`spec/redstone` "Edition differences").
 
-use cairn_lang_core::block_array::{
-    BlockArrayIr, BlockIdSet, BlockState, TargetRegistry, lower_to_block_array,
-};
-use cairn_lang_core::{Edition, IntentModule, lower, parse, resolve};
+use cairn_lang_core::block_array::{BlockArrayIr, TargetRegistry};
+use cairn_lang_core::{Edition, IntentModule, lower, parse};
 use cairn_lang_redstone::verify_portable;
 
-/// A target that spells every token as the block of its name, so the walls stand as written.
-struct Named;
+use crate::common::Named;
 
-impl TargetRegistry for Named {
-    fn lookup(&self, token: &str) -> Option<BlockState> {
-        let name = token.split('.').next()?;
-        Some(BlockState::bare(format!("minecraft:{name}")))
-    }
-
-    fn known_tokens(&self) -> Vec<String> {
-        Vec::new()
-    }
-
-    fn block_ids(&self) -> Option<BlockIdSet<'_>> {
-        None
-    }
-}
-
-/// `src` lowered, and built for `edition`.
+/// `src` lowered, and built for `edition` against [`Named`].
 fn built(src: &str, edition: Edition) -> (IntentModule, BlockArrayIr) {
     let intent = lower(&parse(src).expect("parse"));
-    let built = lower_to_block_array(&intent, &resolve(&intent, Some(edition)), Some(&Named));
+    let built = crate::common::built(&intent, edition);
     (intent, built)
 }
 
@@ -44,8 +26,17 @@ fn room(members: &str) -> String {
 
 /// Each finding on `edition` as the text it points at, its primary and its notes.
 fn found(src: &str, edition: Edition) -> Vec<(String, String, Vec<String>)> {
+    found_with(src, edition, Some(&Named))
+}
+
+/// [`found`], with `registry` saying which blocks pass power.
+fn found_with(
+    src: &str,
+    edition: Edition,
+    registry: Option<&dyn TargetRegistry>,
+) -> Vec<(String, String, Vec<String>)> {
     let (intent, built) = built(src, edition);
-    verify_portable(&intent, &built, edition)
+    verify_portable(&intent, &built, edition, registry)
         .into_iter()
         .map(|d| {
             assert_eq!(d.code.as_str(), "E_NO_PORTABLE_IMPL");
@@ -204,6 +195,21 @@ fn power_passes_through_any_block_but_air_a_sensor_a_piston_and_a_door() {
 }
 
 #[test]
+fn a_block_the_target_says_passes_no_power_carries_none_to_the_cell_above() {
+    let observer = "observer id=sw at=inside.back offset=4 y=2 facing=right -> sig.a";
+    let src = wired(&[PISTON, "raw_block mat=minecraft:glass at=3,2,1", observer]);
+    assert_eq!(found(&src, Edition::Java), []);
+    assert_eq!(
+        found_with(&src, Edition::Java, None),
+        [quasi_connected(
+            PISTON,
+            "the piston `p`",
+            "the observer `sw`"
+        )],
+    );
+}
+
+#[test]
 fn a_pressure_plate_powers_the_block_under_it_whole_and_daylight_powers_none() {
     let torch = "redstone_torch at=inside.back offset=2 y=2";
     let plate = "pressure_plate id=sw at=inside.back offset=2 y=3 -> sig.a";
@@ -349,18 +355,19 @@ fn the_note_points_at_the_binding_that_drives_the_actuator() {
          lever id=sw at=inside.back offset=1 y=1 -> sig.a\n  logic sig.l = sig.a or sig.o\n",
     );
     let (intent, built) = built(&src, Edition::Java);
-    let pointed: Vec<(&str, Vec<Option<&str>>)> = verify_portable(&intent, &built, Edition::Java)
-        .iter()
-        .map(|d| {
-            (
-                &src[d.span.clone()],
-                d.notes
-                    .iter()
-                    .map(|note| note.span.clone().map(|span| &src[span]))
-                    .collect(),
-            )
-        })
-        .collect();
+    let pointed: Vec<(&str, Vec<Option<&str>>)> =
+        verify_portable(&intent, &built, Edition::Java, Some(&Named))
+            .iter()
+            .map(|d| {
+                (
+                    &src[d.span.clone()],
+                    d.notes
+                        .iter()
+                        .map(|note| note.span.clone().map(|span| &src[span]))
+                        .collect(),
+                )
+            })
+            .collect();
     assert_eq!(
         pointed,
         [(

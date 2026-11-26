@@ -25,8 +25,8 @@ use crate::verify::{verify_latency, verify_truth_and_temporal};
 const COMPARATOR_ENTITY: &str = "minecraft:comparator";
 
 /// Synthesizes, places, routes and legalizes every scope's `logic` for `edition`, its block ids
-/// read from `registry`, and lays each circuit under the struct `built` holds for it, leaving
-/// `built` as it was when a phase reports an error.
+/// and the blocks that pass power read from `registry`, and lays each circuit under the struct
+/// `built` holds for it, leaving `built` as it was when a phase reports an error.
 pub fn build_circuits(
     module: &IntentModule,
     built: &mut BlockArrayIr,
@@ -39,10 +39,10 @@ pub fn build_circuits(
         return found.all;
     }
     let netlist = compile_edition_netlist(&compile_netlist(&synth.scoped), edition);
-    if found.stop(verify_portable(module, built, edition)) {
+    if found.stop(verify_portable(module, built, edition, registry)) {
         return found.all;
     }
-    let placement = compile_placement(&netlist, module, built);
+    let placement = compile_placement(&netlist, module, built, registry);
     if found.stop(placement.diagnostics) {
         return found.all;
     }

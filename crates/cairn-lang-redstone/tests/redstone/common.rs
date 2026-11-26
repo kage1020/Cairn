@@ -159,7 +159,8 @@ pub fn edition_netlist_from_source(
     (edition_netlist, intent)
 }
 
-/// A target that spells every token as the block of its name, so every member stands as written.
+/// A target that spells every token as the block of its name, so every member stands as written,
+/// and says that glass passes no power and stone, cobblestone and oak planks do.
 pub struct Named;
 
 impl TargetRegistry for Named {
@@ -175,6 +176,14 @@ impl TargetRegistry for Named {
     fn block_ids(&self) -> Option<BlockIdSet<'_>> {
         None
     }
+
+    fn conducts(&self, state: &BlockState) -> Option<bool> {
+        match state.id.as_str() {
+            "minecraft:glass" => Some(false),
+            "minecraft:stone" | "minecraft:cobblestone" | "minecraft:oak_planks" => Some(true),
+            _ => None,
+        }
+    }
 }
 
 /// `intent` built for `edition` against [`Named`].
@@ -185,7 +194,7 @@ pub fn built(intent: &IntentModule, edition: Edition) -> BlockArrayIr {
 /// The placement pass over `source`, its findings kept.
 pub fn placement_of(source: &str, edition: Edition) -> PlacementOutput {
     let (netlist, intent) = edition_netlist_from_source(source, edition);
-    compile_placement(&netlist, &intent, &built(&intent, edition))
+    compile_placement(&netlist, &intent, &built(&intent, edition), Some(&Named))
 }
 
 /// `source`'s circuits placed, failing on any finding, the lowering's included.
@@ -200,7 +209,7 @@ pub fn placed(source: &str, edition: Edition) -> ScopedCircuitLayout {
         "the fixture must lower: {:#?}",
         built.diagnostics,
     );
-    let out = compile_placement(&netlist, &intent, &built);
+    let out = compile_placement(&netlist, &intent, &built, Some(&Named));
     assert_clean("placement", &out.diagnostics);
     out.scoped
 }

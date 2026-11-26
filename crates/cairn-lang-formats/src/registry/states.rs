@@ -844,6 +844,31 @@ impl<'a> VersionStates<'a> {
         ids
     }
 
+    /// The canonical state of each block [`Self::java_ids`] reads `id` with the states `given` as:
+    /// `given` for its own Java block, else `given` filled in as the family of each Java block
+    /// mapped onto `id` fills it, `None` where that family leaves a property open.
+    #[must_use]
+    pub fn canonical_states<'s>(
+        &self,
+        id: &'s str,
+        given: &IndexMap<String, String>,
+    ) -> Vec<(&'s str, Option<IndexMap<String, String>>)>
+    where
+        'a: 's,
+    {
+        if self.reads_as_own(id, given) {
+            return vec![(id, Some(given.clone()))];
+        }
+        self.map
+            .onto
+            .get(id)
+            .map_or(&[][..], Vec::as_slice)
+            .iter()
+            .filter(|(_, at)| self.index.families[*at].takes(given))
+            .map(|(java, at)| (java.as_str(), self.index.families[*at].filled(given)))
+            .collect()
+    }
+
     /// Whether this version writes the Java block `java` as Bedrock blocks of its own: `java` is
     /// no Bedrock spelling here, the palette refuses none of its pairs, and no other Java block
     /// mapped onto the ids it is written as takes any of its forms, so what is written still says
@@ -1157,16 +1182,9 @@ impl VersionStates<'_> {
         {
             return bare_or(id, given, several(id, &fitting));
         }
-        let mut full = IndexMap::with_capacity(family.java.len());
-        for (key, held) in &family.java {
-            let value = match (given.get(key), &family.defaults[key]) {
-                (Some(value), _) => value,
-                (None, default) if held.contains(default) => default,
-                (None, _) if held.len() == 1 => &held[0],
-                (None, _) => return bare_or(id, given, several(id, &fitting)),
-            };
-            full.insert(key.clone(), value.clone());
-        }
+        let Some(full) = family.filled(given) else {
+            return bare_or(id, given, several(id, &fitting));
+        };
         Ok(self.form(id, java, family, &full, given))
     }
 
@@ -1339,6 +1357,24 @@ impl Family {
         given
             .iter()
             .all(|(key, value)| self.java.get(key).is_some_and(|held| held.contains(value)))
+    }
+
+    /// The whole state `given`, part of one it takes, names: each other property at the Java
+    /// default where the family holds it, else at the one value it holds; `None` when it holds
+    /// several values of one and not the default.
+    fn filled(&self, given: &IndexMap<String, String>) -> Option<IndexMap<String, String>> {
+        self.java
+            .iter()
+            .map(|(key, held)| {
+                let value = match (given.get(key), &self.defaults[key]) {
+                    (Some(value), _) => value,
+                    (None, default) if held.contains(default) => default,
+                    (None, _) if held.len() == 1 => &held[0],
+                    (None, _) => return None,
+                };
+                Some((key.clone(), value.clone()))
+            })
+            .collect()
     }
 }
 

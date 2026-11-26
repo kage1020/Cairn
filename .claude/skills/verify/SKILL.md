@@ -52,7 +52,8 @@ Add these when the change reaches them:
   `python3 .github/scripts/minecraft_load.py --cairn ./target/debug/cairn`.
 - `crates/cairn-lang-formats/registry-data/` or `.github/scripts/extract_registry.py`: the same
   workflow's `Registry tables match the game` check reruns the extraction. Run
-  `python3 .github/scripts/extract_registry.py java --check --java <Java 25>` and
+  `python3 .github/scripts/extract_registry.py java --check --java <JDK 25>`, a JDK since it runs
+  the conductor probe from its source, and
   `python3 .github/scripts/extract_registry.py bedrock --check --java <Java 25>`.
 - A new dependency or a recently stabilised API: CI's `MSRV` job runs
   `cargo +<floor> check --workspace --locked --all-features`, where the floor is the `rust-version`

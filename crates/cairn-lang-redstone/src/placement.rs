@@ -5,7 +5,7 @@ use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
 use cairn_lang_core::ast::DottedRef;
-use cairn_lang_core::block_array::{BlockArrayIr, Dims, MAX_STRUCTURE_VOLUME};
+use cairn_lang_core::block_array::{BlockArrayIr, Dims, MAX_STRUCTURE_VOLUME, TargetRegistry};
 use cairn_lang_core::error::Span;
 use cairn_lang_core::intent::{self, IntentModule, Member};
 use indexmap::IndexMap;
@@ -47,13 +47,14 @@ pub struct PlacementOutput {
     pub diagnostics: Vec<Diagnostic>,
 }
 
-/// Lays each scope of `scoped` under every struct `built` holds for it, leaving out a scope that
-/// fails to place.
+/// Lays each scope of `scoped` under every struct `built` holds for it, `registry` saying which
+/// blocks pass power, leaving out a scope that fails to place.
 #[must_use]
 pub fn compile_placement(
     scoped: &ScopedEditionNetlistIr,
     module: &IntentModule,
     built: &BlockArrayIr,
+    registry: Option<&dyn TargetRegistry>,
 ) -> PlacementOutput {
     let mut out = PlacementOutput::default();
     let lines = intent::circuit_lines(module);
@@ -114,8 +115,15 @@ pub fn compile_placement(
                 continue;
             }
             let region = Reservation::new(region, array.dims.x, array.dims.z);
-            let (coupled, findings) =
-                coupling::couple(ir, members, array, resolved, region.layers, &scope);
+            let (coupled, findings) = coupling::couple(
+                ir,
+                members,
+                array,
+                resolved,
+                region.layers,
+                &scope,
+                registry,
+            );
             if !findings.is_empty() {
                 extend_unique(&mut out.diagnostics, findings);
                 continue;

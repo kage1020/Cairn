@@ -153,6 +153,14 @@ pub trait TargetRegistry {
         None
     }
 
+    /// Whether `state` conducts redstone power at the target, so power given it whole reaches each
+    /// block next to it (`spec/redstone` "Place-and-route"), or `None` when the registry cannot
+    /// say.
+    fn conducts(&self, state: &BlockState) -> Option<bool> {
+        let _ = state;
+        None
+    }
+
     /// The box of the entity `id` at the pinned target (`spec/lint` "Entity AABB"), or `None`
     /// when the registry gives it none.
     fn entity_box(&self, id: &str) -> Option<EntityBox> {
