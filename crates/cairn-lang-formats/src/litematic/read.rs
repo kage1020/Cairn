@@ -11,7 +11,8 @@ use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use thiserror::Error;
 
 use super::{bits_per_entry, long_count};
-use crate::read_stream::{lists_compounds, next_inside, rest_of_compound};
+use crate::read_stream::{Held, lists_compounds, next_inside};
+use crate::volume::MAX_HELD_NBT;
 use crate::volume::{BlockVolume, StoredBlockEntity, block_state_from_nbt};
 
 /// The `Version`s read: 5, the first whose palette is post-flattening, to 7.
@@ -137,6 +138,14 @@ pub enum LitematicReadError {
         /// The palette's length.
         len: usize,
     },
+    /// A field whose NBT, read whole, would take what the reader holds of the file past its limit.
+    #[error("`{path}` holds more NBT than the {limit} bytes a reader holds whole of one file")]
+    HeldTooMuch {
+        /// The field, as `Regions.house.Entities[0]`.
+        path: String,
+        /// The most memory, in bytes, a reader holds whole of one file.
+        limit: usize,
+    },
     /// A packed index past the end of its region's palette.
     #[error("region `{region}` has palette index {index} at voxel {voxel}, past its {len} entries")]
     PaletteIndexOutOfRange {
@@ -166,6 +175,7 @@ pub fn read_litematic<R: Read>(reader: R) -> Result<LitematicSchematic, Litemati
             bits_per_entry(PALETTE_CAPACITY),
         ));
     nbt.next_event()?;
+    let mut held = Held::new();
     let (mut data_version, mut version, mut sub_version) = (None, None, None);
     let mut metadata = None;
     let mut regions = None;
@@ -181,10 +191,10 @@ pub fn read_litematic<R: Read>(reader: R) -> Result<LitematicSchematic, Litemati
                 _ => {}
             },
             Event::Compound { name: Some(name) } if name == "Metadata" => {
-                metadata = Some(read_metadata(&mut nbt)?);
+                metadata = Some(read_metadata(&mut nbt, &held)?);
             }
             Event::Compound { name: Some(name) } if name == "Regions" => {
-                regions = Some(read_regions(&mut nbt)?);
+                regions = Some(read_regions(&mut nbt, &mut held)?);
             }
             Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
             Event::Value { .. } | Event::End => {}
@@ -214,8 +224,30 @@ fn malformed(path: impl Into<String>, expected: &'static str) -> LitematicReadEr
     }
 }
 
+fn held_too_much(path: impl Into<String>) -> LitematicReadError {
+    LitematicReadError::HeldTooMuch {
+        path: path.into(),
+        limit: MAX_HELD_NBT,
+    }
+}
+
+/// The open compound `path`, read whole within what is left of `held` and not kept.
+fn passing_compound<R: Read>(
+    nbt: &mut NbtReader<R>,
+    held: &Held,
+    path: &str,
+) -> Result<Compound, LitematicReadError> {
+    let (Tag::Compound(compound), _) = held.read(nbt)?.ok_or_else(|| held_too_much(path))? else {
+        unreachable!("the rest of a compound reads as a compound");
+    };
+    Ok(compound)
+}
+
 /// The fields of the open `Metadata` compound that [`LitematicMetadata`] keeps.
-fn read_metadata<R: Read>(nbt: &mut NbtReader<R>) -> Result<LitematicMetadata, NbtReadError> {
+fn read_metadata<R: Read>(
+    nbt: &mut NbtReader<R>,
+    held: &Held,
+) -> Result<LitematicMetadata, LitematicReadError> {
     let mut metadata = LitematicMetadata::default();
     loop {
         match next_inside(nbt)? {
@@ -233,7 +265,8 @@ fn read_metadata<R: Read>(nbt: &mut NbtReader<R>) -> Result<LitematicMetadata, N
                 _ => {}
             },
             Event::Compound { name: Some(name) } if name == "EnclosingSize" => {
-                metadata.enclosing_size = vec3(&rest_of_compound(nbt)?);
+                metadata.enclosing_size =
+                    vec3(&passing_compound(nbt, held, "Metadata.EnclosingSize")?);
             }
             Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
             Event::Value { name: None, .. } => {}
@@ -243,17 +276,22 @@ fn read_metadata<R: Read>(nbt: &mut NbtReader<R>) -> Result<LitematicMetadata, N
 
 /// The regions of the open `Regions` compound, each read and decoded in turn. A region that does
 /// not decode stands in for them all, the rest of `Regions` skipped, so a `Version` after it is
-/// still weighed first.
+/// still weighed first; NBT that does not read, or that the reader cannot hold, stops it at once.
 fn read_regions<R: Read>(
     nbt: &mut NbtReader<R>,
-) -> Result<Result<Vec<LitematicReadRegion>, LitematicReadError>, NbtReadError> {
+    held: &mut Held,
+) -> Result<Result<Vec<LitematicReadRegion>, LitematicReadError>, LitematicReadError> {
     let depth = nbt.depth();
     let mut regions = Vec::new();
     loop {
         match next_inside(nbt)? {
-            Event::Compound { name: Some(name) } => match read_region(nbt, name) {
+            Event::Compound { name: Some(name) } => match read_region(nbt, held, name) {
                 Ok(region) => regions.push(region),
-                Err(LitematicReadError::Nbt(err)) => return Err(err),
+                Err(
+                    fault @ (LitematicReadError::Nbt(_) | LitematicReadError::HeldTooMuch { .. }),
+                ) => {
+                    return Err(fault);
+                }
                 Err(fault) => {
                     while nbt.depth() >= depth {
                         nbt.skip_rest()?;
@@ -294,6 +332,7 @@ struct RegionFields {
 /// The open region `name`, its fields read one at a time and every other entry skipped.
 fn read_region<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     name: String,
 ) -> Result<LitematicReadRegion, LitematicReadError> {
     let path = format!("Regions.{name}");
@@ -302,10 +341,10 @@ fn read_region<R: Read>(
         match next_inside(nbt)? {
             Event::End => break,
             Event::Compound { name: Some(key) } if key == "Position" => {
-                fields.position = vec3(&rest_of_compound(nbt)?);
+                fields.position = vec3(&passing_compound(nbt, held, &format!("{path}.Position"))?);
             }
             Event::Compound { name: Some(key) } if key == "Size" => {
-                fields.size = vec3(&rest_of_compound(nbt)?);
+                fields.size = vec3(&passing_compound(nbt, held, &format!("{path}.Size"))?);
             }
             Event::List {
                 name: Some(key),
@@ -322,7 +361,7 @@ fn read_region<R: Read>(
                     }
                     let mut palette = Vec::with_capacity(len);
                     let list = format!("{path}.BlockStatePalette");
-                    each_compound(nbt, &list, element_type_id, |index, entry| {
+                    each_compound(nbt, held, &list, element_type_id, |index, entry| {
                         let state = block_state_from_nbt(&entry).map_err(|fault| {
                             malformed(format!("{list}[{index}].{}", fault.field), fault.expected)
                         })?;
@@ -334,7 +373,7 @@ fn read_region<R: Read>(
                 "TileEntities" => {
                     let list = format!("{path}.TileEntities");
                     let mut block_entities = Vec::new();
-                    each_compound(nbt, &list, element_type_id, |index, nbt| {
+                    each_compound(nbt, held, &list, element_type_id, |index, nbt| {
                         block_entities.push(stored_block_entity(nbt, &format!("{list}[{index}]"))?);
                         Ok(())
                     })?;
@@ -344,6 +383,7 @@ fn read_region<R: Read>(
                     let mut entities = Vec::new();
                     each_compound(
                         nbt,
+                        held,
                         &format!("{path}.Entities"),
                         element_type_id,
                         |_, nbt| {
@@ -366,10 +406,11 @@ fn read_region<R: Read>(
     decode_region(name, &path, fields)
 }
 
-/// Each compound of the open list `path`, read whole one at a time and handed to `item` with its
-/// index.
+/// Each compound of the open list `path`, read whole one at a time and kept in `held`, handed to
+/// `item` with its index.
 fn each_compound<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     path: &str,
     element_type_id: u8,
     mut item: impl FnMut(usize, Compound) -> Result<(), LitematicReadError>,
@@ -379,7 +420,12 @@ fn each_compound<R: Read>(
     }
     for index in 0.. {
         match next_inside(nbt)? {
-            Event::Compound { name: None } => item(index, rest_of_compound(nbt)?)?,
+            Event::Compound { name: None } => {
+                let entry = held
+                    .rest_of_compound(nbt)?
+                    .ok_or_else(|| held_too_much(format!("{path}[{index}]")))?;
+                item(index, entry)?;
+            }
             Event::End => break,
             event => unreachable!("a list of compounds holds only compounds, got {event:?}"),
         }

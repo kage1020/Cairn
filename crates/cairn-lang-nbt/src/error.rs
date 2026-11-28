@@ -98,6 +98,17 @@ pub enum NbtReadError {
         /// Where the prefix starts.
         offset: u64,
     },
+    /// Tags read whole that would take more memory than the reader was told to hold.
+    #[error(
+        "nbt: the tags read whole by byte {offset} take more than this reader's limit of {limit} \
+         bytes"
+    )]
+    HeldTooMuch {
+        /// The most memory, in bytes, the tags may take.
+        limit: usize,
+        /// Where the reader stood when they passed it.
+        offset: u64,
+    },
     /// Compounds and lists nested deeper than the game itself reads.
     #[error("nbt: the tag at byte {offset} nests past {limit} compounds and lists")]
     TooDeep {

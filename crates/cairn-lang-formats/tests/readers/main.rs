@@ -3,6 +3,7 @@
 #[path = "../common/mod.rs"]
 pub mod common;
 
+mod held;
 mod litematic;
 mod mcstructure;
 mod schem;

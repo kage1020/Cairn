@@ -10,6 +10,8 @@ use indexmap::IndexMap;
 use thiserror::Error;
 
 use crate::dims::{read_extents, saturating_volume};
+use crate::read_stream::{Held, next_inside};
+use crate::volume::MAX_HELD_NBT;
 use crate::volume::{StoredBlockEntity, VolumeError};
 
 /// The `format_version` read, the only one the game saves.
@@ -173,6 +175,14 @@ pub enum McStructureReadError {
         /// The most a block array holds.
         limit: usize,
     },
+    /// A field whose NBT, read whole, would take what the reader holds of the file past its limit.
+    #[error("`{path}` holds more NBT than the {limit} bytes a reader holds whole of one file")]
+    HeldTooMuch {
+        /// The field, as `structure.entities`.
+        path: String,
+        /// The most memory, in bytes, a reader holds whole of one file.
+        limit: usize,
+    },
     /// A layer holding other than one index per voxel.
     #[error("`block_indices[{layer}]` holds {found} indices; the structure's voxels need {needed}")]
     LayerLength {
@@ -207,6 +217,13 @@ fn malformed(path: impl Into<String>, expected: &'static str) -> McStructureRead
     }
 }
 
+fn held_too_much(path: impl Into<String>) -> McStructureReadError {
+    McStructureReadError::HeldTooMuch {
+        path: path.into(),
+        limit: MAX_HELD_NBT,
+    }
+}
+
 /// The fields read so far, each layer in the file's z-fastest order.
 #[derive(Default)]
 struct Fields {
@@ -227,6 +244,7 @@ pub fn read_mcstructure<R: Read>(reader: R) -> Result<StoredMcStructure, McStruc
     let mut nbt = NbtReader::bedrock(reader).with_max_len(MAX_STRUCTURE_VOLUME);
     nbt.next_event()?;
     let mut fields = Fields::default();
+    let mut held = Held::new();
     while let Some(event) = nbt.next_event()? {
         match event {
             Event::Value {
@@ -236,7 +254,7 @@ pub fn read_mcstructure<R: Read>(reader: R) -> Result<StoredMcStructure, McStruc
             Event::List {
                 name: Some(name), ..
             } if name == "size" || name == "structure_world_origin" => {
-                let ints = ints(&mut nbt)?;
+                let ints = ints(&mut nbt, &held, &name)?;
                 if name == "size" {
                     fields.size = ints;
                 } else {
@@ -244,7 +262,7 @@ pub fn read_mcstructure<R: Read>(reader: R) -> Result<StoredMcStructure, McStruc
                 }
             }
             Event::Compound { name: Some(name) } if name == "structure" => {
-                read_structure(&mut nbt, &mut fields)?;
+                read_structure(&mut nbt, &mut held, &mut fields)?;
             }
             Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
             Event::Value { .. } | Event::End => {}
@@ -254,9 +272,13 @@ pub fn read_mcstructure<R: Read>(reader: R) -> Result<StoredMcStructure, McStruc
     decode(fields)
 }
 
-/// The ints of the open list, or `None` when an item is not one.
-fn ints<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<Vec<i32>>, McStructureReadError> {
-    let Tag::List(list) = nbt.read_rest()? else {
+/// The ints of the open list `path`, or `None` when an item is not one.
+fn ints<R: Read>(
+    nbt: &mut NbtReader<R>,
+    held: &Held,
+    path: &str,
+) -> Result<Option<Vec<i32>>, McStructureReadError> {
+    let (Tag::List(list), _) = held.read(nbt)?.ok_or_else(|| held_too_much(path))? else {
         unreachable!("the rest of a list reads as a list");
     };
     Ok(list
@@ -272,6 +294,7 @@ fn ints<R: Read>(nbt: &mut NbtReader<R>) -> Result<Option<Vec<i32>>, McStructure
 /// The entries of the open `structure` compound.
 fn read_structure<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     fields: &mut Fields,
 ) -> Result<(), McStructureReadError> {
     loop {
@@ -281,7 +304,9 @@ fn read_structure<R: Read>(
             }) => match name.as_str() {
                 "block_indices" => fields.layers = Some(read_layers(nbt)?),
                 "entities" => {
-                    let Tag::List(list) = nbt.read_rest()? else {
+                    let path = "structure.entities";
+                    let Tag::List(list) = held.rest(nbt)?.ok_or_else(|| held_too_much(path))?
+                    else {
                         unreachable!("the rest of a list reads as a list");
                     };
                     fields.entities = list
@@ -292,20 +317,78 @@ fn read_structure<R: Read>(
                             _ => None,
                         })
                         .collect::<Option<_>>()
-                        .ok_or_else(|| malformed("structure.entities", "a list of compounds"))?;
+                        .ok_or_else(|| malformed(path, "a list of compounds"))?;
                 }
                 _ => nbt.skip_rest()?,
             },
             Some(Event::Compound { name: Some(name) }) if name == "palette" => {
-                let Tag::Compound(palette) = nbt.read_rest()? else {
-                    unreachable!("the rest of a compound reads as a compound");
-                };
-                fields.palette = Some(palette);
+                fields.palette = Some(read_palettes(nbt, held)?);
             }
             Some(Event::Compound { .. } | Event::List { .. }) => nbt.skip_rest()?,
             Some(Event::Value { .. }) => {}
             Some(Event::End) | None => return Ok(()),
         }
+    }
+}
+
+/// The open `structure.palette` compound, holding only its `default` palette.
+fn read_palettes<R: Read>(
+    nbt: &mut NbtReader<R>,
+    held: &mut Held,
+) -> Result<Compound, McStructureReadError> {
+    let mut palettes = Compound::new();
+    loop {
+        match next_inside(nbt)? {
+            Event::Compound { name: Some(name) } if name == "default" => {
+                let default = read_default(nbt, held)?;
+                palettes.insert(name, Tag::Compound(default));
+            }
+            Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
+            Event::Value { .. } => {}
+            Event::End => return Ok(palettes),
+        }
+    }
+}
+
+/// The open `default` palette, holding only its `block_palette`, whose length is weighed before
+/// any entry of it is read, and its `block_position_data`.
+fn read_default<R: Read>(
+    nbt: &mut NbtReader<R>,
+    held: &mut Held,
+) -> Result<Compound, McStructureReadError> {
+    let mut default = Compound::new();
+    loop {
+        let (name, tag) = match next_inside(nbt)? {
+            Event::List {
+                name: Some(name),
+                len,
+                ..
+            } if name == "block_palette" && len > PALETTE_CAPACITY => {
+                return Err(McStructureReadError::PaletteTooLarge {
+                    len,
+                    limit: PALETTE_CAPACITY,
+                });
+            }
+            Event::Compound { name: Some(name) }
+            | Event::List {
+                name: Some(name), ..
+            } if name == "block_palette" || name == "block_position_data" => {
+                let path = format!("structure.palette.default.{name}");
+                let tag = held.rest(nbt)?.ok_or_else(|| held_too_much(path))?;
+                (name, tag)
+            }
+            Event::Value {
+                name: Some(name),
+                tag,
+            } if name == "block_palette" || name == "block_position_data" => (name, tag),
+            Event::Compound { .. } | Event::List { .. } => {
+                nbt.skip_rest()?;
+                continue;
+            }
+            Event::Value { .. } => continue,
+            Event::End => return Ok(default),
+        };
+        default.insert(name, tag);
     }
 }
 
@@ -359,14 +442,13 @@ fn decode(fields: Fields) -> Result<StoredMcStructure, McStructureReadError> {
         }
     };
     let palette_path = "structure.palette.default";
-    let Some(Tag::Compound(default)) = fields
+    let Some(Tag::Compound(mut default)) = fields
         .palette
-        .as_ref()
-        .and_then(|p| p.entries.get("default"))
+        .and_then(|mut palettes| palettes.entries.swap_remove("default"))
     else {
         return Err(malformed(palette_path, "a compound"));
     };
-    let palette = read_palette(default)?;
+    let palette = read_palette(&default)?;
     let layers = fields
         .layers
         .ok_or_else(|| malformed("structure.block_indices", "a list of two lists of ints"))?;
@@ -374,16 +456,17 @@ fn decode(fields: Fields) -> Result<StoredMcStructure, McStructureReadError> {
         .map_err(|_| malformed("structure.block_indices", "a list of two lists of ints"))?;
     let blocks = reorder(dims, volume, 0, &blocks, palette.len())?;
     let liquids = reorder(dims, volume, 1, &liquids, palette.len())?;
-    let (block_entities, other_position_data) = match default.entries.get("block_position_data") {
-        None => (Vec::new(), Vec::new()),
-        Some(Tag::Compound(data)) => position_data(data, dims)?,
-        Some(_) => {
-            return Err(malformed(
-                format!("{palette_path}.block_position_data"),
-                "a compound",
-            ));
-        }
-    };
+    let (block_entities, other_position_data) =
+        match default.entries.swap_remove("block_position_data") {
+            None => (Vec::new(), Vec::new()),
+            Some(Tag::Compound(data)) => position_data(data, dims)?,
+            Some(_) => {
+                return Err(malformed(
+                    format!("{palette_path}.block_position_data"),
+                    "a compound",
+                ));
+            }
+        };
     Ok(StoredMcStructure {
         world_origin,
         volume: BedrockVolume::new(dims, palette, blocks, liquids, block_entities)
@@ -481,11 +564,11 @@ type PositionData = (Vec<StoredBlockEntity>, Vec<(String, usize)>);
 
 /// Each `block_entity_data` of `block_position_data`, at the voxel its key names, and each other
 /// key its entries hold, with how many hold it.
-fn position_data(data: &Compound, dims: Dims) -> Result<PositionData, McStructureReadError> {
+fn position_data(data: Compound, dims: Dims) -> Result<PositionData, McStructureReadError> {
     let path = "structure.palette.default.block_position_data";
     let mut out = Vec::new();
     let mut others: IndexMap<String, usize> = IndexMap::new();
-    for (key, entry) in &data.entries {
+    for (key, entry) in data.entries {
         let position = key
             .parse::<u64>()
             .ok()
@@ -509,15 +592,15 @@ fn position_data(data: &Compound, dims: Dims) -> Result<PositionData, McStructur
                     "keyed by a voxel's index, in decimal as the game writes it",
                 )
             })?;
-        let Tag::Compound(entry) = entry else {
+        let Tag::Compound(mut entry) = entry else {
             return Err(malformed(format!("{path}.{key}"), "a compound"));
         };
         for other in entry.entries.keys().filter(|k| *k != "block_entity_data") {
             *others.entry(other.clone()).or_default() += 1;
         }
-        let mut block = match entry.entries.get("block_entity_data") {
+        let mut block = match entry.entries.swap_remove("block_entity_data") {
             None => continue,
-            Some(Tag::Compound(block)) => block.clone(),
+            Some(Tag::Compound(block)) => block,
             Some(_) => {
                 return Err(malformed(
                     format!("{path}.{key}.block_entity_data"),

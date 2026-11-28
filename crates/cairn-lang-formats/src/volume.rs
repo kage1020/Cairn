@@ -5,6 +5,11 @@ use cairn_lang_nbt::tag::{Compound, Tag};
 use indexmap::IndexMap;
 use thiserror::Error;
 
+/// The most memory, about, that the NBT a reader holds whole of one file may take: its entities,
+/// its block entities' data, its palettes and its metadata (`spec/ecosystem-interop` "Import
+/// stamping and pitfalls").
+pub const MAX_HELD_NBT: usize = 64 << 20;
+
 /// Voxels read from a structure file, with the palette and block entities the file stores, each
 /// voxel a slot of the palette and each block entity on a voxel of the box.
 #[derive(Debug, Clone, PartialEq)]

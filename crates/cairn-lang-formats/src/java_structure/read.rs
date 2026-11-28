@@ -12,6 +12,8 @@ use cairn_lang_nbt::{Event, NbtReadError, NbtReader};
 use thiserror::Error;
 
 use crate::dims::{read_extents, saturating_volume};
+use crate::read_stream::Held;
+use crate::volume::MAX_HELD_NBT;
 use crate::volume::{BlockVolume, StoredBlockEntity, block_state_from_nbt};
 
 /// A Java structure file as read.
@@ -60,6 +62,14 @@ pub enum StructureReadError {
         /// The palette's length.
         len: usize,
         /// The most a block array holds.
+        limit: usize,
+    },
+    /// A field whose NBT, read whole, would take what the reader holds of the file past its limit.
+    #[error("`{path}` holds more NBT than the {limit} bytes a reader holds whole of one file")]
+    HeldTooMuch {
+        /// The field, as `entities`.
+        path: String,
+        /// The most memory, in bytes, a reader holds whole of one file.
         limit: usize,
     },
     /// A `blocks` entry whose `state` no palette entry has.
@@ -113,6 +123,13 @@ fn malformed(path: impl Into<String>, expected: &'static str) -> StructureReadEr
     }
 }
 
+fn held_too_much(path: impl Into<String>) -> StructureReadError {
+    StructureReadError::HeldTooMuch {
+        path: path.into(),
+        limit: MAX_HELD_NBT,
+    }
+}
+
 /// One `blocks` entry, without its NBT.
 struct Listed {
     pos: [i32; 3],
@@ -143,6 +160,7 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
     let mut nbt = NbtReader::java(gz).with_max_len(MAX_STRUCTURE_VOLUME);
     nbt.next_event()?;
     let mut fields = Fields::default();
+    let mut held = Held::new();
     let mut stored: HashSet<String> = HashSet::new();
     while let Some(event) = nbt.next_event()? {
         let name = match &event {
@@ -164,10 +182,14 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
                 tag: Tag::Int(value),
             } if name == "DataVersion" => fields.data_version = Some(value),
             Event::List {
-                name: Some(name), ..
+                name: Some(name),
+                len,
+                ..
             } => match name.as_str() {
                 "size" => {
-                    let Tag::List(list) = nbt.read_rest()? else {
+                    let (Tag::List(list), _) =
+                        held.read(&mut nbt)?.ok_or_else(|| held_too_much("size"))?
+                    else {
                         unreachable!("the rest of a list reads as a list");
                     };
                     let ints = list.items.iter().map(|item| match item {
@@ -176,10 +198,12 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
                     });
                     fields.size = ints.collect();
                 }
-                "palette" => fields.palette = Some(read_palette(&mut nbt, "palette")?),
-                "palettes" => fields.palettes = Some(read_palettes(&mut nbt)?),
-                "blocks" => read_blocks(&mut nbt, &mut fields)?,
-                "entities" => fields.entities = compounds(&mut nbt, "entities")?,
+                "palette" => {
+                    fields.palette = Some(read_palette(&mut nbt, &mut held, "palette", len)?);
+                }
+                "palettes" => fields.palettes = Some(read_palettes(&mut nbt, &mut held)?),
+                "blocks" => read_blocks(&mut nbt, &mut held, &mut fields)?,
+                "entities" => fields.entities = compounds(&mut nbt, &mut held, "entities")?,
                 _ => nbt.skip_rest()?,
             },
             Event::Compound { .. } | Event::List { .. } => nbt.skip_rest()?,
@@ -190,12 +214,13 @@ pub fn read_structure<R: Read>(reader: R) -> Result<StoredStructure, StructureRe
     decode(fields)
 }
 
-/// The compounds of the open list `path`.
+/// The compounds of the open list `path`, held in `held`.
 fn compounds<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     path: &str,
 ) -> Result<Vec<Compound>, StructureReadError> {
-    let Tag::List(list) = nbt.read_rest()? else {
+    let Tag::List(list) = held.rest(nbt)?.ok_or_else(|| held_too_much(path))? else {
         unreachable!("the rest of a list reads as a list");
     };
     list.items
@@ -207,19 +232,20 @@ fn compounds<R: Read>(
         .collect()
 }
 
-/// The block states of the open palette list `path`.
+/// The block states of the open palette list `path`, of `len` entries.
 fn read_palette<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     path: &str,
+    len: usize,
 ) -> Result<Vec<BlockState>, StructureReadError> {
-    let entries = compounds(nbt, path)?;
-    if entries.len() > PALETTE_CAPACITY {
+    if len > PALETTE_CAPACITY {
         return Err(StructureReadError::PaletteTooLarge {
-            len: entries.len(),
+            len,
             limit: PALETTE_CAPACITY,
         });
     }
-    entries
+    compounds(nbt, held, path)?
         .iter()
         .enumerate()
         .map(|(index, entry)| {
@@ -233,13 +259,14 @@ fn read_palette<R: Read>(
 /// The open `palettes` list: the first palette read, and how many there are, the others skipped.
 fn read_palettes<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
 ) -> Result<(Option<Vec<BlockState>>, usize), StructureReadError> {
     let (mut first, mut count) = (None, 0);
     loop {
         match nbt.next_event()? {
-            Some(Event::List { .. }) => {
+            Some(Event::List { len, .. }) => {
                 if count == 0 {
-                    first = Some(read_palette(nbt, "palettes[0]")?);
+                    first = Some(read_palette(nbt, held, "palettes[0]", len)?);
                 } else {
                     nbt.skip_rest()?;
                 }
@@ -256,18 +283,21 @@ fn read_palettes<R: Read>(
 /// The open `blocks` list, an entry at a time.
 fn read_blocks<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     fields: &mut Fields,
 ) -> Result<(), StructureReadError> {
     let mut blocks = Vec::new();
     loop {
         match nbt.next_event()? {
             Some(Event::Compound { name: None }) => {
-                let Tag::Compound(entry) = nbt.read_rest()? else {
-                    unreachable!("the rest of a compound reads as a compound");
-                };
                 let at = blocks.len();
                 let path = || format!("blocks[{at}]");
-                let Some(Tag::Int(state)) = entry.entries.get("state") else {
+                let (Tag::Compound(mut entry), taken) =
+                    held.read(nbt)?.ok_or_else(|| held_too_much(path()))?
+                else {
+                    unreachable!("the rest of a compound reads as a compound");
+                };
+                let Some(&Tag::Int(state)) = entry.entries.get("state") else {
                     return Err(malformed(format!("{}.state", path()), "an int"));
                 };
                 let pos = match entry.entries.get("pos") {
@@ -278,12 +308,15 @@ fn read_blocks<R: Read>(
                     _ => None,
                 }
                 .ok_or_else(|| malformed(format!("{}.pos", path()), "a list of three ints"))?;
-                match entry.entries.get("nbt") {
+                match entry.entries.swap_remove("nbt") {
                     None => {}
-                    Some(Tag::Compound(data)) => fields.block_entities.push((at, data.clone())),
+                    Some(Tag::Compound(data)) => {
+                        held.keep(taken);
+                        fields.block_entities.push((at, data));
+                    }
                     Some(_) => return Err(malformed(format!("{}.nbt", path()), "a compound")),
                 }
-                blocks.push(Listed { pos, state: *state });
+                blocks.push(Listed { pos, state });
             }
             Some(Event::End) | None => break,
             Some(Event::List { .. } | Event::Value { .. } | Event::Compound { .. }) => {

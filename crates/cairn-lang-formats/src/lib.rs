@@ -71,7 +71,7 @@ pub use schem::{
     Schem, SchemError, SchemFile, SchemReadError, SpongeSchematic, prepare_schem, read_schem,
     schem_files,
 };
-pub use volume::{BlockVolume, StoredBlockEntity, VolumeError};
+pub use volume::{BlockVolume, MAX_HELD_NBT, StoredBlockEntity, VolumeError};
 pub use world::{
     CrossVersion, DEFAULT_NAMESPACE, IdPart, LEVEL_DAT, LevelDatError, MissingLists, Namespace,
     StructureFileError, StructureId, StructureIdError, StructureList, WorldVersion, read_level_dat,
