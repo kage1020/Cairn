@@ -447,8 +447,8 @@ points at the member that lays it, and the fix offers `y=0`, or a floor block th
 which alone helps a door. So is a `piston` looking down, which would push into the torch under it,
 and an actuator whose riser would drive another component as well. The cell the riser's torch
 powers, the actuator itself in the floor row or the block under it at `y = 1`, powers whatever
-stands beside it in the floor row or over it, so no other actuator, Tier 0 part or raw member may
-stand there. A sensor may, since power moves no sensor.
+stands beside it in the floor row or over it, so no other actuator, block power moves, Tier 0 part
+or raw member may stand there. A sensor may, since power moves no sensor.
 
 ```text
 room.crn:8:3: error[E_ROUTE_UNREACHABLE_COMPONENT]: struct=room: the lever `l` at y=2 cannot reach the circuit under the floor: a lever or button reaches the layer under the floor only from the floor row `y = 0`, the row over it
@@ -464,11 +464,24 @@ room.crn:5:3:   note: the `minecraft:glass` under the pressure_plate `p` is laid
   note: Fix: set `y=0` on it, or build the floor under it of a block that passes power, such as `@stone`
 ```
 
+Coupling reads the floor row and the row over it by block as well as by member: whatever member lays
+it, a block **power moves** stands there as an actuator does, and a block that **gives power** as a
+sensor does. Power moves a door, a trapdoor, a fence gate, a note block, a redstone lamp, a piston,
+a dispenser, a dropper, a hopper, a crafter, a powered or activator rail, TNT, a bell, a copper bulb
+and a command block. A redstone block, a lever, a button, a pressure plate, a tripwire hook, a
+trapped chest, a daylight detector, an observer, a target, a lectern, a detector rail, a sculk
+sensor and a lightning rod give power. Dust, a repeater, a comparator and a redstone torch do both,
+as a Tier 0 part or a raw member is taken to whatever its block. Each edition reads them by the ids
+it writes them under, Bedrock's own such as `noteblock`, `trapdoor` and `golden_rail` among them. So
+a trapdoor beside a driven lamp is refused as a second lamp there would be, and a floor of redstone
+blocks keeps the top layer's dust from under it.
+
 The top layer stays clear of what the struct powers, since dust under a powered block reads that
-power. Dust runs there only under a **quiet** cell of the floor row: air or a block no component
-holds, with no sensor, Tier 0 part or raw member beside it or over it. A pad's own dust may also run
-under a cell its own sensor is the only one to power. A riser's upper torch hangs on a block its
-lower torch powers, and that block stands only under a cell no component holds.
+power. Dust runs there only under a **quiet** cell of the floor row: air or a block that no
+component holds and that power neither moves nor gives, with no sensor, block that gives power,
+Tier 0 part or raw member beside it or over it. A pad's own dust may also run under a cell its own
+sensor is the only one to power. A riser's upper torch hangs on a block its lower torch powers, and
+that block stands only under a cell that holds neither a component nor a block power moves or gives.
 
 The internal algorithm runs four stages for each edition, each on the layout the stage before it
 left. Every choice in them is ordered, so one source lays one circuit.
