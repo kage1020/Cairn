@@ -199,11 +199,11 @@ fn unquoted_target(raw: &str, tokens: &[Token], err: ParseError) -> ParseError {
 
 /// Parse a `.crn` source string into a [`Module`].
 ///
-/// A lex failure inside a line stands unless a raw directive value took it, which a stretch
-/// holding whitespace other than a space never is.
+/// A lex failure inside a line stands unless its stretch holds no whitespace but spaces and falls
+/// in a raw value: one the parser read or, past a parse failure, one on a line it reads one from.
 ///
 /// # Errors
-/// Returns a [`ParseError`] on the first lex or parse failure.
+/// Returns a [`ParseError`]: a lex failure that stands, else the indentation or parse failure.
 pub fn parse(source: &str) -> Result<Module, ParseError> {
     let Lexed {
         tokens,
@@ -212,11 +212,17 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     } = lex_deferring(source);
     let mut parser = Parser::new(source, &tokens);
     let parsed = parser.parse_module();
+    // No line past the parse failure was read, so its keyword and place say whether it is raw.
+    let unread_raw_value = |token: usize| {
+        parsed.as_ref().is_err_and(|err| {
+            tokens[token].position.line > err.position().line && on_raw_value_line(&tokens, token)
+        })
+    };
     let taken = |token: usize| {
         !source[tokens[token].span.clone()]
             .chars()
             .any(|c| c.is_whitespace() && c != ' ')
-            && parser.raw_values.iter().any(|raw| raw.contains(&token))
+            && (parser.raw_values.iter().any(|raw| raw.contains(&token)) || unread_raw_value(token))
     };
     if let Some(stray) = deferred.into_iter().find(|d| !taken(d.token)) {
         return Err(stray.error.into());
@@ -225,6 +231,55 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
         return Err(fatal.into());
     }
     parsed
+}
+
+/// Whether the line holding `tokens[token]` is one the parser reads a raw value from: an `@cairn`
+/// or `@requires` header, or a `requires` line at the top of a `def` or `theme` body.
+fn on_raw_value_line(tokens: &[Token], token: usize) -> bool {
+    let start = tokens[..token]
+        .iter()
+        .rposition(|t| matches!(t.kind, TokenKind::Newline))
+        .map_or(0, |newline| newline + 1);
+    let mut depth = 0_i32;
+    let mut headers_only = true;
+    let mut in_part = false;
+    let mut opening = true;
+    let mut first = None;
+    for (index, t) in tokens[..token].iter().enumerate() {
+        match &t.kind {
+            TokenKind::Indent => depth += 1,
+            TokenKind::Dedent => depth -= 1,
+            TokenKind::Newline => opening = true,
+            _ if !opening => {}
+            _ if index >= start => {
+                first = Some(index);
+                break;
+            }
+            kind => {
+                opening = false;
+                headers_only &= depth == 0 && matches!(kind, TokenKind::At);
+                if depth == 0 {
+                    in_part = is_ident_in(Some(kind), &["def", "theme"]);
+                }
+            }
+        }
+    }
+    let Some(first) = first else {
+        return false;
+    };
+    match &tokens[first].kind {
+        TokenKind::At => {
+            headers_only
+                && depth == 0
+                && is_ident_in(tokens.get(first + 1).map(|t| &t.kind), &["cairn", REQUIRES])
+        }
+        kind => in_part && depth == 1 && is_ident_in(Some(kind), &[REQUIRES]),
+    }
+}
+
+/// Whether `kind` is an identifier spelled as one of `names`.
+fn is_ident_in(kind: Option<&TokenKind>, names: &[&str]) -> bool {
+    matches!(kind, Some(TokenKind::Ident(name)) if names.contains(&name.as_str()))
 }
 
 /// Render a parse failure as an `E_PARSE` [`Diagnostic`] running to the end of its line, with a
