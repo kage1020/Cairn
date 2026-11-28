@@ -518,7 +518,9 @@ left. Every choice in them is ordered, so one source lays one circuit.
    blocks, joins nothing else, still carries power into the repeater, and is not driven from the
    side. Repeaters go in one at a time until every input reads what it needs. An input that no such
    spot lifts far enough is `E_ATTENUATION_LIMIT` at the line of the tile that reads it, and the
-   message says the dust runs past 15 blocks with no straight stretch for a repeater.
+   message names the input and the signal it reads, the strength it reads there and needs, and the
+   blocks of dust the signal runs over since the part that last restored it, saying they are more
+   than the 15 a signal runs only where they are.
 4. **Legalization.** Every part becomes the block it is built as, its id the target's for the part's
    token: `@redstone_dust.default` for dust, `@redstone_torch.wall` for a torch, `@repeater.default`
    for a repeater, `@comparator.default` for a comparator, and `@circuit.block` for every other
