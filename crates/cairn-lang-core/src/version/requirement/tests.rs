@@ -107,6 +107,9 @@ fn the_label_shapes_the_spec_names_are_accepted() {
     for raw in [
         "version>=1.21.4-rc1",
         "version>=1.21.4-pre.2",
+        "version>=26.3-rc-1",
+        "version>=26.3-pre-1",
+        "version>=26.3-snapshot-10",
         "version>=24w14a",
         "version>=2026.1",
         "version>=1.21.4",
@@ -135,6 +138,9 @@ fn a_pre_release_tag_that_is_not_one_is_refused() {
         "version>=1.21.4-",
         "version>=1.21.4-rc/1",
         "version>=1.21.4-.",
+        "version>=26.3-rc-",
+        "version>=26.3-rc--1",
+        "version>=26.3-rc.-1",
     ] {
         assert!(
             matches!(
@@ -251,6 +257,14 @@ fn a_pre_release_sorts_below_its_release() {
         Ordering::Equal,
     );
     assert_eq!(compare_versions("1.21.4-rc1", "1.21"), Ordering::Greater);
+    assert_eq!(compare_versions("26.3-rc-1", "26.3"), Ordering::Less);
+}
+
+#[test]
+fn a_pre_release_tag_orders_its_numeric_runs_as_numbers() {
+    assert_eq!(compare_versions("26.3-rc-2", "26.3-rc-10"), Ordering::Less);
+    assert_eq!(compare_versions("26.3-rc-1", "26.3-rc.1"), Ordering::Equal);
+    assert_eq!(compare_versions("26.3-rc", "26.3-rc-1"), Ordering::Less);
 }
 
 #[test]

@@ -666,7 +666,7 @@ answers, and only the first is exact:
 | The floor | Placed as | Because |
 |---|---|---|
 | Names a row (a missing trailing component is zero, and a leading zero in a numeric component is padding: `1.21` is Bedrock's `1.21.0`, `1.020` is Java's `1.20`) | That row's key | Exact. |
-| Names a pre-release of a row (`1.21.4-rc1`) | That row's key | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
+| Names a pre-release of a row (`1.21.4-rc1`, `26.3-rc-1`, `26.3-snapshot-1`) | That row's key | Nothing ships between a release candidate and its release, so no supported target lies between them either. |
 | Sits below every row, or above every one | Met by every target, or by none | Reached by comparing the floor's label against the first and last rows' *labels*, while which rows those are is decided by their *keys*, so it holds exactly when the table's labels sort the same way by text as by key. The registry pack loader checks that at load time. The floor's own label must be a dotted decimal to be compared at all. |
 | Anything else: inside the table's span, naming no row | Not placed at all | It has no key, and there is none to give it. `E_REQUIRES_UNORDERABLE`. |
 
@@ -680,7 +680,7 @@ names (a row of its table, or the pre-release of one) is a floor written in the 
 and `E_REQUIRES_UNORDERABLE` names it and offers the scope. A label the other edition does not name
 gets no scope offered, because recommending one would be recommending a guess: scoped to an edition
 that does not name it either, the floor goes inert there and the constraint disappears. That covers
-a label neither edition can place, such as a snapshot, and also one the other edition places only
+a label neither edition can place, such as the snapshot `24w14a`, and also one the other edition places only
 below or above every row. Those two placements are comparisons rather than releases: they say
 nothing about which numbering the author meant, and scoped there the floor is met by every target
 of that edition or by none.
@@ -720,9 +720,16 @@ inferred.
 
 Every label shape [§10.1](#101-the-target-is-a-compile-time-parameter) says will exist is accepted
 by the directive: the semver-ish `1.21.4`, the pre-release `1.21.4-rc1`, a snapshot `24w14a`, and
-whatever a date-based scheme spells. The shape rule is dot-separated components that each begin
-with a digit and carry only letters and digits, with an optional `-` and a pre-release tag of the
-same. `1.a` and `x` name no version in any scheme and are `E_INVALID_REQUIRES`.
+whatever a date-based scheme spells, such as `26.3-rc-1`, `26.3-pre-1` and `26.3-snapshot-1`. The
+shape rule is dot-separated components that each begin with a digit and carry only letters and
+digits, with an optional `-` and a pre-release tag: runs of letters and digits, each separated from
+the next by a `.` or a `-`. `1.a`, `x` and `26.3-rc-` name no version in any scheme and are
+`E_INVALID_REQUIRES`.
+
+A tag after a release core makes the label a pre-release of that release, whatever the tag says:
+`26.3-snapshot-1` is placed as `26.3` is, as `26.3-rc-1` is
+([§10.4](#ordering-is-by-dataversion-per-edition)). A snapshot with no release core, such as
+`24w14a`, names no release and is placed by no table.
 
 Accepting a label is not claiming it can be ordered. Whether a given label has a `DataVersion` is
 the table's answer, and it is asked per edition: `cairn compile --target` refuses the build, and
