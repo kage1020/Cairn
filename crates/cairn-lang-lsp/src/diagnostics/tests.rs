@@ -184,6 +184,41 @@ fn a_lowering_finding_every_target_raises_is_reported_as_a_pinned_check_words_it
 }
 
 #[test]
+fn a_line_each_edition_refuses_with_its_own_code_is_reported_for_each_edition_unpinned() {
+    let source = "theme t:\n  slot floor -> @oak_planks\n  slot wall -> @stone_bricks\n\n\
+                  struct room size=5x5:\n  floor mat_slot=floor\n  walls mat_slot=wall height=3\n  \
+                  item_display id=a at=1,1,1\n";
+    let display = range((7, 2), (7, 28));
+    assert_eq!(
+        located(&compute_diagnostics(&uri(), source, &Pin::Nothing)),
+        [
+            (
+                "E_INVALID_MEMBER",
+                lsp_types::DiagnosticSeverity::ERROR,
+                display
+            ),
+            (
+                "E_PARITY_UNSUPPORTED",
+                lsp_types::DiagnosticSeverity::ERROR,
+                display
+            ),
+        ],
+    );
+    assert_eq!(
+        located(&compute_diagnostics(
+            &uri(),
+            source,
+            &Pin::Edition(Edition::Java)
+        )),
+        [(
+            "E_INVALID_MEMBER",
+            lsp_types::DiagnosticSeverity::ERROR,
+            display
+        )],
+    );
+}
+
+#[test]
 fn an_id_no_shipped_version_declares_is_left_to_a_pinned_check() {
     let source = "theme t:\n  slot wall -> @cobblestone\n  slot roof -> @oak_stair\n\n\
                   struct hut size=5x5\n  walls mat_slot=wall height=3\n  \

@@ -8,6 +8,8 @@ use cairn_lang_core::{
     Diagnostic as CoreDiagnostic, Edition, Module, Severity, diagnose_parse_failure, lower, parse,
     resolve,
 };
+use cairn_lang_formats::build::every_edition::refused_by_every_edition;
+use cairn_lang_formats::build::finding::Found;
 use cairn_lang_formats::{BuiltinEditions, builtin_version_tables, builtin_view};
 
 use crate::line_index::LineIndex;
@@ -50,6 +52,16 @@ fn findings(module: &Module, pin: &Pin) -> Vec<CoreDiagnostic> {
         check_with_intended_targets(module, &ir, edition, &Edition::weighed(edition), &tables);
     let Pin::Target(target) = pin else {
         found.extend(findings_without_target(&ir, edition, &BuiltinEditions));
+        if edition.is_none() && !found.iter().any(|d| d.severity() == Severity::Error) {
+            found.extend(
+                refused_by_every_edition(module, &ir, false)
+                    .into_iter()
+                    .filter_map(|d| match d {
+                        Found::Core(d) => Some(d),
+                        Found::Circuit(_) => None,
+                    }),
+            );
+        }
         return found;
     };
     let edition = target.edition();

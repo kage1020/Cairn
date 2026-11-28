@@ -1,6 +1,6 @@
 //! `cairn check` builds each struct's circuit as `cairn compile` does and reports its findings,
-//! unpinned only where every edition raises them at the same place or one edition's guards hold
-//! them.
+//! unpinned only where every edition raises them at the same place, one edition's guards hold
+//! them, or every edition refuses the source.
 
 use tempfile::TempDir;
 
@@ -32,14 +32,13 @@ fn a_circuit_finding_every_edition_raises_is_reported_unpinned_and_pinned() {
 }
 
 #[test]
-fn a_circuit_finding_one_edition_alone_raises_waits_for_that_edition_pinned() {
+fn a_circuit_finding_one_edition_alone_raises_is_reported_unpinned_when_each_edition_refuses() {
+    let java = (8, 3, "error", "E_NO_PORTABLE_IMPL");
+    let bedrock = (9, 3, "error", "E_ROUTE_UNREACHABLE_COMPONENT");
     let unpinned = check(QUASI_CONNECTED_DISPENSER, &[]);
-    assert_eq!(unpinned.code, Some(0), "stderr={}", unpinned.stderr);
-    assert_stream(&unpinned.stderr, &[]);
-    for (edition, expected) in [
-        ("java", (8, 3, "error", "E_NO_PORTABLE_IMPL")),
-        ("bedrock", (9, 3, "error", "E_ROUTE_UNREACHABLE_COMPONENT")),
-    ] {
+    assert_eq!(unpinned.code, Some(1), "stderr={}", unpinned.stderr);
+    assert_stream(&unpinned.stderr, &[java, bedrock]);
+    for (edition, expected) in [("java", java), ("bedrock", bedrock)] {
         let run = check(QUASI_CONNECTED_DISPENSER, &["--edition", edition]);
         assert_eq!(run.code, Some(1), "{edition}: stderr={}", run.stderr);
         assert_stream(&run.stderr, &[expected]);

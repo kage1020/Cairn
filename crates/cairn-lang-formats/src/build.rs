@@ -5,6 +5,7 @@
 pub mod artifact;
 pub mod circuits;
 pub mod conflicts;
+pub mod every_edition;
 pub mod finding;
 pub mod floors;
 pub mod gate;
