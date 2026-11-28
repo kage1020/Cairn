@@ -776,7 +776,8 @@ Every command that builds a struct's circuit reports these ([Redstone
 §14.8](/spec/redstone/#148-connection-to-the-ir-and-phases)), and most depend on the edition, so a
 command that pins none reports the ones every edition raises at the same place, once for each
 wording the editions give it, and an edition's own by the rule for its guards
-([§11.3](#113-error-vs-warning)).
+([§11.3](#113-error-vs-warning)). `cairn check` also reports each edition's errors when every
+edition refuses the source and no error is reported otherwise, by the same section's rule.
 
 | Code | Meaning |
 |---|---|
@@ -1134,7 +1135,11 @@ its `@edition` guards. With neither flag, each edition's variants are lowered, w
 guards: a finding whose span is on a line only one edition's variant reads, or whose span or one of
 whose notes' spans is on a line under that edition's guard, is that edition's verdict and is
 reported, and any other finding is reported when every edition raises it with the same code at the
-same span, once for each wording the editions give it. Where some line stands under a guard,
+same span, once for each wording the editions give it. When none of the findings these rules keep
+is an error but every edition raises one, so that `--edition` refuses the source whichever edition
+it names, each edition's errors are reported too, each with a note naming its edition, and
+`cairn check` counts its circuit findings among them: a line two editions refuse for different
+reasons, or a source they refuse at different lines, fails the check as it fails every build. Where some line stands under a guard,
 resolution's findings are kept by the same rule, each edition's branch resolved with no variant
 pinned, so the edition-variant softening of `E_UNRESOLVED_SLOT` ([§11.1](#materials-and-targets))
 holds on every line as it does in a source with no guard. A check with `--target` lowers once,

@@ -845,7 +845,8 @@ edition. `cairn check` and `cairn info` run the passes for each edition they rea
 they report its findings. Otherwise they report the ones every edition raises at the same place,
 once for each wording the editions give it, as an `E_SIM_ASSERTION_FAILED` that fails "on java" and
 "on bedrock" is reported twice. `check` also reports an edition's own finding, whose span or one of
-whose notes' spans is on a line under that edition's guard
+whose notes' spans is on a line under that edition's guard, and each edition's errors when every
+edition refuses the source and no error is reported otherwise
 ([Lint](/spec/lint/#113-error-vs-warning)), and `info` reports each edition's own under that
 edition. `cairn synth --experimental-logic-synth` prints each IR on the way.
 

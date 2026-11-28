@@ -7,6 +7,7 @@ use std::process::ExitCode;
 use cairn_lang_core::check::LineStarts;
 use cairn_lang_core::{Edition, Severity, diagnose_parse_failure, lower, parse};
 use cairn_lang_formats::build::circuits::check_circuits;
+use cairn_lang_formats::build::every_edition::refused_by_every_edition;
 use cairn_lang_formats::build::finding::{Finding, Found, render_findings};
 use cairn_lang_formats::build::gate::build_diagnostics;
 use cairn_lang_formats::build::lowering::{CheckLowering, check_lowering};
@@ -66,6 +67,9 @@ pub(crate) fn run_check(
                 .into_iter()
                 .map(Found::Circuit),
         );
+    }
+    if edition.is_none() && !diagnostics.iter().any(|d| d.severity() == Severity::Error) {
+        diagnostics.extend(refused_by_every_edition(&module, &ir, true));
     }
     let has_error = diagnostics.iter().any(|d| d.severity() == Severity::Error);
     let lines = LineStarts::new(&source);
