@@ -125,9 +125,12 @@ down 0, up 1, north 2, south 3, west 4 and east 5, and its `Item`. Bedrock write
 Bedrock builds an item frame as a block, `frame` or `glow_frame`, whose `facing_direction` is
 numbered as Java's `Facing`, with `item_frame_map_bit` and `item_frame_photo_bit` off. Its block
 entity, `ItemFrame` or `GlowItemFrame`, holds its `Item`, an `ItemRotation` of 0 and an
-`ItemDropChance` of 1, and takes the line's `nbt=`. The block takes the frame's cell, so the writer
-refuses a frame in a cell a member has built a block in, or another frame hangs in, and names the
-cell and what holds it.
+`ItemDropChance` of 1, and takes the line's `nbt=`. The block takes the frame's cell, so a Bedrock
+build refuses a frame in a cell a member has built a block in, or another frame an earlier line
+hangs in, and leaves it out. That is `E_FRAME_CELL_TAKEN` at the frame's line, with a note at the
+line that built the block or hung the first frame. The edition alone decides it, so a check with
+`--edition bedrock` raises it with no version pinned. The writer refuses such a frame in an array
+lowering did not build, and names the cell and what holds it.
 
 ### Standing entities
 

@@ -506,6 +506,33 @@ fn two_placements_that_share_a_cell_are_reported_with_no_target() {
     }
 }
 
+/// A room with a frame hung in the cell `block` builds a block in.
+fn framed_block(block: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n\n\
+         struct s size=5x5\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         {block}\n  item_frame at=2,1,2 facing=up\n"
+    )
+}
+
+#[test]
+fn a_frame_only_bedrock_refuses_is_reported_for_bedrock_and_where_its_guard_holds_the_block() {
+    let source = framed_block("fill mat_slot=wall from=2,1,2 to=2,1,2");
+    assert_eq!(
+        positioned(&source, &without_target(&source, Some(Edition::Bedrock))),
+        [("E_FRAME_CELL_TAKEN", "8:3".to_owned())],
+    );
+    assert_eq!(without_target(&source, Some(Edition::Java)), []);
+    assert_eq!(without_target(&source, None), [], "Java reads the line too");
+
+    let guarded = framed_block("@edition bedrock\n    raw_block mat=minecraft:stone at=2,1,2");
+    assert_eq!(
+        positioned(&guarded, &without_target(&guarded, None)),
+        [("E_FRAME_CELL_TAKEN", "9:3".to_owned())],
+        "its note is on a line only Bedrock reads",
+    );
+}
+
 #[test]
 fn a_finding_on_a_line_both_editions_read_needs_each_to_raise_it_there() {
     // Java's roof alone drops its state literal's properties, on the shared `roof` line.

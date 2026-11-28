@@ -401,6 +401,48 @@ fn a_source_no_supported_version_can_build_says_so() {
     );
 }
 
+#[test]
+fn a_frame_bedrock_builds_over_a_block_refuses_its_report_and_leaves_java_buildable() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let src = tmp.path().join("framed.crn");
+    std::fs::write(
+        &src,
+        "theme t:\n\
+         \x20\x20slot floor -> @oak_planks\n\
+         \x20\x20slot dark  -> @stone\n\n\
+         struct room size=9x9:\n\
+         \x20\x20floor mat_slot=floor\n\
+         \x20\x20walls mat_slot=floor height=3\n\
+         \x20\x20fill mat_slot=dark from=4,1,4 to=4,1,4\n\
+         \x20\x20item_frame id=f at=4,1,4 facing=up\n",
+    )
+    .expect("write source");
+
+    // The edition-wide finding, then each version's under the note naming it.
+    let (code, stdout, stderr) = info_raw(&src, "bedrock");
+    assert_eq!(code, Some(1), "stderr={stderr}");
+    assert_eq!(stdout, "", "no row claims a Bedrock build");
+    assert!(
+        stderr.starts_with("note: reported for --editions bedrock\n"),
+        "{stderr}"
+    );
+    assert_stream(&stderr, &[(9, 3, "error", "E_FRAME_CELL_TAKEN"); 5]);
+    let out = tmp.path().join("out");
+    for version in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
+        assert!(
+            !compile_accepts(&src, "bedrock", version, &out.join(version)),
+            "premise: bedrock {version} refuses this source",
+        );
+    }
+
+    let java = ["1.20.4", "1.21", "1.21.4", "26.3"];
+    let axes = info_json_at(&src, "java");
+    assert_eq!(strings(buildable_entry(&axes, "java"), "buildable"), java);
+    for version in java {
+        assert!(compile_accepts(&src, "java", version, &out.join(version)));
+    }
+}
+
 /// Unpinned, `@floor.stone.smooth` takes its default mapping, which 1.21.0 respells.
 #[test]
 fn a_palette_whose_default_ids_never_overlap_can_still_have_a_buildable_target() {

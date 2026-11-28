@@ -3,7 +3,7 @@
 //! (`spec/entities` "Two tiers").
 
 use cairn_lang_core::Edition;
-use cairn_lang_core::block_array::{BlockArray, EntityData};
+use cairn_lang_core::block_array::{BlockArray, Entity, EntityData};
 use cairn_lang_formats::bedrock_structure::{BedrockStructureError, build_mcstructure_tag};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{JavaStructureError, build_structure_tag};
@@ -369,9 +369,17 @@ fn a_bedrock_frame_in_a_cell_a_block_holds_is_refused() {
 
 #[test]
 fn a_bedrock_frame_in_a_cell_another_frame_hangs_in_is_refused_naming_that_frame() {
-    let source =
-        format!("{ROOM}  item_frame at=inside.back offset=3 y=2 item=emerald glowing=true\n");
-    let array = lowered(&source, Edition::Bedrock, "1.21.60");
+    let mut array = lowered(ROOM, Edition::Bedrock, "1.21.60");
+    let frame = array
+        .entities
+        .iter()
+        .find(|entity| matches!(entity.data, EntityData::ItemFrame { .. }))
+        .cloned()
+        .expect("the room hangs a frame");
+    array.entities.push(Entity {
+        id: "minecraft:glow_item_frame".to_owned(),
+        ..frame
+    });
     let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
     match build_mcstructure_tag(&array, &target, &states_for(&target)) {
         Err(BedrockStructureError::FrameCellTaken { id, pos, block }) => assert_eq!(

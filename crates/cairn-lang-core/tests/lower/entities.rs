@@ -348,6 +348,122 @@ fn a_hanging_entity_at_a_triple_needs_a_facing_and_one_by_a_wall_takes_none() {
     assert_eq!(placed(&out), []);
 }
 
+/// The text each note of each finding of `out` points at, for the notes that point at a line.
+fn noted_lines<'a>(src: &'a str, out: &BlockArrayIr) -> Vec<Vec<&'a str>> {
+    out.diagnostics
+        .iter()
+        .map(|d| {
+            d.notes
+                .iter()
+                .filter_map(|note| note.span.clone())
+                .map(|span| &src[span])
+                .collect()
+        })
+        .collect()
+}
+
+/// Each entity `out` places, as its id and cell.
+fn cells(out: &BlockArrayIr) -> Vec<(String, (u32, u32, u32))> {
+    placed(out)
+        .into_iter()
+        .map(|entity| (entity.id, entity.block_pos))
+        .collect()
+}
+
+#[test]
+fn a_bedrock_frame_in_a_cell_a_block_holds_is_refused_with_the_line_that_built_it() {
+    let src = room(
+        "fill mat_slot=wall from=2,1,2 to=2,1,2\n  \
+         item_frame id=f at=2,1,2 facing=up item=diamond",
+    );
+    let bedrock = lowered_for(&src, Edition::Bedrock);
+    assert_eq!(
+        findings(&src, &bedrock),
+        [(
+            DiagnosticCode::FrameCellTaken,
+            "item_frame id=f at=2,1,2 facing=up item=diamond",
+            "`item_frame` hangs `minecraft:item_frame` at 2,1,2, a cell that holds \
+             `minecraft:cobblestone`, and Bedrock builds an item frame as a block of its cell",
+            vec![
+                "`fill` builds `minecraft:cobblestone` at 2,1,2",
+                "an item frame hangs only in a cell that holds air and no other frame",
+                "move the frame, or the block, to a cell of its own",
+            ],
+        )],
+    );
+    assert_eq!(
+        noted_lines(&src, &bedrock),
+        [["fill mat_slot=wall from=2,1,2 to=2,1,2"]]
+    );
+    assert_eq!(placed(&bedrock), []);
+
+    let java = lowered_for(&src, Edition::Java);
+    assert_eq!(findings(&src, &java), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        cells(&java),
+        [("minecraft:item_frame".to_owned(), (2, 1, 2))]
+    );
+}
+
+#[test]
+fn a_bedrock_frame_in_a_cell_an_earlier_line_hangs_a_frame_in_is_refused_and_that_one_kept() {
+    let src = room(
+        "item_frame id=a at=2,1,2 facing=up\n  \
+         item_frame id=b at=2,1,2 facing=north glowing=true",
+    );
+    let bedrock = lowered_for(&src, Edition::Bedrock);
+    assert_eq!(
+        findings(&src, &bedrock),
+        [(
+            DiagnosticCode::FrameCellTaken,
+            "item_frame id=b at=2,1,2 facing=north glowing=true",
+            "`item_frame` hangs `minecraft:glow_item_frame` at 2,1,2, a cell another frame hangs \
+             in, and Bedrock builds an item frame as a block of its cell",
+            vec![
+                "`item_frame` hangs `minecraft:item_frame` at 2,1,2 first",
+                "an item frame hangs only in a cell that holds air and no other frame",
+                "move one of the two frames to a cell of its own",
+            ],
+        )],
+    );
+    assert_eq!(
+        noted_lines(&src, &bedrock),
+        [["item_frame id=a at=2,1,2 facing=up"]]
+    );
+    assert_eq!(
+        cells(&bedrock),
+        [("minecraft:item_frame".to_owned(), (2, 1, 2))]
+    );
+
+    let java = lowered_for(&src, Edition::Java);
+    assert_eq!(findings(&src, &java), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        cells(&java),
+        [
+            ("minecraft:item_frame".to_owned(), (2, 1, 2)),
+            ("minecraft:glow_item_frame".to_owned(), (2, 1, 2)),
+        ],
+    );
+}
+
+#[test]
+fn a_bedrock_frame_hangs_in_the_air_cell_beside_the_block_it_hangs_on() {
+    let src = room(
+        "fill mat_slot=wall from=2,1,2 to=2,1,2\n  \
+         item_frame id=f at=2,2,2 facing=up\n  \
+         item_frame id=g at=2,1,3 facing=south",
+    );
+    let bedrock = lowered_for(&src, Edition::Bedrock);
+    assert_eq!(findings(&src, &bedrock), Vec::<Finding<'_>>::new());
+    assert_eq!(
+        cells(&bedrock),
+        [
+            ("minecraft:item_frame".to_owned(), (2, 1, 3)),
+            ("minecraft:item_frame".to_owned(), (2, 2, 2)),
+        ],
+    );
+}
+
 #[test]
 fn a_standing_entity_stands_on_its_cell_s_floor_facing_south_unless_told() {
     assert_eq!(
