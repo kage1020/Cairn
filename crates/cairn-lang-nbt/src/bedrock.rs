@@ -6,7 +6,7 @@ use std::io::Write;
 use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-use crate::writer::{Endian, write_named_root};
+use crate::writer::{Endian, string_len, write_named_root};
 
 /// Writes `root` as a named Bedrock NBT root; `.mcstructure` files use an empty `root_name`.
 ///
@@ -40,4 +40,13 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     stream_named_root(writer, Endian::Little, root_name, body)
+}
+
+/// Checks that the Bedrock writers would accept `s` as an NBT string, without writing it.
+///
+/// # Errors
+///
+/// [`NbtIoError::LengthOverflow`] when its UTF-8 runs past 65,535 bytes.
+pub fn check_bedrock_string(s: &str) -> Result<(), NbtIoError> {
+    string_len(s, Endian::Little).map(drop)
 }

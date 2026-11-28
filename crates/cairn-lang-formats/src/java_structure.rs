@@ -14,7 +14,7 @@ use cairn_lang_core::block_array::{
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
-    CompoundStream, NbtIoError, check_string, stream_java_uncompressed, write_java_gzip,
+    CompoundStream, NbtIoError, check_java_string, stream_java_uncompressed, write_java_gzip,
 };
 use thiserror::Error;
 
@@ -103,8 +103,7 @@ pub enum JavaStructureError {
     /// A line of sign text the NBT encoder cannot write.
     #[error(
         "the sign at {pos:?} has the line `{text}`, which cannot be written as NBT: {source}. \
-         Fix: {}",
-        sign_text_fix(source)
+         Fix: shorten the sign's text"
     )]
     UnencodableSignText {
         /// The sign's voxel.
@@ -117,7 +116,7 @@ pub enum JavaStructureError {
     /// A string of an entity, its text or one its `nbt=` writes, the NBT encoder cannot write.
     #[error(
         "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: write its text in printable ASCII"
+         Fix: shorten its text"
     )]
     UnencodableEntity {
         /// The entity's id.
@@ -231,7 +230,7 @@ pub fn prepare_structure<'a>(
             continue;
         };
         for line in front.lines().iter().chain(back.lines()) {
-            check_string(&text_component(line, target.data_version)).map_err(|source| {
+            check_java_string(&text_component(line, target.data_version)).map_err(|source| {
                 JavaStructureError::UnencodableSignText {
                     pos: entity.pos,
                     text: line.clone(),
@@ -265,10 +264,11 @@ fn check_palette_strings(entry: &BlockState) -> Result<(), JavaStructureError> {
         field,
         source,
     };
-    check_string(&entry.id).map_err(|source| refuse("its id".to_owned(), source))?;
+    check_java_string(&entry.id).map_err(|source| refuse("its id".to_owned(), source))?;
     for (key, value) in &entry.properties {
-        check_string(key).map_err(|source| refuse(format!("property name `{key}`"), source))?;
-        check_string(value)
+        check_java_string(key)
+            .map_err(|source| refuse(format!("property name `{key}`"), source))?;
+        check_java_string(value)
             .map_err(|source| refuse(format!("the value of property `{key}`"), source))?;
     }
     Ok(())
@@ -532,16 +532,6 @@ pub(crate) fn java_entity_id(data: &BlockEntityData) -> &str {
     }
 }
 
-/// How to fix sign text the NBT encoder refused with `source`.
-pub(crate) fn sign_text_fix(source: &NbtIoError) -> String {
-    match source {
-        NbtIoError::LengthOverflow { limit, .. } => {
-            format!("shorten the sign's text, which NBT holds to {limit} bytes as written")
-        }
-        _ => "write the sign's text in printable ASCII".to_owned(),
-    }
-}
-
 /// The first `DataVersion` that saves text, a sign's messages among it, as text components,
 /// 1.21.5's.
 const TEXT_COMPONENTS_FROM: i32 = 4325;
@@ -573,7 +563,7 @@ fn entity_nbt(
                 pos,
                 text: compound.clone(),
             })?;
-            if let Some((text, source)) = first_unencodable(&nbt) {
+            if let Some((text, source)) = first_unencodable(&nbt, check_java_string) {
                 return Err(JavaStructureError::UnencodableEntity {
                     id: "raw_block".to_owned(),
                     pos,

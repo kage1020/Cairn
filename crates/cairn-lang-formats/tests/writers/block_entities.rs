@@ -3,13 +3,17 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockEntityData, DyeColor};
-use cairn_lang_formats::bedrock_structure::{BedrockStructureError, build_mcstructure_tag};
+use cairn_lang_formats::bedrock_structure::{
+    BedrockStructureError, build_mcstructure_tag, prepare_mcstructure,
+};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_bedrock_target, resolve_java_target};
-use cairn_lang_formats::java_structure::{JavaStructureError, build_structure_tag};
+use cairn_lang_formats::java_structure::{
+    JavaStructureError, build_structure_tag, prepare_structure,
+};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
 use cairn_lang_formats::schem::{prepare_schem, schem_files};
-use cairn_lang_nbt::read_java_gzip;
 use cairn_lang_nbt::tag::{Compound, Tag};
+use cairn_lang_nbt::{NbtIoError, read_bedrock_uncompressed, read_java_gzip};
 
 use crate::common::{lower_source, position_data, snbt, states_for, written_palette};
 
@@ -356,46 +360,93 @@ fn a_bed_keeps_nothing_beside_its_block_on_java() {
 }
 
 #[test]
-fn sign_text_the_nbt_encoder_cannot_write_is_refused_by_both_writers_with_its_fix() {
-    let long = "a".repeat(usize::from(u16::MAX) + 1);
-    for (back, fix) in [
-        (
-            "Café",
-            "nbt: string contains byte 0xc3 at index 3, not encodable here. Fix: write the sign's \
-             text in printable ASCII"
-                .to_owned(),
+fn sign_text_outside_ascii_reads_back_from_both_writers_as_it_was_built() {
+    let back = "Caf\u{e9} \u{770b}\u{677f} \u{1f600}";
+    let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
+    let java = lowered(&source, Edition::Java, "26.3");
+    let target = resolve_java_target("26.3").expect("a shipped target");
+    assert_eq!(
+        java_nbt_for(&java, &target),
+        [(
+            "[2,1,3]".to_owned(),
+            java_sign(["The", "Inn", "", ""], [back, "", "", ""], true),
+        )],
+    );
+    let mut bytes = Vec::new();
+    prepare_structure(&java, &target)
+        .expect("the sign prepares")
+        .write_gzip(&mut bytes)
+        .expect("the file writes");
+    let (_, read) = read_java_gzip(bytes.as_slice()).expect("the bytes read back");
+    assert_eq!(read, build_structure_tag(&java, &target).expect("build"));
+
+    let bedrock = lowered(&source, Edition::Bedrock, "1.21.60");
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    let built = bedrock_root(&bedrock, "1.21.60");
+    let sign = position_data(&built)
+        .into_iter()
+        .find(|(key, _)| key == "48")
+        .expect("the sign's entry");
+    assert_eq!(
+        sign.1,
+        format!(
+            "{{block_entity_data:{{id:\"Sign\",FrontText:{},BackText:{},IsWaxed:0b,x:2,y:1,z:3}}}}",
+            bedrock_face("The\nInn", true),
+            bedrock_face(back, true)
         ),
-        (
-            long.as_str(),
-            "nbt: string length 65536 exceeds wire limit 65535. Fix: shorten the sign's text, \
-             which NBT holds to 65535 bytes as written"
-                .to_owned(),
+    );
+    let (structure, notes) =
+        prepare_mcstructure(&bedrock, &target, &states_for(&target)).expect("the sign prepares");
+    assert_eq!(notes, []);
+    let mut bytes = Vec::new();
+    structure.write(&mut bytes).expect("the file writes");
+    let (_, read) = read_bedrock_uncompressed(bytes.as_slice()).expect("the bytes read back");
+    assert_eq!(read, built);
+}
+
+#[test]
+fn sign_text_longer_than_an_nbt_string_holds_is_refused_by_both_writers_with_its_fix() {
+    let back = "a".repeat(usize::from(u16::MAX) + 1);
+    let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
+    let fix = "nbt: string length 65536 exceeds wire limit 65535. Fix: shorten the sign's text";
+    let java = lowered(&source, Edition::Java, "26.3");
+    let target = resolve_java_target("26.3").expect("a shipped target");
+    match build_structure_tag(&java, &target) {
+        Err(err @ JavaStructureError::UnencodableSignText { .. }) => assert_eq!(
+            err.to_string(),
+            format!(
+                "the sign at (2, 1, 3) has the line `{back}`, which cannot be written as NBT: {fix}"
+            ),
         ),
-    ] {
-        let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
-        let java = lowered(&source, Edition::Java, "26.3");
-        let target = resolve_java_target("26.3").expect("a shipped target");
-        match build_structure_tag(&java, &target) {
-            Err(err @ JavaStructureError::UnencodableSignText { .. }) => assert_eq!(
-                err.to_string(),
-                format!(
-                    "the sign at (2, 1, 3) has the line `{back}`, which cannot be written as NBT: \
-                     {fix}"
-                ),
-            ),
-            other => panic!("expected UnencodableSignText, got {other:?}"),
-        }
-        let bedrock = lowered(&source, Edition::Bedrock, "1.21.60");
-        let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
-        match build_mcstructure_tag(&bedrock, &target, &states_for(&target)) {
-            Err(err @ BedrockStructureError::UnencodableSignText { .. }) => assert_eq!(
-                err.to_string(),
-                format!(
-                    "the sign at (2, 1, 3) has the text `{back}`, which cannot be written as NBT: \
-                     {fix}"
-                ),
-            ),
-            other => panic!("expected UnencodableSignText, got {other:?}"),
-        }
+        other => panic!("expected UnencodableSignText, got {other:?}"),
     }
+    let bedrock = lowered(&source, Edition::Bedrock, "1.21.60");
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    match build_mcstructure_tag(&bedrock, &target, &states_for(&target)) {
+        Err(err @ BedrockStructureError::UnencodableSignText { .. }) => assert_eq!(
+            err.to_string(),
+            format!(
+                "the sign at (2, 1, 3) has the text `{back}`, which cannot be written as NBT: {fix}"
+            ),
+        ),
+        other => panic!("expected UnencodableSignText, got {other:?}"),
+    }
+}
+
+#[test]
+fn java_counts_a_sign_lines_length_in_the_modified_utf8_it_writes() {
+    // 10,923 astral characters are 43,692 bytes of UTF-8 and 65,538 of Modified UTF-8.
+    let back = "\u{1f600}".repeat(10_923);
+    let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
+    let java = lowered(&source, Edition::Java, "26.3");
+    let target = resolve_java_target("26.3").expect("a shipped target");
+    match build_structure_tag(&java, &target) {
+        Err(JavaStructureError::UnencodableSignText {
+            source: NbtIoError::LengthOverflow { len, limit, .. },
+            ..
+        }) => assert_eq!((len, limit), (65_538, 65_535)),
+        other => panic!("expected UnencodableSignText, got {other:?}"),
+    }
+    let bedrock = lowered(&source, Edition::Bedrock, "1.21.60");
+    bedrock_root(&bedrock, "1.21.60");
 }

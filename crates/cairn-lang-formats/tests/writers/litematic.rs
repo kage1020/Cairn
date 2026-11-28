@@ -7,8 +7,8 @@ use cairn_lang_formats::java_structure::JavaStructureError;
 use cairn_lang_formats::litematic::{
     LitematicError, LitematicFile, LitematicRegion, litematic_files, prepare_litematic,
 };
-use cairn_lang_nbt::read_java_gzip;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
+use cairn_lang_nbt::{NbtIoError, read_java_gzip};
 
 use crate::common::{array_of, comparator_array, ir_of, latest, lower_example};
 
@@ -534,10 +534,17 @@ fn a_region_the_nbt_writer_would_refuse_is_refused_with_its_name() {
 fn a_name_the_nbt_encoder_cannot_write_is_refused() {
     let array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
     let mut file = one_region(&array);
-    file.regions[0].name = "h\u{f6}me".to_owned();
-    let err = prepare_litematic(file, &target("1.21.4")).expect_err("not ASCII");
+    let long = "h".repeat(usize::from(u16::MAX) + 1);
+    file.regions[0].name.clone_from(&long);
+    let err = prepare_litematic(file, &target("1.21.4")).expect_err("too long");
     assert!(
-        matches!(&err, LitematicError::UnencodableName { name, .. } if name == "h\u{f6}me"),
+        matches!(
+            &err,
+            LitematicError::UnencodableName {
+                name,
+                source: NbtIoError::LengthOverflow { len: 65_536, limit: 65_535, .. },
+            } if *name == long
+        ),
         "got {err:?}"
     );
 }

@@ -1,7 +1,9 @@
 //! The Bedrock writer's little-endian byte stream.
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{NbtIoError, write_bedrock_uncompressed, write_java_uncompressed};
+use cairn_lang_nbt::{
+    NbtIoError, read_bedrock_uncompressed, write_bedrock_uncompressed, write_java_uncompressed,
+};
 
 use crate::find_subsequence;
 
@@ -121,19 +123,24 @@ fn same_tree_through_both_writers_differs_only_in_byte_order() {
 }
 
 #[test]
-fn string_and_list_validation_matches_java() {
+fn every_string_is_written_as_utf8_and_round_trips_through_the_bedrock_reader() {
     let mut root = Compound::new();
-    root.insert("bad", Tag::String("a\0b".to_owned()));
-    let mut buf = Vec::new();
-    let err = write_bedrock_uncompressed(&mut buf, "", &root).expect_err("nul rejected");
-    match err {
-        NbtIoError::InvalidString { byte, index } => {
-            assert_eq!(byte, 0);
-            assert_eq!(index, 1);
-        }
-        other => panic!("expected InvalidString, got {other:?}"),
+    for (name, text) in [
+        ("nul", "a\0b"),
+        ("latin", "Café"),
+        ("cjk", "看板の文字"),
+        ("astral", "x😀y"),
+    ] {
+        root.insert(name, Tag::String(text.to_owned()));
     }
+    let buf = encode("", &root);
+    assert!(find_subsequence(&buf, "x😀y".as_bytes()).is_some());
+    let (_, read) = read_bedrock_uncompressed(buf.as_slice()).expect("reads back");
+    assert_eq!(read, root);
+}
 
+#[test]
+fn list_validation_matches_java() {
     let mut root = Compound::new();
     root.insert(
         "xs",

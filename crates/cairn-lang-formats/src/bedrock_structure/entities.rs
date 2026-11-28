@@ -3,6 +3,7 @@
 //! structure's `entities`, each with its point in the structure's coordinates.
 
 use cairn_lang_core::block_array::{Compass, Entity, EntityData, Face, Item, Profession, Trade};
+use cairn_lang_nbt::check_bedrock_string;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::BedrockStructureError;
@@ -121,7 +122,7 @@ pub(super) fn bedrock_entities(
 
 /// Refuses the first string of `nbt` the NBT encoder could not write.
 fn check_strings(entity: &Entity, nbt: &Compound) -> Result<(), BedrockStructureError> {
-    match first_unencodable(nbt) {
+    match first_unencodable(nbt, check_bedrock_string) {
         Some((text, source)) => Err(BedrockStructureError::UnencodableEntity {
             id: entity.id.clone(),
             pos: entity.block_pos,

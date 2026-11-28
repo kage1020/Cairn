@@ -398,21 +398,27 @@ fn a_grid_that_disagrees_with_its_dims_is_refused_by_every_builder_before_a_byte
 
 #[test]
 fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
+    let id = format!("minecraft:{}", "a".repeat(usize::from(u16::MAX)));
     let mut array = grid(Dims { x: 1, y: 1, z: 1 }, 1);
-    array.voxels[0] = array
-        .palette
-        .intern(BlockState::bare("minecraft:caf\u{e9}"));
+    array.voxels[0] = array.palette.intern(BlockState::bare(&id));
+    let too_long = |source: &NbtIoError| {
+        matches!(
+            source,
+            NbtIoError::LengthOverflow {
+                context: "string",
+                len: 65_545,
+                limit: 65_535,
+            }
+        )
+    };
 
     let err = prepare_structure(&array, &resolve_java_target("latest").expect("latest"))
         .expect_err("java prepare");
     assert!(
         matches!(
             &err,
-            JavaStructureError::UnencodablePaletteString {
-                id,
-                field,
-                source: NbtIoError::InvalidString { byte: 0xc3, index: 13 },
-            } if id == "minecraft:caf\u{e9}" && field == "its id"
+            JavaStructureError::UnencodablePaletteString { id: named, field, source }
+                if *named == id && field == "its id" && too_long(source)
         ),
         "java: got {err:?}",
     );
@@ -422,25 +428,24 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
     assert!(
         matches!(
             &err,
-            BedrockStructureError::UnencodablePaletteString {
-                id,
-                field,
-                source: NbtIoError::InvalidString { byte: 0xc3, index: 13 },
-            } if id == "minecraft:caf\u{e9}" && field == "its id"
+            BedrockStructureError::UnencodablePaletteString { id: named, field, source }
+                if *named == id && field == "its id" && too_long(source)
         ),
         "bedrock: got {err:?}",
     );
     assert_eq!(
         err.to_string(),
-        "palette entry `minecraft:caf\u{e9}`: its id cannot be written as NBT: nbt: string \
-         contains byte 0xc3 at index 13, not encodable here",
+        format!(
+            "palette entry `{id}`: its id cannot be written as NBT: nbt: string length 65545 \
+             exceeds wire limit 65535"
+        ),
     );
 
     let mut array = grid(Dims { x: 1, y: 1, z: 1 }, 1);
     let mut state = BlockState::bare("minecraft:oak_stairs");
     state
         .properties
-        .insert("facing".to_owned(), "nor\u{f0}".to_owned());
+        .insert("facing".to_owned(), "n".repeat(usize::from(u16::MAX) + 1));
     array.voxels[0] = array.palette.intern(state);
     let err = prepare_structure(&array, &resolve_java_target("latest").expect("latest"))
         .expect_err("java prepare");

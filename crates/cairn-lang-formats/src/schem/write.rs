@@ -6,7 +6,7 @@ use std::io::Write;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{CompoundStream, NbtIoError, check_string, stream_java_uncompressed};
+use cairn_lang_nbt::{CompoundStream, NbtIoError, check_java_string, stream_java_uncompressed};
 use thiserror::Error;
 
 use super::STATE_SEPARATORS;
@@ -158,7 +158,7 @@ pub fn prepare_schem<'a>(
     {
         return Err(SchemError::BlockEntityWithoutId { pos });
     }
-    check_string(&file.stem).map_err(|source| SchemError::UnencodableName {
+    check_java_string(&file.stem).map_err(|source| SchemError::UnencodableName {
         name: file.stem.clone(),
         source,
     })?;
@@ -172,7 +172,7 @@ pub fn prepare_schem<'a>(
                 format!("{}[{}]", state.id, state.properties_text())
             },
         })?;
-        check_string(&spelled).map_err(|source| SchemError::UnencodableName {
+        check_java_string(&spelled).map_err(|source| SchemError::UnencodableName {
             name: spelled.clone(),
             source,
         })?;

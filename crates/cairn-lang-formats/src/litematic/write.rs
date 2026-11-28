@@ -5,7 +5,7 @@ use std::io::Write;
 
 use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockState};
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{CompoundStream, NbtIoError, check_string, stream_java_uncompressed};
+use cairn_lang_nbt::{CompoundStream, NbtIoError, check_java_string, stream_java_uncompressed};
 use indexmap::IndexMap;
 use thiserror::Error;
 
@@ -147,12 +147,12 @@ pub fn prepare_litematic<'a>(
         name: name.to_owned(),
         source,
     };
-    check_string(&file.stem).map_err(|source| unencodable(&file.stem, source))?;
+    check_java_string(&file.stem).map_err(|source| unencodable(&file.stem, source))?;
     let mut min = [i64::MAX; 3];
     let mut max = [i64::MIN; 3];
     let (mut total_volume, mut total_blocks) = (0_i64, 0_i64);
     for region in &file.regions {
-        check_string(&region.name).map_err(|source| unencodable(&region.name, source))?;
+        check_java_string(&region.name).map_err(|source| unencodable(&region.name, source))?;
         prepare_structure(region.block_array, target).map_err(|source| LitematicError::Region {
             region: region.name.clone(),
             source: Box::new(source),

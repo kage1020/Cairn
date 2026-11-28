@@ -1,11 +1,13 @@
-//! The NBT encoder both dialects share; they differ only in the byte order of multi-byte scalars.
+//! The NBT encoder both dialects share; they differ in the byte order of multi-byte scalars and
+//! in how a string's characters are encoded.
 
 use std::io::Write;
 
 use crate::error::NbtIoError;
-use crate::tag::{Compound, List, Tag, string_len};
+use crate::tag::{Compound, List, Tag};
 
-/// The byte order of every multi-byte scalar.
+/// The byte order of every multi-byte scalar, and with it the string encoding: Java's big-endian
+/// NBT writes Modified UTF-8, Bedrock's little-endian NBT writes UTF-8.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Endian {
     /// Java.
@@ -56,10 +58,55 @@ pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError
 }
 
 pub(crate) fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
-    let len = string_len(s)?;
+    let len = string_len(s, endian)?;
     endian.write_u16(w, len)?;
-    w.write_all(s.as_bytes())?;
+    if endian == Endian::Little || !needs_modified_utf8(s) {
+        w.write_all(s.as_bytes())?;
+        return Ok(());
+    }
+    let mut bytes = Vec::with_capacity(usize::from(len));
+    let low = |bits: u16| bits.to_le_bytes()[0];
+    for unit in s.encode_utf16() {
+        match unit {
+            0x0001..=0x007F => bytes.push(low(unit)),
+            0x0000..=0x07FF => {
+                bytes.extend_from_slice(&[0xC0 | low(unit >> 6), 0x80 | low(unit & 0x3F)]);
+            }
+            _ => bytes.extend_from_slice(&[
+                0xE0 | low(unit >> 12),
+                0x80 | low((unit >> 6) & 0x3F),
+                0x80 | low(unit & 0x3F),
+            ]),
+        }
+    }
+    w.write_all(&bytes)?;
     Ok(())
+}
+
+/// The length prefix `s` is written with in `endian`'s dialect: the bytes of its encoding.
+pub(crate) fn string_len(s: &str, endian: Endian) -> Result<u16, NbtIoError> {
+    let len = if endian == Endian::Little || !needs_modified_utf8(s) {
+        s.len()
+    } else {
+        s.encode_utf16()
+            .map(|unit| match unit {
+                0x0001..=0x007F => 1,
+                0x0000..=0x07FF => 2,
+                _ => 3,
+            })
+            .sum()
+    };
+    u16::try_from(len).map_err(|_| NbtIoError::LengthOverflow {
+        context: "string",
+        len,
+        limit: u16::MAX as usize,
+    })
+}
+
+/// Whether `s` holds a character Java's Modified UTF-8 writes apart from UTF-8: NUL, or one past
+/// U+FFFF, which UTF-8 opens with a byte of `0xF0` or more.
+fn needs_modified_utf8(s: &str) -> bool {
+    s.bytes().any(|byte| byte == 0 || byte >= 0xF0)
 }
 
 pub(crate) fn write_payload<W: Write>(

@@ -53,8 +53,9 @@ holds a raw member ([Versioning and Editions
 the compound over what it writes for the entity, key by key at the top level: a key the compound
 names replaces the writer's own, and every other key is added. A `raw_block`'s compound is the
 block entity of its block, written as given. The compiler checks the compound's syntax and nothing
-in it; a writer refuses a compound whose text holds a character outside ASCII, which the NBT it
-writes does not carry, and names the entity's cell.
+in it. Every string is written as given, in the Modified UTF-8 of Java's NBT or the UTF-8 of
+Bedrock's, and a writer refuses one longer than an NBT string holds, 65,535 bytes in that encoding,
+and names the entity's cell.
 
 A villager trading hall is a staple build and display entities are core to modern decoration.
 Sending them to `nbt={}` would cost generation quality and edit stability, so they are structured.
@@ -251,9 +252,9 @@ is `E_INVALID_MEMBER`, whatever its lines hold, and no sign is built; a value of
 item of a list included, is `W_IGNORED_ARGUMENT`, which leaves that face blank or its text unlit.
 Text is black. Java saves each face as four messages with `has_glowing_text`, each message a JSON
 string before 1.21.5 and a plain string from it, as each release reads one. Bedrock saves each face
-as one `Text`, its lines joined by line breaks, with `IgnoreLighting` for glowing. A writer refuses
-a sign whose text the NBT it writes cannot carry, a character outside ASCII or text longer than an
-NBT string holds, and names the sign's cell.
+as one `Text`, its lines joined by line breaks, with `IgnoreLighting` for glowing. Text keeps every
+character it is written with; a writer refuses a sign whose text is longer than an NBT string
+holds, and names the sign's cell.
 
 Java names a bed's colour in its block, as `blue_bed`, and keeps nothing for it in a block entity.
 Bedrock has one bed block, `bed`, and keeps the colour in the block entity of each half, as the

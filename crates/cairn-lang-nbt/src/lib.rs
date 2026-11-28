@@ -13,11 +13,14 @@ pub mod stream;
 pub mod tag;
 mod writer;
 
-pub use bedrock::{stream_bedrock_uncompressed, write_bedrock_uncompressed};
-pub use java::{NbtIoError, stream_java_uncompressed, write_java_gzip, write_java_uncompressed};
+pub use bedrock::{check_bedrock_string, stream_bedrock_uncompressed, write_bedrock_uncompressed};
+pub use java::{
+    NbtIoError, check_java_string, stream_java_uncompressed, write_java_gzip,
+    write_java_uncompressed,
+};
 pub use read::{
     Event, MAX_DEPTH, NbtReadError, NbtReader, read_bedrock_uncompressed, read_java_gzip,
     read_java_uncompressed,
 };
 pub use stream::{CompoundStream, ListStream};
-pub use tag::{Compound, List, Tag, check_string};
+pub use tag::{Compound, List, Tag};

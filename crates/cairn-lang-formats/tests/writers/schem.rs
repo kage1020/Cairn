@@ -469,16 +469,29 @@ fn an_array_the_nbt_writer_would_refuse_is_refused() {
 fn a_name_the_nbt_encoder_cannot_write_is_refused() {
     let array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
     let mut file = struct_file(&array);
-    file.stem = "h\u{f6}me".to_owned();
-    let err = prepare_schem(file, &target("1.21.4")).expect_err("not ASCII");
+    let long = "h".repeat(usize::from(u16::MAX) + 1);
+    file.stem.clone_from(&long);
+    let err = prepare_schem(file, &target("1.21.4")).expect_err("too long");
     assert!(
         matches!(
             &err,
             SchemError::UnencodableName {
                 name,
-                source: NbtIoError::InvalidString { byte: 0xc3, index: 1 },
-            } if name == "h\u{f6}me"
+                source: NbtIoError::LengthOverflow { len: 65_536, limit: 65_535, .. },
+            } if *name == long
         ),
         "got {err:?}"
+    );
+}
+
+#[test]
+fn a_name_outside_ascii_reads_back_as_it_was_given() {
+    let array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
+    let mut file = struct_file(&array);
+    file.stem = "h\u{f6}me \u{1f3e0}".to_owned();
+    let schematic = written_schematic(file, &target("1.21.4"));
+    assert_eq!(
+        entry(&schematic, "Metadata").entries.get("Name"),
+        Some(&string("h\u{f6}me \u{1f3e0}"))
     );
 }

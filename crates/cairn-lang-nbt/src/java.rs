@@ -6,7 +6,7 @@ use std::io::Write;
 pub use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-use crate::writer::{Endian, write_named_root};
+use crate::writer::{Endian, string_len, write_named_root};
 
 /// Writes `root` as a named Java NBT root without gzip.
 ///
@@ -56,4 +56,13 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     stream_named_root(writer, Endian::Big, root_name, body)
+}
+
+/// Checks that the Java writers would accept `s` as an NBT string, without writing it.
+///
+/// # Errors
+///
+/// [`NbtIoError::LengthOverflow`] when its Modified UTF-8 runs past 65,535 bytes.
+pub fn check_java_string(s: &str) -> Result<(), NbtIoError> {
+    string_len(s, Endian::Big).map(drop)
 }

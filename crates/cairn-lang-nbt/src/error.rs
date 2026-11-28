@@ -6,15 +6,6 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NbtIoError {
-    /// A string held a NUL or non-ASCII byte, outside the range where Java's Modified UTF-8 and
-    /// Bedrock's UTF-8 agree.
-    #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
-    InvalidString {
-        /// The rejected byte.
-        byte: u8,
-        /// Its byte index in the string.
-        index: usize,
-    },
     /// A [`List`](crate::tag::List) declared one element type but an item carried another.
     #[error("nbt: list declared element type {declared} but item {index} has type {actual}")]
     HeterogeneousList {
