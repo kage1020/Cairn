@@ -61,6 +61,10 @@ const PINNED: Table = &[
     ),
     ("minecraft:oak_planks", &[]),
     (
+        "minecraft:oak_pressure_plate",
+        &[("powered", &["true", "false"])],
+    ),
+    (
         "minecraft:oak_trapdoor",
         &[
             ("facing", &["north", "south", "west", "east"]),
@@ -330,7 +334,7 @@ fn a_pressure_plate_whose_material_is_outside_its_block_is_not_placed() {
     assert_eq!(solid_cells(only_structure(&out)), 0, "no default plate");
 
     // A literal the target takes still defers, since a plate's states are its own.
-    let source = plated("@oak_log[axis=x]");
+    let source = plated("@oak_pressure_plate[powered=true]");
     let out = lowered_at(&source, &Tables::pinned());
     let found: Vec<(DiagnosticCode, &str)> = findings(&source, &out)
         .into_iter()

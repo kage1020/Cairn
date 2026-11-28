@@ -9,11 +9,12 @@ fn defer_reasons(ir: &BlockArrayIr) -> Vec<String> {
     ir.diagnostics.iter().map(|d| d.primary.clone()).collect()
 }
 
-/// A theme binding the members' two slots, and a struct header wide enough for a roof ridge.
+/// A theme binding the members' slots, and a struct header wide enough for a roof ridge.
 const PRELUDE: &str = "theme t:\n  \
                        slot wall -> @cobblestone\n  \
                        slot roof -> @spruce_stairs\n  \
-                       slot deck -> @oak_planks\n\n\
+                       slot deck -> @oak_planks\n  \
+                       slot plate -> @oak_pressure_plate\n\n\
                        struct t size=9x7\n  \
                        walls mat_slot=wall height=3\n";
 
@@ -163,11 +164,11 @@ fn a_malformed_overhang_on_a_dropped_roof_is_not_read_at_all() {
 fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
     let raised = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n\n  \
-         level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=deck\n",
+         level id=upper y=3\n    pressure_plate at=inside.front offset=1 mat_slot=plate\n",
     ));
     let ground = lowered(&source(
         "  roof kind=gable mat_slot=roof overhang=1\n  \
-         pressure_plate at=inside.front offset=1 y=3 mat_slot=deck\n",
+         pressure_plate at=inside.front offset=1 y=3 mat_slot=plate\n",
     ));
 
     assert_eq!(defer_reasons(&raised), Vec::<String>::new());
@@ -177,7 +178,7 @@ fn a_pressure_plate_under_a_raised_level_lands_at_that_level() {
             .palette
             .entries
             .iter()
-            .any(|s| s.id == "minecraft:oak_planks"),
+            .any(|s| s.id == "minecraft:oak_pressure_plate"),
         "the plate must paint for this comparison to mean anything",
     );
 }

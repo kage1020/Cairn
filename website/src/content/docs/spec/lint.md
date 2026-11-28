@@ -169,7 +169,7 @@ to compare.
 | `E_INTENDED_TARGET_CAP` | Every version `@intended_targets` names is below a floor the same file declares. |
 | `W_INTENDED_TARGET_CAP` | Some, not all, of them are. |
 | `W_INTENDED_TARGET_UNSUPPORTED` | `@intended_targets` names a version no `--target` of the edition can build. |
-| `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them. |
+| `E_INCOMPATIBLE_MATERIAL` | A member whose geometry attaches blockstates is bound to a material that cannot carry them, or a `pressure_plate` to a block that is no pressure plate. |
 | `E_MISSING_MATERIAL` | A member whose only route to a block is `mat_slot=` was written without one. |
 | `E_UNRESOLVED_SLOT` | A member whose role reads a `mat_slot=` names a slot the bound theme does not declare. |
 | `E_UNKNOWN_SLOT_TARGET` | A `slot NAME -> VALUE` whose value is neither a canonical nor an abstract material token nor a member form a `hologram` is built as, or a key a `theme` selector row's keyword binds ([Materials and Themes](/spec/materials-themes/#selector-bindings)) whose value is neither a canonical nor an abstract material token ([Materials and Themes](/spec/materials-themes/)). |
@@ -259,11 +259,12 @@ otherwise answered in full at its next pull.
 family ([Compilation Model §4.3](/spec/compilation/#43-gable-roof-voxel-rules)), a `door` bound
 outside the door family ([Syntax §5.4](/spec/syntax/#54-selectors)), a `chest` bound outside the
 chest family ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
-a `button` bound outside the button family ([Redstone §14.2](/spec/redstone/#142-signal-binding)),
-or a `trapdoor` bound outside the trapdoor family, a `beam` bound to a block whose `axis` does not
-take `x`, `y` and `z`, an `arch` bound outside the stair family, a `sign` bound to a block that is
-no standing sign with a wall sign at the target, or a `bed` bound outside the bed family
-([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
+a `button` or a `pressure_plate` bound outside the button or pressure plate family ([Redstone
+§14.2](/spec/redstone/#142-signal-binding)), or a `trapdoor` bound outside the trapdoor family, a
+`beam` bound to a block whose `axis` does not take `x`, `y` and `z`, an `arch` bound outside the
+stair family, a `sign` bound to a block that is no standing sign with a wall sign at the target, or
+a `bed` bound outside the bed family ([Blockstate Model
+§6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)).
 
 `E_THEME_VARIANT_MISSING` fires only under `--edition`, and is reported **once per logical theme**
 however many scopes read it, since they all want the same edit in the same `theme` block. Every
@@ -1046,8 +1047,8 @@ versions of the edition whose tables take the pair, oldest first; each is absent
 `E_INCOMPATIBLE_MATERIAL` follows the same idea: `slot` is the `mat_slot=` name the member read and
 is absent when it carries no binding, and a dotted `token` (`roof.dark_wood`) means the pack's
 mapping is what to correct rather than the source line. `required` is `stair`, `door`, `chest`,
-`button`, `trapdoor`, `pillar`, `sign` or `bed`, named rather than implied so that a further family
-is a new value here, not a new code.
+`button`, `trapdoor`, `pillar`, `sign`, `bed` or `pressure_plate`, named rather than implied so that
+a further family is a new value here, not a new code.
 
 `W_TRUTH_TABLE_PARTIAL.missing` is a **sample** rather than the set: twenty inputs have a million
 combinations. Take the count from `2^inputs - covered`, never from `missing.len()`. `inputs` is

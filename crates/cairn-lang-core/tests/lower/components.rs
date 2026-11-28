@@ -9,7 +9,8 @@ use crate::common::{Finding, blocks_where, findings, lowered, only_structure};
 const THEME: &str = "theme t:\n  \
                      slot wall  -> @cobblestone\n  \
                      slot knob  -> @stone_button\n  \
-                     slot plank -> @oak_planks\n\n";
+                     slot plank -> @oak_planks\n  \
+                     slot plate -> @stone_pressure_plate\n\n";
 
 /// Every component keyword, with the noun its findings call it by.
 const COMPONENTS: [(&str, &str); 7] = [
@@ -273,6 +274,42 @@ fn a_button_bound_outside_the_button_family_is_refused_and_built_from_the_defaul
             BACK,
             "minecraft:oak_button[face=wall,facing=south]".to_owned()
         )]
+    );
+}
+
+#[test]
+fn a_pressure_plate_bound_outside_the_plate_family_is_refused_and_built_from_the_default_plate() {
+    let src = storeroom("pressure_plate at=inside.back offset=2 y=1 mat_slot=plank");
+    let out = lowered(&src);
+    assert_eq!(
+        findings(&src, &out),
+        [(
+            DiagnosticCode::IncompatibleMaterial,
+            "@oak_planks",
+            "pressure_plate senses what stands on it and `minecraft:oak_planks` is not a pressure \
+             plate, so nothing would sense it",
+            vec![
+                "bind the slot to a `*_pressure_plate` material — the registry pack's \
+                 `pressure_plate.default` resolves to one",
+                "reached through `mat_slot=plank`, so every member reading that slot has it too",
+            ],
+        )],
+    );
+    assert_eq!(
+        serde_json::to_value(&out.diagnostics[0].data).expect("serialises")["required"],
+        "pressure_plate",
+    );
+    assert_eq!(
+        components(&out),
+        [(BACK, "minecraft:oak_pressure_plate".to_owned())]
+    );
+}
+
+#[test]
+fn a_pressure_plate_bound_to_a_plate_is_built_from_it() {
+    assert_eq!(
+        built("pressure_plate at=inside.back offset=2 y=1 mat_slot=plate"),
+        [(BACK, "minecraft:stone_pressure_plate".to_owned())],
     );
 }
 

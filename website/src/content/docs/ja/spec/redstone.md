@@ -104,7 +104,7 @@ dispenser id=ds at=front.outside offset=6 y=1 fired_by=sig.pulse facing=out
 
 どのコンポーネントも、動力のない状態で建ちます。レバーはオフ、ボタンは押されておらず、ランプは消え、ピストンは縮み、ディスペンサーは作動していません。ワールドで動力を与えるのは回路なので、こうした状態は行に書かず、意図 (intent) に昇格する状態は `facing=` だけです ([ブロックステートモデル §6.2](/ja/spec/blockstate/#62-intent_state-と-resolved_state))。
 
-**コンポーネントの材料。** `button` は `mat_slot=` を読み、そのスロットはボタンに割り当てる必要があります。ほかのブロックなら `E_INCOMPATIBLE_MATERIAL` で、ボタンは代わりに `@button.default` で建ちます。`mat_slot=` がなければ `@button.default` で建ちます。ほかのコンポーネントは、それぞれの tier-1 のトークン ([マテリアルとテーマ](/ja/spec/materials-themes/#tier-1-のトークン)) で建ちます。ピストンは `@piston.default` で、`sticky=true` なら `@piston.sticky` で建ちます。そのどれを使うかを `mat_slot=` が選ぶことはないので、`mat_slot=` を書くと `W_IGNORED_ARGUMENT` になります。
+**コンポーネントの材料。** `pressure_plate` と `button` は `mat_slot=` を読み、そのスロットは同じ種類のブロック、つまり Bedrock の `wooden_pressure_plate` のように ID が `_pressure_plate` か `_button` で終わるブロックに割り当てる必要があります。ほかのブロックなら `E_INCOMPATIBLE_MATERIAL` で、感圧板やボタンは代わりに `@pressure_plate.default` か `@button.default` で建ちます。`mat_slot=` がなければそのトークンで建ちます。ほかのコンポーネントは、それぞれの tier-1 のトークン ([マテリアルとテーマ](/ja/spec/materials-themes/#tier-1-のトークン)) で建ちます。ピストンは `@piston.default` で、`sticky=true` なら `@piston.sticky` で建ちます。そのどれを使うかを `mat_slot=` が選ぶことはないので、`mat_slot=` を書くと `W_IGNORED_ARGUMENT` になります。
 
 **レバーやボタンが掛かるブロックは検査しません。** レバーやボタンは、壁のセルに何があってもそこに掛けて書き出し、そのブロックにゲームが掛けさせるかどうかは確かめません。そのセルを `walls` が塗っていないか、それを支えられない面のブロックで塗っている場合、ブロック更新が届いた時点でゲームはレバーやボタンを落とします。
 
