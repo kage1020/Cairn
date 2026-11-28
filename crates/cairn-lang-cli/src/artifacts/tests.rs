@@ -259,48 +259,34 @@ fn a_litematic_whose_file_name_leaves_out_dir_writes_nothing() {
 }
 
 #[test]
-fn two_litematics_whose_names_differ_only_in_case_collide_only_where_out_folds_case() {
+fn two_litematics_whose_names_differ_only_in_case_collide_on_every_host() {
     let target = latest_java();
     let out_dir = Path::new("out");
     let block_ir = rekeyed_probe(&["struct::hut", "struct::HUT"]);
-    match prepare_artifacts(
-        &block_ir,
-        litematic(&target),
-        out_dir,
-        NameCase::Insensitive,
-    ) {
-        Err(PrepareRefusal::Collision(collision)) => assert_eq!(
-            (
-                collision.first.as_str(),
-                collision.first_path.as_path(),
-                collision.scope.as_str(),
-                collision.path.as_path(),
-                collision.litematic,
+    for case in [NameCase::Insensitive, NameCase::Sensitive] {
+        match prepare_artifacts(&block_ir, litematic(&target), out_dir, case) {
+            Err(PrepareRefusal::Collision(collision)) => assert_eq!(
+                (
+                    collision.first.as_str(),
+                    collision.first_path.as_path(),
+                    collision.scope.as_str(),
+                    collision.path.as_path(),
+                    collision.litematic,
+                ),
+                (
+                    "struct::hut",
+                    out_dir.join("hut.litematic").as_path(),
+                    "struct::HUT",
+                    out_dir.join("HUT.litematic").as_path(),
+                    true,
+                ),
             ),
-            (
-                "struct::hut",
-                out_dir.join("hut.litematic").as_path(),
-                "struct::HUT",
-                out_dir.join("HUT.litematic").as_path(),
-                true,
+            other => panic!(
+                "`hut.litematic` and `HUT.litematic` collide whatever `--out` folds, got {:?}",
+                prepared_paths(other),
             ),
-        ),
-        other => panic!(
-            "`hut.litematic` and `HUT.litematic` are one file where `--out` folds case, got {:?}",
-            prepared_paths(other),
-        ),
+        }
     }
-    let paths = prepared_paths(prepare_artifacts(
-        &block_ir,
-        litematic(&target),
-        out_dir,
-        NameCase::Sensitive,
-    ))
-    .unwrap_or_else(|refusal| panic!("two files where `--out` keeps case, got {refusal:?}"));
-    assert_eq!(
-        paths,
-        [out_dir.join("hut.litematic"), out_dir.join("HUT.litematic")]
-    );
 }
 
 #[test]
