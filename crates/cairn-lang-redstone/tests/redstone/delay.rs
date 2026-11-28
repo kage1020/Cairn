@@ -132,3 +132,30 @@ fn no_circuit_delays_to_nothing() {
     assert_eq!(out.diagnostics, []);
     assert_eq!(out.scoped, ScopedCircuitLayout::default());
 }
+
+/// An `and` of a plate the deferred roof leaves with nothing to stand on and one placed inside.
+fn and_of_an_unplaced_plate(and: &str) -> String {
+    format!(
+        "theme t:\n  slot w -> @oak_planks\nstruct s size=12x10\n  floor mat_slot=w\n  \
+         level y=2\n    roof kind=flat mat_slot=w overhang=1\n  \
+         pressure_plate id=p1 at=front.outside y=0 -> sig.a\n  \
+         pressure_plate id=p2 at=inside.front offset=1 y=0 -> sig.b\n  logic sig.f = {and}\n  \
+         lamp id=l at=inside.back offset=2 y=0 lit_by=sig.f\n  circuit region=floor void=4\n"
+    )
+}
+
+#[test]
+fn an_input_that_reads_nothing_lays_no_buffer_behind_a_gate_that_passes_its_strength_on() {
+    for and in ["sig.a and sig.b", "sig.b and sig.a"] {
+        let source = and_of_an_unplaced_plate(and);
+        for edition in [Edition::Java, Edition::Bedrock] {
+            let out = compile_delay(&routed(&source, edition));
+            assert_eq!(out.diagnostics, [], "{edition:?} {and}");
+            assert_eq!(
+                buffers(&out.scoped.scopes[0].ir),
+                [0, 0],
+                "{edition:?} {and}"
+            );
+        }
+    }
+}
