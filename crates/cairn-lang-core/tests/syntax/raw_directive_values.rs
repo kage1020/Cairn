@@ -161,15 +161,18 @@ fn an_indentation_failure_after_a_taken_value_is_the_error_reported() {
     assert_eq!(err.position().line.get(), 3);
 }
 
-/// The parse error, as `(line, column, message)`, for a source that does not parse.
-fn refusal(source: &str) -> (u32, u32, String) {
+/// The parse error, as whether `lex` refused it and its `(line, column, message)`.
+fn refusal(source: &str) -> (bool, (u32, u32, String)) {
     let err = parse(source).expect_err("the fixture does not parse");
     let at = err.position();
-    (at.line.get(), at.col.get(), err.user_message())
+    (
+        matches!(err, ParseError::Lex(_)),
+        (at.line.get(), at.col.get(), err.user_message()),
+    )
 }
 
 #[test]
-fn a_raw_value_after_a_parse_error_is_not_refused_in_its_place() {
+fn a_parse_error_ahead_of_a_raw_value_is_the_error_reported() {
     for (source, expected) in [
         (
             "def d size=3x3\n  window size=\n  requires version~=1.21\n",
@@ -191,11 +194,70 @@ fn a_raw_value_after_a_parse_error_is_not_refused_in_its_place() {
             "theme t\n  slot a ->\n  requires version>=1.21+x\n",
             (2, 12, "unexpected end of line in value position"),
         ),
+        // The `requires` line opens with an `Indent`, then with a `Dedent`.
+        (
+            "def d size=\n  requires version~=1.21\n",
+            (1, 12, "unexpected end of line in value position"),
+        ),
+        (
+            "def d size=3x3:\n  window size=\n    floor\n  requires version~=1.21\n",
+            (2, 15, "unexpected end of line in value position"),
+        ),
     ] {
         let (line, col, message) = expected;
         assert_eq!(
             refusal(source),
-            (line, col, message.to_owned()),
+            (false, (line, col, message.to_owned())),
+            "{source:?}"
+        );
+    }
+}
+
+#[test]
+fn a_stray_behind_a_parse_error_where_no_raw_value_stands_is_refused() {
+    for source in [
+        // On the line the parse failed on.
+        "struct s size=3x3\n  requires version>=1.21+x\n",
+        "site p:\n  requires version>=1.21+x\n",
+        "struct s size=3x3\n  requires = ~\n",
+        "requires version~=1.21\n",
+        "theme t:\n  slot a -> @stone\n@cairn 2026.6+build\n",
+        // On a later line: a `struct`, `site`, member, guard or top-level `requires`.
+        "struct s size=3x3\n  window size=\n  requires version~=1.21\n",
+        "site s\n  place x ->\n  requires version~=1.21\n",
+        "def d size=2x2:\n  window size=\n  window size=1x1\n    requires version~=1.21\n",
+        "def d size=2x2:\n  window size=\n  @edition java\n    requires version~=1.21\n",
+        "theme t:\n  slot x ->\nrequires version~=1.21\n",
+        // And a header after an item, or indented.
+        "theme t:\n  slot x ->\n@cairn 2026.6+x\n",
+        "def d size=3x3:\n  window size=\n@cairn 2026.6+build\n",
+        "@crain 2026.6\n  @cairn 2026.6+build\n",
+    ] {
+        refused_as_lex_refuses(source);
+    }
+}
+
+/// `lex` refuses each raw value's `~` first, so the expected refusal is written out.
+#[test]
+fn a_stray_past_a_raw_value_behind_a_parse_error_is_refused() {
+    for (source, expected) in [
+        (
+            "theme t:\n  slot x ->\n  requires version~=1.21\n  slot $ -> @stone\n",
+            (4, 8, "unexpected character `$` (U+0024)"),
+        ),
+        (
+            "theme t:\n  slot x ->\n  requires version~=1.21\t\n",
+            (3, 25, "unexpected character U+0009"),
+        ),
+        (
+            "@crain 2026.6\n@cairn 2026.6~ \"dr\taft\n",
+            (2, 16, "unterminated string literal"),
+        ),
+    ] {
+        let (line, col, message) = expected;
+        assert_eq!(
+            refusal(source),
+            (true, (line, col, message.to_owned())),
             "{source:?}"
         );
     }
