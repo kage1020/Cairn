@@ -95,7 +95,7 @@ pub fn compile(source: &str, edition: Edition, target: &str) -> Compiled {
         Err(BuildRefusal::RunLevel(refusal)) => {
             compiled.run_level.push(refusal.render(source, &lines));
         }
-        // `cairn check --target` reports the same refusal as a finding.
+        // The language server marks the same refusal at the floor's line.
         Err(BuildRefusal::Floor(refusal)) => {
             compiled.diagnostics.push(refusal.render(source, &lines));
             return compiled;

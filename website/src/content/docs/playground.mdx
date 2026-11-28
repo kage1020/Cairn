@@ -17,8 +17,8 @@ and run in your browser, so nothing you write leaves the page. Each build is
 - **Findings** are the ones `cairn check` and `cairn compile` report, in the shape
   [Lint](/spec/lint/) gives them: what is wrong, what would be valid, and how to fix it. Select
   one to put the cursor where it points. A `--target` a `@requires` floor rules out is the finding
-  `cairn check` reports at that floor, and a refusal of the whole run, such as a `--target` the
-  edition does not ship, is listed with them.
+  `cairn compile` and the language server report at that floor, and a refusal of the whole run,
+  such as a `--target` the edition does not ship, is listed with them.
 - **Result** draws the [block-array IR](/spec/architecture/) the structure files are written
   from, layer by layer, with the palette its cells index into. It appears whenever no finding is an
   error, even when the run itself is refused.
