@@ -7,11 +7,11 @@ use std::fmt::Write as _;
 use cairn_lang_core::logic_library::StageCount;
 use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::{
-    CellPortDriver, EditionCell, GateKind, LogicalCell, NetRef, PortName, SignalRef,
-    compile_netlist, verify_latency,
+    CellPortDriver, EditionCell, GateKind, LogicalCell, NetRef, PortName, SignalRef, compile_delay,
+    compile_netlist, compile_routing, verify_latency,
 };
 
-use crate::common::{cells, legalized, synth_source};
+use crate::common::{cells, legalized, placement_of, synth_source};
 
 /// A struct with a lever on each of `inputs` and a door that `expression` opens, then `tail`.
 fn source(inputs: &[&str], expression: &str, tail: &str) -> String {
@@ -244,10 +244,73 @@ fn a_latency_bound_counts_a_macro_by_the_port_it_enters() {
                 ),
                 format!(
                     "struct=s: `assert latency(sig.r -> sig.out) <= 4` fails on {edition}: its \
-                     slowest path from sig.r to sig.out takes 7 ticks, 2 in the torches up to the \
+                     slowest path from sig.r to sig.out takes 8 ticks, 2 in the torches up to the \
                      actuator"
                 ),
             ],
         );
+    }
+}
+
+/// A struct of `size` with a lever on `sig.a`, and on `sig.f` for a `latch`, and a lamp that
+/// `expression` lights over a reservation of `void`.
+fn one_sensor_one_actuator(expression: &str, size: &str, void: u32) -> String {
+    let reset = if expression.starts_with("latch") {
+        "  lever id=in1 at=inside.front offset=3 y=0 -> sig.f\n"
+    } else {
+        ""
+    };
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\nstruct s size={size}\n  floor mat_slot=wall\n  \
+         walls mat_slot=wall height=4\n  roof kind=flat mat_slot=wall overhang=1\n  \
+         lever id=in0 at=inside.front offset=1 y=0 -> sig.a\n{reset}  \
+         lamp id=out0 at=inside.back offset=1 y=1 lit_by=sig.o\n  logic sig.o = {expression}\n  \
+         circuit region=floor void={void}\n"
+    )
+}
+
+/// The codes of the first place-and-route stage that refuses `source`'s circuit, or none.
+fn laid(source: &str, edition: Edition) -> Vec<&'static str> {
+    let codes = |found: &[cairn_lang_redstone::Diagnostic]| -> Vec<&'static str> {
+        found.iter().map(|d| d.code.as_str()).collect()
+    };
+    let placed = placement_of(source, edition);
+    if !placed.diagnostics.is_empty() {
+        return codes(&placed.diagnostics);
+    }
+    let routed = compile_routing(&placed.scoped);
+    if !routed.diagnostics.is_empty() {
+        return codes(&routed.diagnostics);
+    }
+    codes(&compile_delay(&routed.scoped).diagnostics)
+}
+
+#[test]
+fn every_macro_one_sensor_feeds_lays_whatever_room_the_struct_leaves_it() {
+    let expressions = [
+        "delay(sig.a, 3)",
+        "pulse(sig.a, 3)",
+        "edge_rising(sig.a)",
+        "edge_falling(sig.a)",
+        "latch(set=sig.a, reset=sig.f)",
+        "counter(sig.a, 1)",
+        "counter(sig.a, 2)",
+        "counter(sig.a, 3)",
+        "counter(sig.a, 4)",
+    ];
+    for expression in expressions {
+        for size in ["16x12", "24x20", "32x28"] {
+            for void in 4..=6 {
+                let source = one_sensor_one_actuator(expression, size, void);
+                for edition in [Edition::Java, Edition::Bedrock] {
+                    let refused = laid(&source, edition);
+                    assert_eq!(
+                        refused,
+                        Vec::<&str>::new(),
+                        "{expression} at {size} void={void} on {edition:?}"
+                    );
+                }
+            }
+        }
     }
 }
