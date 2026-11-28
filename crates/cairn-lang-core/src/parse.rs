@@ -199,9 +199,8 @@ fn unquoted_target(raw: &str, tokens: &[Token], err: ParseError) -> ParseError {
 
 /// Parse a `.crn` source string into a [`Module`].
 ///
-/// A lex failure inside a line stands unless it falls in a raw value, read as one or, past a parse
-/// failure, on a line the parser reads one from; a stretch holding whitespace other than a space
-/// always stands.
+/// A lex failure inside a line stands unless its stretch holds no whitespace but spaces and falls
+/// in a raw value: one the parser read or, past a parse failure, one on a line it reads one from.
 ///
 /// # Errors
 /// Returns a [`ParseError`]: a lex failure that stands, else the indentation or parse failure.
