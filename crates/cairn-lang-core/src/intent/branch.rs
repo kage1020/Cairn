@@ -96,8 +96,9 @@ fn keep_branch(members: &mut Vec<Member>, edition: Option<Edition>) {
     }
 }
 
-/// Drop each member of `members` under another edition's guard, at any depth, adding the `id=` of
-/// each villager among them to `dropped`.
+/// Drop each member of `members` under another edition's guard, at any depth, and each
+/// `raw_repeat` left with no raw member to write, adding the `id=` of each villager among them to
+/// `dropped`.
 fn drop_other_branches(
     members: &mut Vec<Member>,
     edition: Option<Edition>,
@@ -112,9 +113,21 @@ fn drop_other_branches(
         }
         keep
     });
-    for member in members {
+    members.retain_mut(|member| {
+        let repeats = repeats_raw(member);
         drop_other_branches(&mut member.children.members, edition, dropped);
-    }
+        !repeats || repeats_raw(member)
+    });
+}
+
+/// Whether `member` is a `raw_repeat` with a raw member under it.
+fn repeats_raw(member: &Member) -> bool {
+    matches!(member.role, MemberRole::RawRepeat)
+        && member
+            .children
+            .members
+            .iter()
+            .any(|child| child.role.is_repeatable())
 }
 
 fn collect_villager_ids(members: &[Member], into: &mut Vec<String>) {

@@ -1596,11 +1596,13 @@ alone. A line of that layer in a `site` body is `E_MISPLACED_MEMBER`, with a gua
 so a guard there holds nothing that builds.
 
 A pinned build keeps the lines under its own edition's guards and drops the other edition's, with
-the `trade` lines of each villager it drops ([Entities §8.1](/spec/entities/#standing-entities)).
+the `trade` lines of each villager it drops ([Entities §8.1](/spec/entities/#standing-entities)),
+and each `raw_repeat` it leaves with no raw member, since that repeat has nothing to write there.
 `cairn compile --edition java` builds the snippet's `minecraft:light` and never builds
 `light_block_15`. Lowering that pins no edition keeps neither: `cairn lower` without `--edition`
-prints the edition-neutral pivot, so it leaves every guarded line out and a note says how many. It
-still reports what each edition's branch finds on those lines, and exits 1 on an error there.
+prints the edition-neutral pivot, so it leaves every guarded line out, with what goes with it, and
+a note says how many. It still reports what each edition's branch finds on those lines, and exits 1
+on an error there.
 
 Two lines under guards for different editions never build together, so they may share an `id=`.
 A guarded line and an unguarded one, or two under guards for one edition, are both built by that
