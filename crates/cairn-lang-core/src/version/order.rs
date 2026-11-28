@@ -97,7 +97,7 @@ impl VersionOrder {
             Some((core, _)) => (core, true),
             None => (label, false),
         };
-        // A pre-release answers as its release: Minecraft ships nothing between them.
+        // A pre-release or snapshot answers as its release: the table has no row between them.
         if pre_release && let Some(key) = self.key_of(core) {
             return FloorPlacement::At(key);
         }
@@ -242,6 +242,13 @@ mod tests {
         assert_eq!(java().place("1.19-rc1"), FloorPlacement::BelowEvery);
         assert_eq!(java().place("99.0-rc1"), FloorPlacement::AboveEvery);
         assert_eq!(bedrock().place("1.21.4-rc1"), FloorPlacement::Unplaceable);
+    }
+
+    #[test]
+    fn a_date_based_pre_release_or_snapshot_of_a_release_places_at_it() {
+        for label in ["1.21.4-rc-1", "1.21.4-pre-3", "1.21.4-snapshot-10"] {
+            assert_eq!(java().place(label), FloorPlacement::At(4189), "{label}");
+        }
     }
 
     #[test]

@@ -8,7 +8,7 @@ use cairn_lang_core::block_array::{
 };
 use cairn_lang_core::{Diagnostic, Edition, lower, parse, resolve};
 
-use crate::common::{DECLARED, Tables, blocks, lowered, notes, slice};
+use crate::common::{DECLARED, Tables, blocks, lowered, notes, positioned, slice};
 
 /// `source`'s findings lowered with no target, for `edition` or for both, `standing` saying what
 /// the versions of an edition make of an id.
@@ -53,19 +53,6 @@ fn located<'a>(source: &'a str, found: &[Diagnostic]) -> Vec<(&'static str, &'a 
     found
         .iter()
         .map(|d| (d.code.as_str(), slice(source, d)))
-        .collect()
-}
-
-/// Each finding as its code and the 1-based `line:column` it starts at.
-fn positioned(source: &str, found: &[Diagnostic]) -> Vec<(&'static str, String)> {
-    found
-        .iter()
-        .map(|d| {
-            let before = &source[..d.span.start];
-            let line = before.matches('\n').count() + 1;
-            let column = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
-            (d.code.as_str(), format!("{line}:{column}"))
-        })
         .collect()
 }
 

@@ -149,6 +149,9 @@ fn a_component_that_is_not_a_number_is_refused() {
 fn a_label_the_spec_says_will_exist_is_not_refused_by_the_directive() {
     for (header, version) in [
         ("@requires version>=1.21.4-rc1\n", "1.21.4-rc1"),
+        ("@requires version>=26.3-rc-1\n", "26.3-rc-1"),
+        ("@requires version>=26.3-pre-1\n", "26.3-pre-1"),
+        ("@requires version>=26.3-snapshot-1\n", "26.3-snapshot-1"),
         ("@requires version>=24w14a\n", "24w14a"),
         ("@requires version>=2026.1\n", "2026.1"),
     ] {
@@ -194,6 +197,11 @@ fn the_finding_carries_the_failure_as_data() {
             "@requires version>=1.21 extra\n",
             "trailing_tokens",
             "extra",
+        ),
+        (
+            "@requires version>=26.3-rc--1\n",
+            "prerelease_not_a_tag",
+            "rc--1",
         ),
         ("@requires version>=\n", "empty_version", ""),
         ("@requires nonsense\n", "not_a_version_requirement", ""),

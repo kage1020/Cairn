@@ -90,7 +90,8 @@ pub const BUILTIN_BLOCK_IDS: &[&str] = &[BlockState::AIR_ID, STAIR_BASE_ID, FLAT
 /// Lower `intent`'s structs, placements and walkways into block arrays, keeping the members of the
 /// `@edition` guards for `resolution`'s edition and none without one.
 ///
-/// Without a `registry`, an abstract token is a `W_ABSTRACT_TOKEN_DEFERRED` warning.
+/// Without a `registry`, an abstract token is a `W_ABSTRACT_TOKEN_DEFERRED` warning. A line `check`
+/// refuses is `check`'s alone to report: this builds nothing for it and adds no finding.
 #[must_use]
 pub fn lower_to_block_array(
     intent: &IntentModule,

@@ -7,7 +7,7 @@ use serde_json::json;
 use super::*;
 use crate::diagnostics::compute_diagnostics;
 use crate::pin::Pin;
-use crate::test_fixtures::{PALE_OAK, SIGN, java};
+use crate::test_fixtures::{PALE_OAK, SIGN, bedrock, java};
 
 /// A part whose own floor is Java 1.21.4.
 const HUT: &str = "\
@@ -122,7 +122,7 @@ fn edit(title: &str, preferred: bool, text: String) -> (String, bool, Does) {
 }
 
 #[test]
-fn an_alias_replaces_the_id_and_is_the_preferred_fix() {
+fn an_ids_only_alias_replaces_it_and_is_the_preferred_fix() {
     assert_eq!(
         offered(SIGN, &java("1.21.4"), false),
         [edit(
@@ -144,6 +144,27 @@ fn an_id_written_with_its_namespace_is_replaced_with_one_and_keeps_its_state_lit
             true,
             source.replace("standing_sign", "oak_sign"),
         )],
+    );
+}
+
+#[test]
+fn a_split_ids_aliases_are_each_offered_and_none_is_preferred() {
+    let source = SIGN.replace("@standing_sign", "@stonebrick");
+    let replaced = |alias: &str| {
+        edit(
+            &format!("Replace `stonebrick` with its alias `{alias}`"),
+            false,
+            SIGN.replace("@standing_sign", &format!("@{alias}")),
+        )
+    };
+    assert_eq!(
+        offered(&source, &bedrock("1.21.60"), false),
+        [
+            replaced("stone_bricks"),
+            replaced("chiseled_stone_bricks"),
+            replaced("cracked_stone_bricks"),
+            replaced("mossy_stone_bricks"),
+        ],
     );
 }
 

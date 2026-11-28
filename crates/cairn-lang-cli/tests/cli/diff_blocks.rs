@@ -384,10 +384,7 @@ fn a_source_that_does_not_build_at_the_stamp_is_refused_before_comparing() {
         &source.replace("roof   kind=gable", "rooof  kind=gable"),
     );
     let run = diff_blocks(&[&artifact, &broken]);
-    let found = [
-        (18, 3, "error", "E_UNKNOWN_KEYWORD"),
-        (18, 3, "warning", "W_DEFERRED_MEMBER"),
-    ];
+    let found = [(18, 3, "error", "E_UNKNOWN_KEYWORD")];
     assert_eq!((run.code, run.stdout.as_str()), (Some(1), ""));
     assert_stream(&run.stderr, &found);
     let json = diff_blocks(&[&artifact, &broken, Path::new("--format"), Path::new("json")]);

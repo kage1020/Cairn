@@ -115,7 +115,8 @@ impl fmt::Display for RequirementError {
             Self::PreRelease { version, tag } => write!(
                 f,
                 "version `{version}` has the pre-release tag `{tag}`, which is not \
-                 dot-separated letters and digits, as in `1.21.4-rc1`",
+                 letters and digits separated by `.` or `-`, as in `1.21.4-rc1` or \
+                 `26.3-rc-1`",
             ),
             Self::TrailingTokens(rest) => {
                 write!(
@@ -186,7 +187,8 @@ fn strip_operator(rest: &str) -> Result<&str, RequirementError> {
     }
 }
 
-/// Check that a label is shaped like a Minecraft version: `1.21.4`, `1.21.4-rc1`, `24w14a`.
+/// Check that a label is shaped like a Minecraft version: `1.21.4`, `1.21.4-rc1`, `26.3-rc-1`,
+/// `24w14a`.
 fn validate_label(version: &str) -> Result<(), RequirementError> {
     let (core, tag) = split_prerelease(version);
     for component in core.split('.') {
@@ -229,11 +231,38 @@ fn is_component(s: &str) -> bool {
         && s.bytes().all(|b| b.is_ascii_alphanumeric())
 }
 
-/// Whether a pre-release tag is dot-separated letters and digits.
+/// Whether a pre-release tag is runs of letters and digits separated by `.` or `-`.
 fn is_prerelease_tag(s: &str) -> bool {
     !s.is_empty()
-        && s.split('.')
+        && tag_parts(s)
             .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_alphanumeric()))
+}
+
+/// A pre-release tag's runs, split at each `.` and `-`.
+fn tag_parts(tag: &str) -> impl Iterator<Item = &str> {
+    tag.split(['.', '-'])
+}
+
+/// A pre-release tag's runs as they order: [`tag_parts`], each split again where letters meet
+/// digits, so `rc10`, `rc.10` and `rc-10` all order as `rc` then `10`.
+fn tag_runs(tag: &str) -> impl Iterator<Item = &str> {
+    tag_parts(tag).flat_map(letter_digit_runs)
+}
+
+/// `part` split where letters meet digits; an empty part is one empty run.
+fn letter_digit_runs(part: &str) -> impl Iterator<Item = &str> {
+    let mut rest = Some(part);
+    std::iter::from_fn(move || {
+        let left = rest?;
+        let digits = left.bytes().next().is_some_and(|b| b.is_ascii_digit());
+        let end = left
+            .bytes()
+            .position(|b| b.is_ascii_digit() != digits)
+            .unwrap_or(left.len());
+        let (run, tail) = left.split_at(end);
+        rest = (!tail.is_empty()).then_some(tail);
+        Some(run)
+    })
 }
 
 /// [`parse_requirement`] for a caller with no way to report why there is no floor.
@@ -286,12 +315,26 @@ fn compare_tags(a: Option<&str>, b: Option<&str>) -> Ordering {
         (None, None) => Ordering::Equal,
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
-        (Some(l), Some(r)) => l.cmp(r),
+        (Some(l), Some(r)) => {
+            let mut left = tag_runs(l);
+            let mut right = tag_runs(r);
+            loop {
+                match (left.next(), right.next()) {
+                    (None, None) => return Ordering::Equal,
+                    (None, Some(_)) => return Ordering::Less,
+                    (Some(_), None) => return Ordering::Greater,
+                    (Some(l), Some(r)) => match compare_segments(l, r) {
+                        Ordering::Equal => {}
+                        non_eq => return non_eq,
+                    },
+                }
+            }
+        }
     }
 }
 
-/// Order one pair of components, every number below every non-number so the order stays
-/// transitive.
+/// Order one pair of components or tag runs, every number below every non-number so the order
+/// stays transitive.
 fn compare_segments(l: &str, r: &str) -> Ordering {
     match (numeric_key(l), numeric_key(r)) {
         // Without leading zeros, the longer run is the larger value.
