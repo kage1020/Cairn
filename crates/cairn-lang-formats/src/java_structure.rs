@@ -21,7 +21,7 @@ use thiserror::Error;
 use crate::block_id::is_concrete_id;
 use crate::data_version::JavaTarget;
 use crate::dims::{VolumeError, dim_to_i32, dims_to_i32, fits_list_limit, list_volume};
-use crate::nbt_text::{compound_of, first_unencodable};
+use crate::nbt_text::{compound_of, excerpt, first_unencodable};
 
 pub use read::{StoredStructure, StructureReadError, read_structure};
 
@@ -91,7 +91,11 @@ pub enum JavaStructureError {
         voxels: usize,
     },
     /// A palette string the NBT encoder cannot write.
-    #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
+    #[error(
+        "palette entry `{}`: {field} cannot be written as NBT: {source}. Fix: shorten the `mat=` \
+         of the `raw_block` or `raw_fill` that names it",
+        excerpt(id)
+    )]
     UnencodablePaletteString {
         /// The entry's id.
         id: String,
@@ -102,21 +106,26 @@ pub enum JavaStructureError {
     },
     /// A line of sign text the NBT encoder cannot write.
     #[error(
-        "the sign at {pos:?} has the line `{text}`, which cannot be written as NBT: {source}. \
-         Fix: shorten the sign's text"
+        "the sign at {pos:?} has the line `{}`{}, which cannot be written as NBT: {source}. Fix: \
+         shorten the sign's text",
+        excerpt(text),
+        if *saved_as_json { ", saved as a JSON string with its quotes and escapes" } else { "" }
     )]
     UnencodableSignText {
         /// The sign's voxel.
         pos: (u32, u32, u32),
         /// The line.
         text: String,
+        /// Whether the target saves the line as a JSON string, which the encoder measured.
+        saved_as_json: bool,
         /// The encoder's refusal.
         source: NbtIoError,
     },
     /// A string of an entity, its text or one its `nbt=` writes, the NBT encoder cannot write.
     #[error(
-        "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: shorten its text"
+        "the `{id}` at {pos:?} holds the string `{}`, which cannot be written as NBT: {source}. \
+         Fix: shorten that string",
+        excerpt(text)
     )]
     UnencodableEntity {
         /// The entity's id.
@@ -234,6 +243,7 @@ pub fn prepare_structure<'a>(
                 JavaStructureError::UnencodableSignText {
                     pos: entity.pos,
                     text: line.clone(),
+                    saved_as_json: target.data_version < TEXT_COMPONENTS_FROM,
                     source,
                 }
             })?;

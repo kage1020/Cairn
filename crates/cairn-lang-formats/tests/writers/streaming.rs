@@ -401,14 +401,13 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
     let id = format!("minecraft:{}", "a".repeat(usize::from(u16::MAX)));
     let mut array = grid(Dims { x: 1, y: 1, z: 1 }, 1);
     array.voxels[0] = array.palette.intern(BlockState::bare(&id));
-    let too_long = |source: &NbtIoError| {
+    let too_long = |source: &NbtIoError, in_encoding: &str| {
         matches!(
             source,
-            NbtIoError::LengthOverflow {
-                context: "string",
+            NbtIoError::StringTooLong {
                 len: 65_545,
-                limit: 65_535,
-            }
+                encoding,
+            } if *encoding == in_encoding
         )
     };
 
@@ -418,7 +417,7 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
         matches!(
             &err,
             JavaStructureError::UnencodablePaletteString { id: named, field, source }
-                if *named == id && field == "its id" && too_long(source)
+                if *named == id && field == "its id" && too_long(source, "Modified UTF-8")
         ),
         "java: got {err:?}",
     );
@@ -429,15 +428,17 @@ fn a_palette_string_the_encoder_refuses_is_named_with_its_entry() {
         matches!(
             &err,
             BedrockStructureError::UnencodablePaletteString { id: named, field, source }
-                if *named == id && field == "its id" && too_long(source)
+                if *named == id && field == "its id" && too_long(source, "UTF-8")
         ),
         "bedrock: got {err:?}",
     );
     assert_eq!(
         err.to_string(),
         format!(
-            "palette entry `{id}`: its id cannot be written as NBT: nbt: string length 65545 \
-             exceeds wire limit 65535"
+            "palette entry `minecraft:{}…`: its id cannot be written as NBT: nbt: the string takes \
+             65545 bytes of UTF-8, past the 65535 an NBT string holds. Fix: shorten the `mat=` of \
+             the `raw_block` or `raw_fill` that names it",
+            "a".repeat(22)
         ),
     );
 

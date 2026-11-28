@@ -596,6 +596,7 @@ fn a_partial_build_is_refused_in_either_format() {
 #[test]
 fn a_structure_the_backend_cannot_write_is_refused_in_either_format() {
     let (tmp, _src, artifact) = built_hut();
+    // The target saves the line as a JSON string, so its quotes take it past 65,535 bytes.
     let long = "a".repeat(usize::from(u16::MAX));
     let sign = write_source(
         tmp.path(),
@@ -606,9 +607,11 @@ fn a_structure_the_backend_cannot_write_is_refused_in_either_format() {
         ),
     );
     let stderr = format!(
-        "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{long}`, which cannot \
-         be written as NBT: nbt: string length 65537 exceeds wire limit 65535. Fix: shorten the \
-         sign's text\n"
+        "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{}…`, saved as a JSON \
+         string with its quotes and escapes, which cannot be written as NBT: nbt: the string \
+         takes 65537 bytes of Modified UTF-8, past the 65535 an NBT string holds. Fix: shorten \
+         the sign's text\n",
+        "a".repeat(32)
     );
     let run = diff_blocks(&[&artifact, &sign]);
     assert_eq!(

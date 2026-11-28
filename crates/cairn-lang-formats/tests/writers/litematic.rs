@@ -542,10 +542,19 @@ fn a_name_the_nbt_encoder_cannot_write_is_refused() {
             &err,
             LitematicError::UnencodableName {
                 name,
-                source: NbtIoError::LengthOverflow { len: 65_536, limit: 65_535, .. },
+                source: NbtIoError::StringTooLong { len: 65_536, encoding: "Modified UTF-8" },
             } if *name == long
         ),
         "got {err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "the name `{}…` cannot be written as NBT: nbt: the string takes 65536 bytes of \
+             Modified UTF-8, past the 65535 an NBT string holds. Fix: shorten the name of the \
+             struct, site, placement or walkway it comes from",
+            "h".repeat(32)
+        )
     );
 }
 

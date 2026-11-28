@@ -7,7 +7,7 @@ use std::io::Write;
 use crate::error::NbtIoError;
 use crate::tag::{Compound, Tag};
 use crate::writer::{
-    Endian, check_item_type, write_byte_array_payload, write_compound_body, write_list_header,
+    Dialect, check_item_type, write_byte_array_payload, write_compound_body, write_list_header,
     write_long_array_payload, write_payload, write_string, write_tag_id,
 };
 
@@ -19,13 +19,13 @@ const LONG_ARRAY_ID: u8 = 12;
 /// A compound being written, terminated when the closure that received it returns `Ok`.
 pub struct CompoundStream<'w, W: Write> {
     writer: &'w mut W,
-    endian: Endian,
+    dialect: Dialect,
 }
 
 /// A list being written after its header; each item must carry the declared element type.
 pub struct ListStream<'w, W: Write> {
     writer: &'w mut W,
-    endian: Endian,
+    dialect: Dialect,
     element_type_id: u8,
     len: usize,
     written: usize,
@@ -33,7 +33,7 @@ pub struct ListStream<'w, W: Write> {
 
 pub(crate) fn stream_named_root<W, F>(
     writer: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     root_name: &str,
     body: F,
 ) -> Result<(), NbtIoError>
@@ -42,16 +42,16 @@ where
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
     write_tag_id(writer, COMPOUND_ID)?;
-    write_string(writer, endian, root_name)?;
-    stream_compound_body(writer, endian, body)
+    write_string(writer, dialect, root_name)?;
+    stream_compound_body(writer, dialect, body)
 }
 
-fn stream_compound_body<W, F>(writer: &mut W, endian: Endian, body: F) -> Result<(), NbtIoError>
+fn stream_compound_body<W, F>(writer: &mut W, dialect: Dialect, body: F) -> Result<(), NbtIoError>
 where
     W: Write,
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
-    let mut compound = CompoundStream { writer, endian };
+    let mut compound = CompoundStream { writer, dialect };
     body(&mut compound)?;
     write_tag_id(compound.writer, 0)
 }
@@ -59,7 +59,7 @@ where
 /// `body` runs even when `len` is 0, so an item written into an empty list panics as a miscount.
 fn stream_list_body<W, F>(
     writer: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     element_type_id: u8,
     len: usize,
     body: F,
@@ -69,10 +69,10 @@ where
     F: FnOnce(&mut ListStream<'_, W>) -> Result<(), NbtIoError>,
 {
     let element_type_id = if len == 0 { 0 } else { element_type_id };
-    write_list_header(writer, endian, element_type_id, len)?;
+    write_list_header(writer, dialect, element_type_id, len)?;
     let mut list = ListStream {
         writer,
-        endian,
+        dialect,
         element_type_id,
         len,
         written: 0,
@@ -91,29 +91,29 @@ impl<W: Write> CompoundStream<'_, W> {
     ///
     /// # Errors
     ///
-    /// A `name` that is not a valid NBT string, a tag the encoder rejects, or an I/O failure.
+    /// A `name` longer than an NBT string holds, a tag the encoder rejects, or an I/O failure.
     pub fn tag(&mut self, name: &str, tag: &Tag) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, tag.type_id())?;
-        write_string(self.writer, self.endian, name)?;
-        write_payload(self.writer, self.endian, tag)
+        write_string(self.writer, self.dialect, name)?;
+        write_payload(self.writer, self.dialect, tag)
     }
 
     /// Appends a named compound without cloning it into a [`Tag`].
     ///
     /// # Errors
     ///
-    /// A `name` that is not a valid NBT string, a tag the encoder rejects, or an I/O failure.
+    /// A `name` longer than an NBT string holds, a tag the encoder rejects, or an I/O failure.
     pub fn compound_tag(&mut self, name: &str, value: &Compound) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, COMPOUND_ID)?;
-        write_string(self.writer, self.endian, name)?;
-        write_compound_body(self.writer, self.endian, value)
+        write_string(self.writer, self.dialect, name)?;
+        write_compound_body(self.writer, self.dialect, value)
     }
 
     /// Appends a named compound whose entries `body` streams.
     ///
     /// # Errors
     ///
-    /// A `name` that is not a valid NBT string, `body`'s error, or an I/O failure.
+    /// A `name` longer than an NBT string holds, `body`'s error, or an I/O failure.
     ///
     /// # Panics
     ///
@@ -123,8 +123,8 @@ impl<W: Write> CompoundStream<'_, W> {
         F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
     {
         write_tag_id(self.writer, COMPOUND_ID)?;
-        write_string(self.writer, self.endian, name)?;
-        stream_compound_body(self.writer, self.endian, body)
+        write_string(self.writer, self.dialect, name)?;
+        stream_compound_body(self.writer, self.dialect, body)
     }
 
     /// Appends a named `TAG_Long_Array` of the `len` values `values` yields, never collecting them.
@@ -143,8 +143,8 @@ impl<W: Write> CompoundStream<'_, W> {
         values: impl IntoIterator<Item = i64>,
     ) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, LONG_ARRAY_ID)?;
-        write_string(self.writer, self.endian, name)?;
-        write_long_array_payload(self.writer, self.endian, len, values)
+        write_string(self.writer, self.dialect, name)?;
+        write_long_array_payload(self.writer, self.dialect, len, values)
     }
 
     /// Appends a named `TAG_Byte_Array` of the `len` values `values` yields, never collecting them.
@@ -163,8 +163,8 @@ impl<W: Write> CompoundStream<'_, W> {
         values: impl IntoIterator<Item = i8>,
     ) -> Result<(), NbtIoError> {
         write_tag_id(self.writer, BYTE_ARRAY_ID)?;
-        write_string(self.writer, self.endian, name)?;
-        write_byte_array_payload(self.writer, self.endian, len, values)
+        write_string(self.writer, self.dialect, name)?;
+        write_byte_array_payload(self.writer, self.dialect, len, values)
     }
 
     /// Appends a named list of `len` items that `body` streams; an empty one declares `TAG_End`.
@@ -187,8 +187,8 @@ impl<W: Write> CompoundStream<'_, W> {
         F: FnOnce(&mut ListStream<'_, W>) -> Result<(), NbtIoError>,
     {
         write_tag_id(self.writer, LIST_ID)?;
-        write_string(self.writer, self.endian, name)?;
-        stream_list_body(self.writer, self.endian, element_type_id, len, body)
+        write_string(self.writer, self.dialect, name)?;
+        stream_list_body(self.writer, self.dialect, element_type_id, len, body)
     }
 }
 
@@ -216,7 +216,7 @@ impl<W: Write> ListStream<'_, W> {
     /// When the list already holds the items it declared.
     pub fn item(&mut self, tag: &Tag) -> Result<(), NbtIoError> {
         self.claim(tag.type_id())?;
-        write_payload(self.writer, self.endian, tag)
+        write_payload(self.writer, self.dialect, tag)
     }
 
     /// Appends one compound item whose entries `body` streams.
@@ -233,7 +233,7 @@ impl<W: Write> ListStream<'_, W> {
         F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
     {
         self.claim(COMPOUND_ID)?;
-        stream_compound_body(self.writer, self.endian, body)
+        stream_compound_body(self.writer, self.dialect, body)
     }
 
     /// Appends one list item of `len` items that `body` streams; an empty one declares `TAG_End`.
@@ -250,6 +250,6 @@ impl<W: Write> ListStream<'_, W> {
         F: FnOnce(&mut ListStream<'_, W>) -> Result<(), NbtIoError>,
     {
         self.claim(LIST_ID)?;
-        stream_list_body(self.writer, self.endian, element_type_id, len, body)
+        stream_list_body(self.writer, self.dialect, element_type_id, len, body)
     }
 }

@@ -12,6 +12,7 @@ use thiserror::Error;
 use super::STATE_SEPARATORS;
 use crate::data_version::JavaTarget;
 use crate::java_structure::{JavaStructureError, placed_block_entities, prepare_structure};
+use crate::nbt_text::excerpt;
 use crate::site_frame::site_origin;
 
 /// The Sponge Schematic version written.
@@ -93,11 +94,26 @@ pub enum SchemError {
         /// The second entry's index.
         second: usize,
     },
-    /// `Metadata.Name` or a `Palette` key is not a string the NBT encoder writes.
-    #[error("`{name}` cannot be written as NBT: {source}")]
+    /// `Metadata.Name` is not a string the NBT encoder writes.
+    #[error(
+        "the name `{}` cannot be written as NBT: {source}. Fix: shorten the name of the struct, \
+         site, placement or walkway it comes from",
+        excerpt(name)
+    )]
     UnencodableName {
-        /// The string.
+        /// The name.
         name: String,
+        /// The encoder's refusal.
+        source: NbtIoError,
+    },
+    /// A palette entry whose spelling as a `Palette` key is not a string the NBT encoder writes.
+    #[error(
+        "palette entry `{}` cannot be written as NBT: {source}",
+        excerpt(state)
+    )]
+    UnencodableState {
+        /// The entry, as its `Palette` key spells it.
+        state: String,
         /// The encoder's refusal.
         source: NbtIoError,
     },
@@ -172,8 +188,8 @@ pub fn prepare_schem<'a>(
                 format!("{}[{}]", state.id, state.properties_text())
             },
         })?;
-        check_java_string(&spelled).map_err(|source| SchemError::UnencodableName {
-            name: spelled.clone(),
+        check_java_string(&spelled).map_err(|source| SchemError::UnencodableState {
+            state: spelled.clone(),
             source,
         })?;
         if let Some(first) = seen.insert(spelled.clone(), index) {

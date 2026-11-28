@@ -47,6 +47,15 @@ pub(crate) fn put_over(base: &mut Compound, written: Compound) {
     }
 }
 
+/// `text` as a refusal quotes it: whole when short, else its first characters and an ellipsis.
+pub(crate) fn excerpt(text: &str) -> String {
+    const SHOWN: usize = 32;
+    match text.char_indices().nth(SHOWN) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
 /// How an edition's writer checks a string it is about to write.
 pub(crate) type StringCheck = fn(&str) -> Result<(), NbtIoError>;
 

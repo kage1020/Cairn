@@ -28,7 +28,7 @@ use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
 use crate::java_structure::java_entity_id;
-use crate::nbt_text::{compound_of, first_unencodable};
+use crate::nbt_text::{compound_of, excerpt, first_unencodable};
 use crate::registry::VersionStates;
 
 pub use read::{
@@ -131,8 +131,9 @@ pub enum BedrockStructureError {
     },
     /// A sign's text the NBT encoder cannot write.
     #[error(
-        "the sign at {pos:?} has the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: shorten the sign's text"
+        "the sign at {pos:?} has the text `{}`, which cannot be written as NBT: {source}. Fix: \
+         shorten the sign's text",
+        excerpt(text)
     )]
     UnencodableSignText {
         /// The sign's voxel.
@@ -143,7 +144,11 @@ pub enum BedrockStructureError {
         source: NbtIoError,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
-    #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
+    #[error(
+        "palette entry `{}`: {field} cannot be written as NBT: {source}. Fix: shorten the `mat=` \
+         of the `raw_block` or `raw_fill` that names it",
+        excerpt(id)
+    )]
     UnencodablePaletteString {
         /// The entry's id.
         id: String,
@@ -216,8 +221,9 @@ pub enum BedrockStructureError {
     },
     /// A string of an entity, or one its `nbt=` writes, the NBT encoder cannot write.
     #[error(
-        "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: shorten its text"
+        "the `{id}` at {pos:?} holds the string `{}`, which cannot be written as NBT: {source}. \
+         Fix: shorten that string",
+        excerpt(text)
     )]
     UnencodableEntity {
         /// The entity's id.

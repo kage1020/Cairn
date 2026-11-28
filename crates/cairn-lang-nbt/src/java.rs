@@ -6,7 +6,7 @@ use std::io::Write;
 pub use crate::error::NbtIoError;
 use crate::stream::{CompoundStream, stream_named_root};
 use crate::tag::Compound;
-use crate::writer::{Endian, string_len, write_named_root};
+use crate::writer::{Dialect, check_string, write_named_root};
 
 /// Writes `root` as a named Java NBT root without gzip.
 ///
@@ -18,7 +18,7 @@ pub fn write_java_uncompressed<W: Write>(
     root_name: &str,
     root: &Compound,
 ) -> Result<(), NbtIoError> {
-    write_named_root(writer, Endian::Big, root_name, root)
+    write_named_root(writer, Dialect::Java, root_name, root)
 }
 
 /// Writes `root` as a named Java NBT root wrapped in gzip, as `.nbt` structure files are.
@@ -41,7 +41,7 @@ pub fn write_java_gzip<W: Write>(
 ///
 /// # Errors
 ///
-/// A `root_name` that is not a valid NBT string, `body`'s error, or an I/O failure on `writer`.
+/// A `root_name` longer than an NBT string holds, `body`'s error, or an I/O failure on `writer`.
 ///
 /// # Panics
 ///
@@ -55,14 +55,14 @@ where
     W: Write,
     F: FnOnce(&mut CompoundStream<'_, W>) -> Result<(), NbtIoError>,
 {
-    stream_named_root(writer, Endian::Big, root_name, body)
+    stream_named_root(writer, Dialect::Java, root_name, body)
 }
 
 /// Checks that the Java writers would accept `s` as an NBT string, without writing it.
 ///
 /// # Errors
 ///
-/// [`NbtIoError::LengthOverflow`] when its Modified UTF-8 runs past 65,535 bytes.
+/// [`NbtIoError::StringTooLong`] when its Modified UTF-8 runs past 65,535 bytes.
 pub fn check_java_string(s: &str) -> Result<(), NbtIoError> {
-    string_len(s, Endian::Big).map(drop)
+    check_string(s, Dialect::Java)
 }

@@ -13,6 +13,11 @@ fn encode(name: &str, root: &Compound) -> Vec<u8> {
     buf
 }
 
+/// The bytes `text` is written as, after its length prefix, as the one string of a root.
+fn string_bytes(text: &str) -> Vec<u8> {
+    crate::string_bytes(write_bedrock_uncompressed, u16::from_le_bytes, text)
+}
+
 #[test]
 fn empty_root_emits_header_plus_end() {
     let buf = encode("", &Compound::new());
@@ -102,7 +107,7 @@ fn int_list_and_array_lengths_are_little_endian() {
 }
 
 #[test]
-fn same_tree_through_both_writers_differs_only_in_byte_order() {
+fn an_int_tree_through_both_writers_differs_only_in_byte_order() {
     let mut root = Compound::new();
     root.insert("i", Tag::Int(0x0102_0304));
     let mut java = Vec::new();
@@ -131,12 +136,41 @@ fn every_string_is_written_as_utf8_and_round_trips_through_the_bedrock_reader() 
         ("cjk", "看板の文字"),
         ("astral", "x😀y"),
     ] {
+        assert_eq!(string_bytes(text), text.as_bytes(), "{text:?}");
         root.insert(name, Tag::String(text.to_owned()));
     }
-    let buf = encode("", &root);
-    assert!(find_subsequence(&buf, "x😀y".as_bytes()).is_some());
-    let (_, read) = read_bedrock_uncompressed(buf.as_slice()).expect("reads back");
+    let (_, read) = read_bedrock_uncompressed(encode("", &root).as_slice()).expect("reads back");
     assert_eq!(read, root);
+}
+
+#[test]
+fn a_string_holds_65535_bytes_of_utf8_and_no_more() {
+    // Each `é` takes two bytes, so the limit falls on bytes rather than characters.
+    let fits = format!("{}a", "é".repeat(32_767));
+    assert_eq!(string_bytes(&fits), fits.as_bytes());
+    let mut root = Compound::new();
+    root.insert("s", Tag::String(format!("{fits}a")));
+    let err = write_bedrock_uncompressed(&mut Vec::new(), "", &root).expect_err("too long");
+    assert_eq!(
+        err.to_string(),
+        "nbt: the string takes 65536 bytes of UTF-8, past the 65535 an NBT string holds"
+    );
+    assert!(
+        matches!(
+            err,
+            NbtIoError::StringTooLong {
+                len: 65_536,
+                encoding: "UTF-8"
+            }
+        ),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_nul_takes_one_byte_so_bedrock_writes_what_java_refuses() {
+    let nuls = "\0".repeat(32_768);
+    assert_eq!(string_bytes(&nuls), nuls.as_bytes());
 }
 
 #[test]

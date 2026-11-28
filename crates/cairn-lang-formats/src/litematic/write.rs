@@ -14,6 +14,7 @@ use crate::data_version::JavaTarget;
 use crate::java_structure::{
     JavaStructureError, palette_entry, placed_block_entities, prepare_structure,
 };
+use crate::nbt_text::excerpt;
 use crate::site_frame::site_origin;
 
 /// The keys every Litematica palette entry names its block and properties by.
@@ -96,7 +97,11 @@ pub enum LitematicError {
         source: Box<JavaStructureError>,
     },
     /// The file's or a region's name is not a string the NBT encoder writes.
-    #[error("the name `{name}` cannot be written as NBT: {source}")]
+    #[error(
+        "the name `{}` cannot be written as NBT: {source}. Fix: shorten the name of the struct, \
+         site, placement or walkway it comes from",
+        excerpt(name)
+    )]
     UnencodableName {
         /// The name.
         name: String,

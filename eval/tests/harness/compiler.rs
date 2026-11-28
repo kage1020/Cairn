@@ -36,6 +36,7 @@ fn a_build_of_no_block_is_empty() {
 
 #[test]
 fn a_program_check_passes_and_compile_refuses_is_a_failed_compile() {
+    // The target saves the line as a JSON string, whose quotes count toward its length.
     let line = "a".repeat(usize::from(u16::MAX) + 1);
     let program = format!(
         "\
@@ -53,9 +54,11 @@ struct s size=5x5
     assert_eq!(
         evaluation.checked,
         Checked::Compile(format!(
-            "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{line}`, which cannot \
-             be written as NBT: nbt: string length 65538 exceeds wire limit 65535. Fix: shorten the \
-             sign's text\n"
+            "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{}…`, saved as a \
+             JSON string with its quotes and escapes, which cannot be written as NBT: nbt: the \
+             string takes 65538 bytes of Modified UTF-8, past the 65535 an NBT string holds. Fix: \
+             shorten the sign's text\n",
+            "a".repeat(32)
         ))
     );
 }

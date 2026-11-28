@@ -408,14 +408,16 @@ fn sign_text_outside_ascii_reads_back_from_both_writers_as_it_was_built() {
 fn sign_text_longer_than_an_nbt_string_holds_is_refused_by_both_writers_with_its_fix() {
     let back = "a".repeat(usize::from(u16::MAX) + 1);
     let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
-    let fix = "nbt: string length 65536 exceeds wire limit 65535. Fix: shorten the sign's text";
+    let shown = "a".repeat(32);
     let java = lowered(&source, Edition::Java, "26.3");
     let target = resolve_java_target("26.3").expect("a shipped target");
     match build_structure_tag(&java, &target) {
         Err(err @ JavaStructureError::UnencodableSignText { .. }) => assert_eq!(
             err.to_string(),
             format!(
-                "the sign at (2, 1, 3) has the line `{back}`, which cannot be written as NBT: {fix}"
+                "the sign at (2, 1, 3) has the line `{shown}…`, which cannot be written as NBT: \
+                 nbt: the string takes 65536 bytes of Modified UTF-8, past the 65535 an NBT \
+                 string holds. Fix: shorten the sign's text"
             ),
         ),
         other => panic!("expected UnencodableSignText, got {other:?}"),
@@ -426,7 +428,38 @@ fn sign_text_longer_than_an_nbt_string_holds_is_refused_by_both_writers_with_its
         Err(err @ BedrockStructureError::UnencodableSignText { .. }) => assert_eq!(
             err.to_string(),
             format!(
-                "the sign at (2, 1, 3) has the text `{back}`, which cannot be written as NBT: {fix}"
+                "the sign at (2, 1, 3) has the text `{shown}…`, which cannot be written as NBT: \
+                 nbt: the string takes 65536 bytes of UTF-8, past the 65535 an NBT string holds. \
+                 Fix: shorten the sign's text"
+            ),
+        ),
+        other => panic!("expected UnencodableSignText, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_line_saved_as_a_json_string_is_measured_with_its_quotes() {
+    let back = "a".repeat(usize::from(u16::MAX));
+    let source = ROOM.replace(r#"back="Closed""#, &format!("back={back:?}"));
+    let java = lowered(&source, Edition::Java, "26.3");
+    assert_eq!(
+        java_nbt(&java, "26.3"),
+        [(
+            "[2,1,3]".to_owned(),
+            java_sign(["The", "Inn", "", ""], [&back, "", "", ""], true)
+        )]
+    );
+    let java = lowered(&source, Edition::Java, "1.21.4");
+    let target = resolve_java_target("1.21.4").expect("a shipped target");
+    match build_structure_tag(&java, &target) {
+        Err(err @ JavaStructureError::UnencodableSignText { .. }) => assert_eq!(
+            err.to_string(),
+            format!(
+                "the sign at (2, 1, 3) has the line `{}…`, saved as a JSON string with its \
+                 quotes and escapes, which cannot be written as NBT: nbt: the string takes 65537 \
+                 bytes of Modified UTF-8, past the 65535 an NBT string holds. Fix: shorten the \
+                 sign's text",
+                "a".repeat(32)
             ),
         ),
         other => panic!("expected UnencodableSignText, got {other:?}"),
@@ -442,11 +475,30 @@ fn java_counts_a_sign_lines_length_in_the_modified_utf8_it_writes() {
     let target = resolve_java_target("26.3").expect("a shipped target");
     match build_structure_tag(&java, &target) {
         Err(JavaStructureError::UnencodableSignText {
-            source: NbtIoError::LengthOverflow { len, limit, .. },
+            saved_as_json: false,
+            source:
+                NbtIoError::StringTooLong {
+                    len: 65_538,
+                    encoding: "Modified UTF-8",
+                },
             ..
-        }) => assert_eq!((len, limit), (65_538, 65_535)),
+        }) => {}
         other => panic!("expected UnencodableSignText, got {other:?}"),
     }
     let bedrock = lowered(&source, Edition::Bedrock, "1.21.60");
-    bedrock_root(&bedrock, "1.21.60");
+    let sign = bedrock_data(&bedrock, "1.21.60")
+        .into_iter()
+        .find(|(key, _)| key == "48");
+    assert_eq!(
+        sign,
+        Some((
+            "48".to_owned(),
+            format!(
+                "{{block_entity_data:{{id:\"Sign\",FrontText:{},BackText:{},IsWaxed:0b,x:2,y:1,\
+                 z:3}}}}",
+                bedrock_face("The\nInn", true),
+                bedrock_face(&back, true)
+            )
+        ))
+    );
 }
