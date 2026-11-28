@@ -1,5 +1,6 @@
 //! Bytes the reader refuses, each with the offset where the fault starts.
 
+use cairn_lang_nbt::tag::Tag;
 use cairn_lang_nbt::{
     MAX_DEPTH, NbtReadError, NbtReader, read_bedrock_uncompressed, read_java_uncompressed,
 };
@@ -291,4 +292,77 @@ fn finishing_a_reader_whose_root_is_open_panics() {
     let mut reader = NbtReader::java(bytes.as_slice());
     reader.next_event().expect("the root opens");
     let _ = reader.finish();
+}
+
+/// The tree `bytes` holds under its root, read with [`NbtReader::read_rest_within`] at `limit`.
+fn within(bytes: &[u8], limit: usize) -> Result<(Tag, usize), NbtReadError> {
+    let mut reader = NbtReader::java(bytes);
+    reader.next_event().expect("the root opens");
+    reader.read_rest_within(limit)
+}
+
+#[test]
+fn a_tree_read_within_exactly_what_it_takes_reads_and_one_byte_less_is_refused() {
+    let bytes = java_bytes("", &every_tag());
+    let (tree, taken) = within(&bytes, usize::MAX).expect("the tree reads");
+    assert_eq!(tree, Tag::Compound(every_tag()));
+    assert_eq!(
+        within(&bytes, taken).expect("the tree reads"),
+        (tree, taken)
+    );
+    assert!(
+        matches!(within(&bytes, taken - 1), Err(NbtReadError::HeldTooMuch { limit, .. }) if limit == taken - 1),
+        "one byte less is refused"
+    );
+}
+
+#[test]
+fn an_array_past_the_limit_is_refused_at_its_prefix_and_the_reader_reads_no_further() {
+    let mut bytes = root_with_entry(10, &[7, 0, 1, b'a']);
+    bytes.extend(2000_i32.to_be_bytes());
+    bytes.extend([0; 2000]);
+    bytes.extend([0, 0]);
+    let mut reader = NbtReader::java(bytes.as_slice());
+    reader.next_event().expect("the root opens");
+    reader.next_event().expect("`l` opens");
+    let err = reader
+        .read_rest_within(1000)
+        .expect_err("the array is refused");
+    assert!(
+        matches!(
+            err,
+            NbtReadError::HeldTooMuch {
+                limit: 1000,
+                offset: 15,
+            }
+        ),
+        "got {err:?}"
+    );
+    let err = reader
+        .next_event()
+        .expect_err("the reader reads no further");
+    assert!(
+        matches!(err, NbtReadError::AfterFailure { offset: 15 }),
+        "got {err:?}"
+    );
+}
+
+#[test]
+fn a_list_is_charged_for_its_tags_not_for_the_bytes_that_encode_them() {
+    let len: i32 = 1 << 16;
+    let mut bytes = root_with_entry(9, &[1]);
+    bytes.extend(len.to_be_bytes());
+    bytes.extend(vec![0; usize::try_from(len).expect("a length")]);
+    bytes.push(0);
+    let limit = usize::try_from(len).expect("a length") * 8;
+    let mut reader = NbtReader::java(bytes.as_slice());
+    reader.next_event().expect("the root opens");
+    reader.next_event().expect("`l` opens");
+    assert!(
+        matches!(
+            reader.read_rest_within(limit),
+            Err(NbtReadError::HeldTooMuch { limit: at, .. }) if at == limit
+        ),
+        "a list of 65536 one-byte tags takes more than 8 bytes a tag"
+    );
 }

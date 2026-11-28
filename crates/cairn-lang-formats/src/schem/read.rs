@@ -15,7 +15,8 @@ use indexmap::IndexMap;
 use thiserror::Error;
 
 use super::STATE_SEPARATORS;
-use crate::read_stream::{lists_compounds, next_inside, rest_of_compound};
+use crate::read_stream::{Held, lists_compounds, next_inside};
+use crate::volume::MAX_HELD_NBT;
 use crate::volume::{BlockVolume, StoredBlockEntity};
 
 /// The versions read: 2, the first to carry `DataVersion`, and 3.
@@ -63,6 +64,14 @@ pub enum SchemReadError {
         path: String,
         /// What the specification puts there.
         expected: &'static str,
+    },
+    /// A field whose NBT, read whole, would take what the reader holds of the file past its limit.
+    #[error("`{path}` holds more NBT than the {limit} bytes a reader holds whole of one file")]
+    HeldTooMuch {
+        /// The field, as `Schematic.Entities[0]`.
+        path: String,
+        /// The most memory, in bytes, a reader holds whole of one file.
+        limit: usize,
     },
     /// A field away from where the file's `Version` keeps it.
     #[error("`{path}` is not where a version {version} `.schem` keeps it, which is `{belongs}`")]
@@ -161,6 +170,13 @@ pub enum SchemReadError {
         /// The earlier block entity's index.
         first: usize,
     },
+}
+
+fn held_too_much(path: impl Into<String>) -> SchemReadError {
+    SchemReadError::HeldTooMuch {
+        path: path.into(),
+        limit: MAX_HELD_NBT,
+    }
 }
 
 fn malformed(path: impl Into<String>, expected: &'static str) -> SchemReadError {
@@ -400,7 +416,7 @@ pub fn read_schem<R: Read>(reader: R) -> Result<SpongeSchematic, SchemReadError>
         .with_max_array_len(MAX_STRUCTURE_VOLUME.saturating_mul(MAX_VARINT_LEN));
     nbt.next_event()?;
     let mut fields = Fields::default();
-    read_entries(&mut nbt, &mut fields, Container::Root)?;
+    read_entries(&mut nbt, &mut Held::new(), &mut fields, Container::Root)?;
     nbt.finish()?;
     decode(fields)
 }
@@ -408,9 +424,10 @@ pub fn read_schem<R: Read>(reader: R) -> Result<SpongeSchematic, SchemReadError>
 /// Reads the entries of the open `container`, recording each field either version names.
 fn read_entries<R: Read>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
     fields: &mut Fields,
     container: Container,
-) -> Result<(), NbtReadError> {
+) -> Result<(), SchemReadError> {
     loop {
         match next_inside(nbt)? {
             Event::Value {
@@ -433,13 +450,18 @@ fn read_entries<R: Read>(
                 );
                 fields.record(field, container, &name, typed);
                 match field {
-                    Field::Schematic => read_entries(nbt, fields, Container::Schematic)?,
+                    Field::Schematic => read_entries(nbt, held, fields, Container::Schematic)?,
                     Field::Blocks if container == Container::Root => {
-                        read_entries(nbt, fields, Container::RootBlocks)?;
+                        read_entries(nbt, held, fields, Container::RootBlocks)?;
                     }
-                    Field::Blocks => read_entries(nbt, fields, Container::SchematicBlocks)?,
+                    Field::Blocks => {
+                        read_entries(nbt, held, fields, Container::SchematicBlocks)?;
+                    }
                     Field::Metadata if fields.metadata.is_none() => {
-                        fields.metadata = Some(rest_of_compound(nbt)?);
+                        let metadata = held.rest_of_compound(nbt)?;
+                        fields.metadata = Some(metadata.ok_or_else(|| {
+                            held_too_much(format!("{}{name}", container.prefix()))
+                        })?);
                     }
                     Field::Palette if fields.palette.is_none() => {
                         fields.palette = Some(read_palette_entries(nbt)?);
@@ -458,13 +480,20 @@ fn read_entries<R: Read>(
                 };
                 let typed = matches!(field, Field::BlockEntities | Field::Entities);
                 fields.record(field, container, &name, typed);
+                let path = format!("{}{name}", container.prefix());
                 match field {
                     Field::BlockEntities if fields.block_entities.is_none() => {
-                        fields.block_entities =
-                            Some(each_compound(nbt, element_type_id, read_block_entity)?);
+                        fields.block_entities = Some(each_compound(
+                            nbt,
+                            held,
+                            &path,
+                            element_type_id,
+                            read_block_entity,
+                        )?);
                     }
                     Field::Entities if fields.entities.is_none() => {
-                        fields.entities = Some(each_compound(nbt, element_type_id, Ok)?);
+                        fields.entities =
+                            Some(each_compound(nbt, held, &path, element_type_id, Ok)?);
                     }
                     _ => nbt.skip_rest()?,
                 }
@@ -516,13 +545,15 @@ fn read_palette_entries<R: Read>(nbt: &mut NbtReader<R>) -> Result<StoredPalette
     }
 }
 
-/// The items of the open list, each a compound `item` reads, or the first one it refuses, with
-/// the rest of the list skipped.
+/// The items of the open list `path`, each a compound kept in `held` that `item` reads, or the
+/// first one it refuses, with the rest of the list skipped.
 fn each_compound<R: Read, T>(
     nbt: &mut NbtReader<R>,
+    held: &mut Held,
+    path: &str,
     element_type_id: u8,
     item: impl Fn(Compound) -> Result<T, (&'static str, &'static str)>,
-) -> Result<Result<Vec<T>, ListFault>, NbtReadError> {
+) -> Result<Result<Vec<T>, ListFault>, SchemReadError> {
     if !lists_compounds(element_type_id) {
         nbt.skip_rest()?;
         return Ok(Err(ListFault {
@@ -533,7 +564,10 @@ fn each_compound<R: Read, T>(
     let mut items = Vec::new();
     loop {
         match next_inside(nbt)? {
-            Event::Compound { name: None } => match item(rest_of_compound(nbt)?) {
+            Event::Compound { name: None } => match item(
+                held.rest_of_compound(nbt)?
+                    .ok_or_else(|| held_too_much(format!("{path}[{}]", items.len())))?,
+            ) {
                 Ok(read) => items.push(read),
                 Err((field, expected)) => {
                     let fault = ListFault {

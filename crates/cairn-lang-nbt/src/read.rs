@@ -104,6 +104,15 @@ pub struct NbtReader<R: Read> {
     state: State,
     max_list_len: usize,
     max_array_len: usize,
+    /// The memory left for the call of [`Self::read_rest_within`] under way, if one is.
+    holding: Option<Held>,
+}
+
+/// The memory a call of [`NbtReader::read_rest_within`] may still take, and has taken.
+#[derive(Debug, Clone, Copy)]
+struct Held {
+    limit: usize,
+    taken: usize,
 }
 
 /// How strings are encoded, which is where the two dialects differ beyond byte order.
@@ -146,6 +155,7 @@ impl<R: Read> NbtReader<R> {
             state: State::Start,
             max_list_len: usize::MAX,
             max_array_len: usize::MAX,
+            holding: None,
         }
     }
 
@@ -197,6 +207,31 @@ impl<R: Read> NbtReader<R> {
     ///
     /// When no compound or list is open.
     pub fn read_rest(&mut self) -> Result<Tag, NbtReadError> {
+        self.read_rest_within(usize::MAX).map(|(tag, _)| tag)
+    }
+
+    /// [`Self::read_rest`], refused once the tags it builds would take more than `max_bytes` of
+    /// memory; returns the tag and the memory, about, that it takes.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Self::next_event`], and [`NbtReadError::HeldTooMuch`] past `max_bytes`.
+    ///
+    /// # Panics
+    ///
+    /// When no compound or list is open.
+    pub fn read_rest_within(&mut self, max_bytes: usize) -> Result<(Tag, usize), NbtReadError> {
+        self.holding = Some(Held {
+            limit: max_bytes,
+            taken: 0,
+        });
+        let tag = self.build_rest();
+        let held = self.holding.take().expect("held until the build ends");
+        Ok((tag?, held.taken))
+    }
+
+    /// What is left of the innermost open compound or list, built as one tag.
+    fn build_rest(&mut self) -> Result<Tag, NbtReadError> {
         let mut open = vec![
             match self.stack.last().expect("a compound or list is open") {
                 Frame::Compound => Partial::Compound(None, Compound::new()),
@@ -219,11 +254,18 @@ impl<R: Read> NbtReader<R> {
                     element_type_id,
                     len,
                 } => {
-                    let items = Vec::with_capacity(len.min(PREALLOCATE_AT_MOST));
+                    let reserved = len.min(PREALLOCATE_AT_MOST);
+                    self.hold(reserved.saturating_mul(size_of::<Tag>()))?;
+                    let items = Vec::with_capacity(reserved);
                     open.push(Partial::List(name, element_type_id, items));
                     continue;
                 }
-                Event::Value { name, tag } => (name, tag),
+                Event::Value { name, tag } => {
+                    if let Tag::String(text) = &tag {
+                        self.hold(text.len())?;
+                    }
+                    (name, tag)
+                }
                 Event::End => {
                     let done = open.pop().expect("one partial per open container");
                     let finished = done.finish();
@@ -233,10 +275,31 @@ impl<R: Read> NbtReader<R> {
                     finished
                 }
             };
-            open.last_mut()
-                .expect("a value belongs to an open container")
-                .push(finished);
+            let into = open
+                .last_mut()
+                .expect("a value belongs to an open container");
+            self.hold(into.room_for(&finished))?;
+            into.push(finished);
         }
+    }
+
+    /// Takes `bytes` more of the memory the call of [`Self::read_rest_within`] under way may take.
+    fn hold(&mut self, bytes: usize) -> Result<(), NbtReadError> {
+        let Some(held) = &mut self.holding else {
+            return Ok(());
+        };
+        held.taken = held.taken.saturating_add(bytes);
+        if held.taken <= held.limit {
+            return Ok(());
+        }
+        let refusal = NbtReadError::HeldTooMuch {
+            limit: held.limit,
+            offset: self.offset,
+        };
+        self.state = State::Failed {
+            offset: self.offset,
+        };
+        Err(refusal)
     }
 
     /// Skips what is left of the innermost open compound or list, holding none of its arrays.
@@ -414,6 +477,7 @@ impl<R: Read> NbtReader<R> {
                     self.discard(len)?;
                     return Ok(Payload::Skipped);
                 }
+                self.hold(len)?;
                 let bytes = self.read_growing(len)?;
                 Tag::ByteArray(bytes.into_iter().map(|b| i8::from_ne_bytes([b])).collect())
             }
@@ -429,6 +493,7 @@ impl<R: Read> NbtReader<R> {
                     self.discard(len)?;
                     return Ok(Payload::Skipped);
                 }
+                self.hold(len)?;
                 let bytes = self.read_growing(len)?;
                 let endian = self.endian;
                 Tag::IntArray(
@@ -446,6 +511,7 @@ impl<R: Read> NbtReader<R> {
                     self.discard(len)?;
                     return Ok(Payload::Skipped);
                 }
+                self.hold(len)?;
                 let bytes = self.read_growing(len)?;
                 let endian = self.endian;
                 Tag::LongArray(
@@ -569,6 +635,24 @@ enum Partial {
 }
 
 impl Partial {
+    /// The memory, about, that pushing `entry` takes beyond what it holds itself: a compound's
+    /// slot for it and its name, or a full list's next block of slots, which it reserves.
+    fn room_for(&mut self, (name, _): &(Option<String>, Tag)) -> usize {
+        match self {
+            Partial::Compound(..) => {
+                size_of::<(u64, String, Tag)>()
+                    + size_of::<usize>()
+                    + name.as_ref().map_or(0, String::len)
+            }
+            Partial::List(_, _, items) if items.len() == items.capacity() => {
+                let more = items.capacity().max(4);
+                items.reserve_exact(more);
+                more.saturating_mul(size_of::<Tag>())
+            }
+            Partial::List(..) => 0,
+        }
+    }
+
     fn push(&mut self, (name, tag): (Option<String>, Tag)) {
         match self {
             Partial::Compound(_, compound) => {

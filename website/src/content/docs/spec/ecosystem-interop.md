@@ -109,7 +109,8 @@ any other name in the root, the schematic and `Blocks`, and refuses, by its path
 - a palette key stored twice, two keys that spell one block state, such as `stone` and
   `minecraft:stone`, two keys that map to one index, and an index below 0;
 - a varint past five bytes or 32 bits, and an index no palette key maps;
-- extents or a palette past what a block array holds.
+- extents or a palette past what a block array holds, and NBT read whole past what a reader holds
+  of one file ([§12.4](#124-import-stamping-and-pitfalls)).
 
 A `Version` it does not read is reported before any fault in a field that `Version` would explain.
 `Offset` is returned as stored. Version 3 defines it as the vector a paste moves the schematic by;
@@ -532,6 +533,12 @@ Other rules:
   if lifted at once. They need chunk split → per-chunk L1 → per-part lift → join with `site`, run
   over a streaming parse. The import does the first two: such a body is written as a `site` of
   chunks ([§12.3.1](#1231-what-an-import-writes)), and each reader streams its file, holding the
-  grid rather than the NBT that encodes it.
+  grid rather than the NBT that encodes it. Of the NBT a reader does hold whole, its entities, its
+  block entities' data, its palettes and its metadata, it holds at most 64 MiB of one file, counting
+  each tag at the memory it takes, and refuses a file past that by the path of the field that passes
+  it. A palette longer than a block array holds is refused at the length its list declares, before
+  an entry of it is read. So a small file that unpacks to more than that is refused with exit 1 by
+  `cairn import` and `cairn diff-blocks`, and by `cairn-lsp`, which reads the file in its own
+  process, instead of running out of memory.
 - Legacy numeric-ID `.schematic` files from before 1.13 flattening are not supported in v1 ([Purpose
   and Scope](/spec/overview/)): `cairn import` refuses one as an extension it does not read.
