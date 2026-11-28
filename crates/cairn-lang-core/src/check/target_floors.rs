@@ -3,7 +3,7 @@
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticData, DiagnosticNote};
 use crate::edition::Edition;
-use crate::resolve::{VersionFloor, versions_satisfying};
+use crate::resolve::{FloorOrigin, VersionFloor, versions_satisfying};
 use crate::version::{FloorPlacement, FloorVerdict, VersionOrder};
 
 use super::VersionTables;
@@ -65,23 +65,35 @@ fn version_cap(
     targetable: &[String],
     pin_target: &dyn Fn(&str) -> String,
 ) -> Diagnostic {
-    let mut notes: Vec<String> = floor.inheritance().into_iter().collect();
+    let mut notes = spanless(floor.inheritance().into_iter().collect());
+    if let (Some(edit), FloorOrigin::Def(name)) = (&floor.edit, &floor.origin) {
+        notes.push(DiagnosticNote {
+            span: Some(edit.clone()),
+            message: format!(
+                "this `edit` sets `use={name}`, so the `place` it selects builds `def {name}` and \
+                 inherits its floor"
+            ),
+        });
+    }
     let keyword = floor.keyword();
     if let Some(lowest) = valid.first() {
-        notes.push(format!("valid {edition} targets: {}", valid.join(", ")));
-        notes.push(format!(
+        notes.push(spanless_note(format!(
+            "valid {edition} targets: {}",
+            valid.join(", ")
+        )));
+        notes.push(spanless_note(format!(
             "fix: {}, or lower the {keyword} floor",
             pin_target(lowest),
-        ));
+        )));
     } else {
         // `latest` is a `--target` value too, so it is listed with the versions.
-        notes.push(format!(
+        notes.push(spanless_note(format!(
             "no supported {edition} target satisfies it: {}, latest",
             targetable.join(", "),
-        ));
-        notes.push(format!(
+        )));
+        notes.push(spanless_note(format!(
             "fix: lower the {keyword} floor, or build against another edition"
-        ));
+        )));
     }
     Diagnostic {
         code: DiagnosticCode::VersionCap,
@@ -91,7 +103,7 @@ fn version_cap(
             floor.declarer(),
             floor.rendered(),
         ),
-        notes: spanless(notes),
+        notes,
         data: Some(DiagnosticData::VersionCap {
             edition: edition.as_str().to_owned(),
             target: target.to_owned(),
@@ -152,11 +164,12 @@ fn requires_unorderable(
 }
 
 fn spanless(messages: Vec<String>) -> Vec<DiagnosticNote> {
-    messages
-        .into_iter()
-        .map(|message| DiagnosticNote {
-            span: None,
-            message,
-        })
-        .collect()
+    messages.into_iter().map(spanless_note).collect()
+}
+
+fn spanless_note(message: String) -> DiagnosticNote {
+    DiagnosticNote {
+        span: None,
+        message,
+    }
 }

@@ -10,7 +10,7 @@ use crate::ast::{Arg, Header, Item, ItemKind, Module, RawRequirement, Statement}
 use crate::diagnostic::RenderedDiagnostic;
 use crate::edition::Edition;
 use crate::error::{Position, Span};
-use crate::intent::guarded_lines;
+use crate::intent::{IntentModule, Member, MemberRole, guarded_lines, lower};
 use crate::version::{FloorVerdict, VersionOrder, compare_versions, parse_min_version};
 
 use super::theme_variant::{bound_theme_name, pick_variant, single_logical_theme};
@@ -522,17 +522,23 @@ impl FloorScope {
 
 /// The floors `scope` accepts, headers first, in source order.
 fn collect_floors(module: &Module, scope: FloorScope) -> Vec<VersionFloor> {
-    let instantiated = InstantiatedParts::of(module, scope);
+    let edited = lower(module);
+    let instantiated = InstantiatedParts::of(module, &edited, scope);
     let mut floors = Vec::new();
     let mut push = |requirement: &RawRequirement, span: &Span, origin: &FloorOrigin| {
         if let Some(parsed) = parse_min_version(requirement.as_str())
             && scope.keeps(parsed.edition)
         {
+            let edit = match origin {
+                FloorOrigin::Def(name) => edit_placing(&edited, name),
+                _ => None,
+            };
             floors.push(VersionFloor {
                 version: parsed.version.to_owned(),
                 edition: parsed.edition,
                 origin: origin.clone(),
                 span: span.clone(),
+                edit,
             });
         }
     };
@@ -559,6 +565,22 @@ fn collect_floors(module: &Module, scope: FloorScope) -> Vec<VersionFloor> {
     floors
 }
 
+/// The first `edit` line of `edited` that selects a member and sets its `use=` to `def`.
+fn edit_placing(edited: &IntentModule, def: &str) -> Option<Span> {
+    edited
+        .edits
+        .iter()
+        .find(|edit| {
+            !edit.selected.is_empty()
+                && edit
+                    .set
+                    .get("use")
+                    .and_then(|value| value.value.as_label_str())
+                    == Some(def)
+        })
+        .map(|edit| edit.span.clone())
+}
+
 /// The parts of a module a build actually instantiates, by declared name.
 struct InstantiatedParts<'a> {
     /// Defs some `place use=NAME` in a `site`, a `struct` or a placed def's body names.
@@ -568,11 +590,12 @@ struct InstantiatedParts<'a> {
 }
 
 impl<'a> InstantiatedParts<'a> {
-    /// The parts `module`'s placements and its module-level auto-pick bind.
+    /// The parts `module`'s placements and its module-level auto-pick bind, a body's placements
+    /// read from `edited`, its members after every `edit`.
     ///
     /// A theme's floor applies once it is bound, whether or not a slot is read from it.
     /// The auto-pick is read only for a `struct`, since an unplaced `def` builds nothing.
-    fn of(module: &'a Module, scope: FloorScope) -> Self {
+    fn of(module: &'a Module, edited: &IntentModule, scope: FloorScope) -> Self {
         let declared_defs: HashSet<&str> = module
             .items
             .iter()
@@ -613,15 +636,30 @@ impl<'a> InstantiatedParts<'a> {
         }
         // A body's `place` builds a def one level down, and its `theme=` binds nothing.
         let placed_from_sites = parts.defs.clone();
-        for item in &module.items {
-            let body = match item {
-                Item::Struct { body, .. } => body,
-                Item::Def { name, body, .. } if placed_from_sites.contains(name.as_str()) => body,
-                _ => continue,
-            };
-            parts.walk(body, &declared_defs, None);
+        let bodies = edited.structs.iter().map(|s| &s.members).chain(
+            edited
+                .defs
+                .iter()
+                .filter(|d| placed_from_sites.contains(d.name.as_str()))
+                .map(|d| &d.members),
+        );
+        for members in bodies {
+            parts.place_members(members, &declared_defs);
         }
         parts
+    }
+
+    /// Collects the defs the `place` members of one edited body and the bodies under it name.
+    fn place_members(&mut self, members: &[Member], declared_defs: &HashSet<&'a str>) {
+        for member in members {
+            self.place_members(&member.children.members, declared_defs);
+            if matches!(member.role, MemberRole::Place)
+                && let Some(name) = member.used_def()
+                && let Some(declared) = declared_defs.get(name)
+            {
+                self.defs.insert(declared);
+            }
+        }
     }
 
     /// Collects the `place` lines of one body and the bodies under it, and the themes their
@@ -704,6 +742,8 @@ pub struct VersionFloor {
     pub origin: FloorOrigin,
     /// Byte range of the `@requires` directive or `requires` line.
     pub span: Span,
+    /// The `edit` line that sets a body placement's `use=` to the def that declares the floor.
+    pub edit: Option<Span>,
 }
 
 impl VersionFloor {
