@@ -532,7 +532,7 @@ fn edge_falling_pulses_once_on_each_fall() {
     }
 }
 
-/// A `latch` sets in four ticks, resets in one, re-arms five ticks after `reset` falls under a
+/// A `latch` sets in four ticks, resets in two, re-arms six ticks after `reset` falls under a
 /// held `set`, and stays off when both fall together.
 #[test]
 fn latch_sets_resets_and_lets_reset_win() {
@@ -546,11 +546,11 @@ fn latch_sets_resets_and_lets_reset_win() {
         bench.set(set, false);
         assert_eq!(last_change(&bench.run(8), true), (0, true), "holds");
         bench.set(reset, true);
-        assert_eq!(last_change(&bench.run(8), true), (1, false));
+        assert_eq!(last_change(&bench.run(8), true), (2, false));
         bench.set(set, true);
         assert_eq!(last_change(&bench.run(8), false), (0, false), "reset wins");
         bench.set(reset, false);
-        assert_eq!(last_change(&bench.run(10), false), (5, true), "re-arms");
+        assert_eq!(last_change(&bench.run(10), false), (6, true), "re-arms");
         bench.set(reset, true);
         bench.run(8);
         bench.set(reset, false);
@@ -559,10 +559,10 @@ fn latch_sets_resets_and_lets_reset_win() {
     }
 }
 
-/// A `counter` feeding its output back turns on at the `n`-th rise and off at the `2n`-th, three
+/// A `counter` feeding its output back turns on at the `n`-th rise and off at the `2n`-th, four
 /// ticks after the rise.
 #[test]
-fn counter_toggles_every_n_rises_three_ticks_after_each() {
+fn counter_toggles_every_n_rises_four_ticks_after_each() {
     for stages in 1..=MAX_COUNTER_STAGES {
         for (rotation, order) in variants() {
             let cell = EditionCell::JavaRepeaterCounter {
@@ -590,7 +590,7 @@ fn counter_toggles_every_n_rises_three_ticks_after_each() {
                     "{stages} stages, rise {rise}, {rotation:?} {order:?}"
                 );
                 if value != before {
-                    assert_eq!(tick, 3, "{stages} stages, rise {rise}");
+                    assert_eq!(tick, 4, "{stages} stages, rise {rise}");
                 }
                 outs.push(value);
                 bench.set(a(), false);

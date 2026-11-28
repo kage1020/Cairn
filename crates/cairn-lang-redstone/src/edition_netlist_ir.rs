@@ -165,11 +165,11 @@ impl EditionCell {
                 PortName::A => 1,
                 PortName::B | PortName::Sel | PortName::Set | PortName::Reset => 2,
             },
-            // A falling `reset` re-arms `set` through its two-tick hold and three torches. Asked
-            // for a port a latch does not have, it errs on the slow side.
+            // A falling `reset` re-arms `set` through its repeater, its two-tick hold and three
+            // torches. Asked for a port a latch does not have, it errs on the slow side.
             Self::JavaTorchLatch | Self::BedrockTorchLatch => match port {
                 PortName::Set => 4,
-                PortName::A | PortName::B | PortName::Sel | PortName::Reset => 5,
+                PortName::A | PortName::B | PortName::Sel | PortName::Reset => 6,
             },
             Self::JavaRepeaterDelay { stages } | Self::BedrockRepeaterDelay { stages } => {
                 2 * u64::from(stages.get())
@@ -179,11 +179,11 @@ impl EditionCell {
             Self::JavaTorchPulse { stages } | Self::BedrockTorchPulse { stages } => {
                 2 * u64::from(stages.get()) + 2
             }
-            Self::JavaTorchEdgeRising | Self::BedrockTorchEdgeRising => 4,
-            Self::JavaRepeaterCounter { .. }
-            | Self::BedrockRepeaterCounter { .. }
-            | Self::JavaTorchEdgeFalling
-            | Self::BedrockTorchEdgeFalling => 3,
+            Self::JavaTorchEdgeRising
+            | Self::BedrockTorchEdgeRising
+            | Self::JavaRepeaterCounter { .. }
+            | Self::BedrockRepeaterCounter { .. } => 4,
+            Self::JavaTorchEdgeFalling | Self::BedrockTorchEdgeFalling => 3,
             Self::JavaRepeaterOr
             | Self::BedrockRepeaterOr
             | Self::JavaInverterTorch

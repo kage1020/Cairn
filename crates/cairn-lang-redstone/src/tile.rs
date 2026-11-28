@@ -509,7 +509,8 @@ fn edge_falling() -> Template {
 }
 
 /// The output torch the NOR of `reset` and a second torch, which is the NOR of the output and
-/// of `set` gated by `reset` held two ticks past its fall.
+/// of `set` gated by `reset` held two ticks past its fall; `reset` enters by a repeater, since its
+/// dust runs on to both.
 fn latch() -> Template {
     Builder::default()
         .port(-6, 2, PortName::Set, 2)
@@ -532,7 +533,8 @@ fn latch() -> Template {
         .dust(2, 1)
         .repeater(-1, 4, Face::North, RepeaterDelay::TWO)
         .dust(-1, 3)
-        .port(-2, 5, PortName::Reset, 10)
+        .port(-3, 5, PortName::Reset, 1)
+        .repeater(-2, 5, Face::East, RepeaterDelay::ONE)
         .row(-1, 5, 5)
         .dust(5, 4)
         .dust(5, 3)
@@ -543,13 +545,14 @@ fn latch() -> Template {
 }
 
 /// `stages` master–slave pairs of repeaters, masters locked by `a` and slaves by `not a`, the
-/// last slave fed back inverted to the first master over the inverter of `a`.
+/// last slave fed back inverted to the first master over the inverter of `a`; `a` enters by a
+/// repeater, since its dust runs on past every stage.
 fn counter(stages: u32) -> Template {
     let n = coord(usize::try_from(stages.clamp(1, MAX_COUNTER_STAGES)).unwrap_or(1));
-    let need = u8::try_from(2 * n + 6).unwrap_or(15);
     let mut builder = Builder::default();
     builder
-        .port(-5, -2, PortName::A, need)
+        .port(-6, -2, PortName::A, 1)
+        .repeater(-5, -2, Face::East, RepeaterDelay::ONE)
         .row(-4, 2 * n, -2)
         .dust(-4, -1)
         .block(-4, 0)

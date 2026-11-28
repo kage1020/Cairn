@@ -583,8 +583,8 @@ its inputs carries ([§14.5](#145-place-and-route)):
 | PULSE `n` | `TorchPulse`, the torch NOR of `not a` and of `a` through `2n + 1` one-tick repeaters | the same | `2n + 2` | restores |
 | EDGE_RISING | `TorchEdgeRising`, a `TorchPulse` of one stage | the same | 4 | restores |
 | EDGE_FALLING | `TorchEdgeFalling`, the torch NOR of `a` and of `not a` through a repeater | the same | 3 | restores |
-| LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 5 | restores |
-| COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 3 | restores |
+| LATCH | `TorchLatch`, two torch NORs each powered by the other | the same | `set` 4, `reset` 6 | restores |
+| COUNTER `n` | `RepeaterCounter`, `n` flip-flops of locking repeaters in a twisted ring | the same | 4 | restores |
 
 An operand of `xor` reaches its own NOR straight and the other through the NOR of the two, so its
 output settles once that path has, two torches after the operand changes. Each port of
@@ -610,22 +610,27 @@ A macro's cell is built of torches and repeaters alone, the same on both edition
 - **`TorchLatch`**: the output torch is the NOR of `reset` and the second torch, and the second
   torch is the NOR of the output and of `set` gated by `reset`, which is the torch NOR of `not set`
   and of `reset` held on two ticks past its fall by a repeater beside it. A `set` turns the output
-  on through four torches: `not set`, the gate, the second torch and the output. A `reset` turns it
-  off through the output torch alone, and its fall, while `set` is on, turns it back on five ticks
-  later, through the repeater and those three torches after it. The hold is what makes `reset` win:
-  while `reset` is on or has just fallen, `set` reaches nothing.
+  on through four torches: `not set`, the gate, the second torch and the output. A `reset` enters
+  by a one-tick repeater of its own and turns the output off through the output torch, two ticks,
+  and its fall, while `set` is on, turns it back on six ticks later, through its repeater, the hold
+  and those three torches after it. The hold is what makes `reset` win: while `reset` is on or has
+  just fallen, `set` reaches nothing.
 - **`RepeaterCounter`**: each stage is a master–slave flip-flop of two repeaters, the master locked
   while `a` is on and the slave while it is off. Each stage feeds the next and the last feeds the
   first through an inverter, a twisted ring of `n` stages that steps through `2n` states from all
-  off, so its last stage, the output, changes every `n` times `a` turns on. The slave's lock lifts
-  two ticks after `a` turns on and its repeater passes the master on a tick later, three ticks in
-  all, and the master locks at two ticks, before any stage it reads from can change.
+  off, so its last stage, the output, changes every `n` times `a` turns on. `a` enters by a
+  one-tick repeater of its own; the slave's lock lifts two ticks after that and its repeater passes
+  the master on a tick later, four ticks in all, and the master locks two ticks after `a` enters,
+  before any stage it reads from can change.
 
 Each Edition Cell's Physical Tile is its parts at full size: a block, torch, repeater, comparator or
 dust in each voxel, the voxel each port reads, and the dust its output leaves by, which placement
 lays turned a quarter at a time ([§14.5](#145-place-and-route)). A port reads its operand as a block
 it powers, a repeater it drives, or dust, and dust that carries the operand on inside the tile needs
-the strength to reach its end, so a port says how strong the wire into it must arrive.
+the strength to reach its end, so a port says how strong the wire into it must arrive. The dust of a
+`counter`'s `a` and a `latch`'s `reset` runs on farther than a wire stepping down into the cells'
+layer can be counted on to carry, so each enters its tile by a repeater of its own, which restores
+it, and the wire into it needs 1 as any input a repeater takes does.
 
 - **Absorbed**: repeater, observer, comparator, and orientation, all cell-implementation
   differences.
