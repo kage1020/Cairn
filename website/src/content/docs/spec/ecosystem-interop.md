@@ -140,7 +140,8 @@ through does, by any spelling or link, counted as the paths that reach a compile
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 `<stem>.raw.crn` is refused the same way when a link makes one of its paths the file, and a path the
 file system cannot answer for refuses the import with exit 1. An entry already at either scratch
-path refuses the import with exit 1 before the file is read, as it refuses a compile.
+path refuses the import as it refuses a compile, here with exit 1 before the file to import is
+read.
 `raw` is the one mode, since L1 is the compiler's ceiling
 ([§12.3](#123-three-tiers-of-transliteration)) and the lift is a refactor of what it writes.
 

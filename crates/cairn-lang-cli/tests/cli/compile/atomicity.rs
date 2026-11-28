@@ -1,5 +1,5 @@
 //! A failed `cairn compile` leaves the previous build exactly as it was, and a refused one writes
-//! nothing. Each failure is forced by a directory planted where a file has to go.
+//! nothing. Each failure is forced by a directory planted where a file or its scratch path goes.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -103,7 +103,7 @@ fn change_the_source(source: &Path) {
     fs::write(source, edited).expect("write source");
 }
 
-/// Where a directory gets planted, and therefore which step fails.
+/// Where a directory gets planted, and therefore which step fails or which check refuses the build.
 const OBSTRUCTIONS: &[&str] = &[
     // Commit fails on the lockfile, after every artifact has been staged.
     "lockfile",
@@ -113,7 +113,7 @@ const OBSTRUCTIONS: &[&str] = &[
     "artifact-staging",
     // The first entry, so the undo runs with nothing displaced and nothing committed.
     "first-artifact",
-    // An entry at an artifact's `.bak` refuses it the same way.
+    // An entry at an artifact's `.bak` refuses the build the same way.
     "artifact-backup",
 ];
 
@@ -242,6 +242,37 @@ fn a_failed_build_says_which_file_stopped_it() {
 }
 
 #[test]
+fn a_lock_that_cannot_be_staged_throws_away_the_artifacts_staged_before_it() {
+    let build = first_successful_build();
+    let before = snapshot(&build.out_dir);
+    let before_lock = fs::read(&build.lock).expect("read lockfile");
+    change_the_source(&build.source);
+    let lock = build.lock_dir().join("missing").join("village.crn.lock");
+
+    let run = compile(&build.source, "java", "latest", &build.out_dir, Some(&lock));
+    let stderr = stderr_of(&run);
+    assert_eq!(
+        (
+            run.status.code(),
+            String::from_utf8_lossy(&run.stdout).as_ref()
+        ),
+        (Some(1), ""),
+        "stderr={stderr}"
+    );
+    assert!(
+        stderr.starts_with(&format!("error: writing lockfile `{}`: ", lock.display())),
+        "the write fails with the platform's own words: {stderr}",
+    );
+    assert_eq!(
+        snapshot(&build.out_dir),
+        before,
+        "the previous build is untouched"
+    );
+    assert_eq!(fs::read(&build.lock).ok(), Some(before_lock));
+    assert_eq!(build.scratch(), Vec::<String>::new(), "stderr={stderr}");
+}
+
+#[test]
 fn a_failed_first_build_leaves_nothing_at_all() {
     let tmp = TempDir::new().expect("tempdir");
     let source = tmp.path().join("village.crn");
@@ -353,7 +384,8 @@ fn assert_refused_by_the_guard(
         Some(1),
         "{args} names an artifact and must be refused; stderr={stderr}",
     );
-    // The guard's own wording: an unguarded run also exits 1, from the failed commit.
+    // The guard's own wording: an unguarded run also exits 1, when staging finds the artifact's
+    // `.tmp` taken.
     let expected = format!(
         "collides with an artifact this build writes (`{}`)",
         artifact.display(),

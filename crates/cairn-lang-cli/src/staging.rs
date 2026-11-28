@@ -106,7 +106,7 @@ pub struct ScratchBlocked {
 }
 
 impl ScratchBlocked {
-    /// Say what is in the way and how to clear it, then run `command` again.
+    /// Print what is in the way and how to clear it, naming `command` as the one to run again.
     pub fn report(&self, command: &str) {
         let Self {
             kind,
@@ -122,7 +122,8 @@ impl ScratchBlocked {
                 );
                 eprintln!(
                     "  note: a file is written at its path with `.tmp` added and renamed into \
-                     place, and one it replaces is moved aside to its path with `.bak` added"
+                     place, and one it replaces is moved aside to its path with `.bak` added, so \
+                     the entry may be one an earlier run left behind"
                 );
                 eprintln!("  fix: move `{at}` aside, then {command} again");
             }
@@ -144,7 +145,15 @@ pub fn blocked_scratch(kind: Kind, final_path: &Path) -> Vec<ScratchBlocked> {
         .into_iter()
         .filter_map(|scratch| {
             let unlookable = match fs::symlink_metadata(&scratch) {
-                Err(err) if err.kind() == io::ErrorKind::NotFound => return None,
+                // Under a file where a directory should be, the write reports the real fault.
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+                    ) =>
+                {
+                    return None;
+                }
                 Ok(_) => None,
                 Err(err) => Some(err),
             };
@@ -173,8 +182,7 @@ impl StagedSet {
     ///
     /// # Errors
     ///
-    /// The I/O failure, after removing the partial scratch file, or `AlreadyExists` for an entry
-    /// at the scratch path, which is left as it is.
+    /// The I/O failure, after removing the scratch file if this call created it.
     pub fn stage(
         &mut self,
         final_path: &Path,
@@ -197,7 +205,7 @@ impl StagedSet {
             file.get_ref().sync_all()
         })();
         if let Err(err) = result {
-            remove_scratch(&tmp_path);
+            remove_staged(&tmp_path);
             return Err(err);
         }
         self.entries.push(Staged {
@@ -218,7 +226,7 @@ impl StagedSet {
     ///
     /// # Errors
     ///
-    /// The first rename that failed, after undoing the ones before it.
+    /// The first step that failed, after undoing the ones before it.
     pub fn commit(self) -> Result<Vec<PathBuf>, CommitFailure> {
         let mut displaced: Vec<Displaced> = Vec::new();
         let mut committed: Vec<PathBuf> = Vec::new();
@@ -279,6 +287,7 @@ impl StagedSet {
                     entry.backup_path.display(),
                     entry.final_path.display(),
                 );
+                fix_left_behind(&entry.backup_path);
             }
         }
         Ok(committed)
@@ -286,21 +295,40 @@ impl StagedSet {
 
     fn discard_scratch(&self) {
         for entry in &self.entries {
-            remove_scratch(&entry.tmp_path);
+            remove_staged(&entry.tmp_path);
         }
     }
 }
 
-/// Remove a scratch file, warning when it is left behind.
-pub fn remove_scratch(tmp_path: &Path) {
+/// Remove a scratch file, warning when it is left behind, and say whether it was.
+pub fn remove_scratch(tmp_path: &Path) -> bool {
     match fs::remove_file(tmp_path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-        Err(err) => eprintln!(
-            "warning: scratch file `{}` was left behind: {err}",
-            tmp_path.display(),
-        ),
+        Ok(()) => false,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+        Err(err) => {
+            eprintln!(
+                "warning: scratch file `{}` was left behind: {err}",
+                tmp_path.display(),
+            );
+            true
+        }
     }
+}
+
+/// [`remove_scratch`] for a staged file, which refuses the next run while it is left there.
+fn remove_staged(tmp_path: &Path) {
+    if remove_scratch(tmp_path) {
+        fix_left_behind(tmp_path);
+    }
+}
+
+/// Say that `path`, left behind, has to go before the next run, which refuses to write through it.
+fn fix_left_behind(path: &Path) {
+    eprintln!(
+        "  fix: remove `{}` before running again, since a run refuses to write through a \
+         scratch path that holds an entry",
+        path.display(),
+    );
 }
 
 /// Put the directory back the way the commit found it, reporting every step that fails.

@@ -423,7 +423,7 @@ pub(crate) fn check_source_is_left_alone(
 }
 
 /// Refuse a build that would write any of its files through a scratch path already holding an
-/// entry (`spec/versioning-editions` "Provenance and lock").
+/// entry, or one the file system cannot look at (`spec/versioning-editions` "Provenance and lock").
 pub(crate) fn check_scratch_is_free(
     prepared: &[(PathBuf, PreparedStructure<'_>)],
     lock_path: &Path,

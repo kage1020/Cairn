@@ -393,8 +393,8 @@ fn a_file_at_a_scratch_path_of_the_source_refuses_the_import_and_is_left_as_it_w
             &format!(
                 "error: source `{}` is written through `{}`, which already exists\n  note: a \
                  file is written at its path with `.tmp` added and renamed into place, and one it \
-                 replaces is moved aside to its path with `.bak` added\n  fix: move `{}` aside, \
-                 then import again\n",
+                 replaces is moved aside to its path with `.bak` added, so the entry may be one \
+                 an earlier run left behind\n  fix: move `{}` aside, then import again\n",
                 out.display(),
                 scratch.display(),
                 scratch.display(),

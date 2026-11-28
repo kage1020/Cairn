@@ -1330,11 +1330,11 @@ blocks as the target does, and each `reason` is the row's reason and boundary as
 A compile writes each of its files, every artifact and the lock, through two scratch paths beside
 it: the file is written at its path with `.tmp` added and renamed into place, and a file already at
 its path is moved aside to the path with `.bak` added until the new one is there. A build that
-fails partway puts the directory back as it was. Neither scratch path may already hold an entry, a
-file, a folder or a symbolic link, which the compile would write through or delete: once lowering
-has said where each file goes, such an entry refuses the compile, exit 1, before any file is
-written, and the refusal names each entry to move aside. A scratch path the file system cannot
-answer for refuses it the same way.
+fails partway puts the directory back as it was. Neither scratch path may already hold an entry,
+whether a file, a directory or a symbolic link, since the compile would write through it or delete
+it: once lowering has said where each file goes, such an entry refuses the compile, exit 1, before
+any artifact or lockfile is written, and the refusal names each entry to move aside. A scratch path
+the file system cannot answer for refuses it the same way.
 
 A compile never writes over the source it compiles. No path it writes a file through, the file's
 own or either scratch path, may name the source, and every path that reaches the source's file

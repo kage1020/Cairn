@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::common::{Fixture, Run, compile_as};
+use crate::common::{Fixture, Run, compile, compile_as};
 
 const HUT: &str =
     "theme t:\n  slot w -> @stone\n\nstruct hut size=3x3\n  walls mat_slot=w height=2\n";
@@ -22,7 +22,8 @@ fn refusal(kind: &str, path: &Path, scratch: &Path) -> String {
     format!(
         "error: {kind} `{}` is written through `{}`, which already exists\n  note: a file is \
          written at its path with `.tmp` added and renamed into place, and one it replaces is \
-         moved aside to its path with `.bak` added\n  fix: move `{}` aside, then compile again\n",
+         moved aside to its path with `.bak` added, so the entry may be one an earlier run left \
+         behind\n  fix: move `{}` aside, then compile again\n",
         path.display(),
         scratch.display(),
         scratch.display(),
@@ -49,6 +50,8 @@ fn a_file_at_a_scratch_path_refuses_the_build_and_is_left_as_it_was() {
         let before = (fs::read(&artifact), fs::read(fixture.lock()));
         let planted = beside(&path, suffix);
         fs::write(&planted, "my backup").expect("plant the file");
+        // A build that went through would now write other bytes.
+        fs::write(fixture.source(), HUT.replace("height=2", "height=3")).expect("edit the source");
 
         let run = Run::from(compile_as(&fixture, "java", "latest"));
         assert_eq!(
@@ -98,31 +101,64 @@ fn every_scratch_path_holding_an_entry_is_named() {
 #[cfg(unix)]
 #[test]
 fn a_symbolic_link_at_a_scratch_path_is_not_written_through() {
-    let fixture = Fixture::new(HUT);
-    let victim = fixture.source().with_file_name("victim.txt");
-    fs::write(&victim, "precious").expect("write the victim");
-    fs::create_dir_all(fixture.out()).expect("make --out");
-    let artifact = fixture.out().join("hut.nbt");
-    let link = beside(&artifact, ".tmp");
-    std::os::unix::fs::symlink(&victim, &link).expect("plant the link");
+    for dangling in [false, true] {
+        let fixture = Fixture::new(HUT);
+        let victim = fixture.source().with_file_name("victim.txt");
+        if !dangling {
+            fs::write(&victim, "precious").expect("write the victim");
+        }
+        fs::create_dir_all(fixture.out()).expect("make --out");
+        let artifact = fixture.out().join("hut.nbt");
+        let link = beside(&artifact, ".tmp");
+        std::os::unix::fs::symlink(&victim, &link).expect("plant the link");
 
-    let run = Run::from(compile_as(&fixture, "java", "latest"));
-    assert_eq!(
-        (run.code, run.stdout.as_str(), run.stderr),
-        (Some(1), "", refusal("artifact", &artifact, &link)),
-    );
-    assert_eq!(
-        fs::read_to_string(&victim).expect("the victim reads"),
-        "precious"
-    );
+        let run = Run::from(compile_as(&fixture, "java", "latest"));
+        assert_eq!(
+            (run.code, run.stdout.as_str(), run.stderr),
+            (Some(1), "", refusal("artifact", &artifact, &link)),
+            "dangling={dangling}"
+        );
+        assert_eq!(
+            fs::read_to_string(&victim).ok(),
+            (!dangling).then(|| "precious".to_owned()),
+            "dangling={dangling}"
+        );
+        assert!(
+            fs::symlink_metadata(&link)
+                .expect("the link is there")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(&artifact).is_err(),
+            "no artifact is written"
+        );
+    }
+}
+
+#[test]
+fn a_lock_under_a_file_is_refused_by_its_write_rather_than_its_scratch_check() {
+    let fixture = Fixture::new(HUT);
+    let notes = fixture.source().with_file_name("notes.txt");
+    fs::write(&notes, "mine").expect("write the file");
+    let lock = notes.join("hut.crn.lock");
+    let run = Run::from(compile(
+        &fixture.source(),
+        "java",
+        "latest",
+        &fixture.out(),
+        Some(&lock),
+    ));
+    assert_eq!((run.code, run.stdout.as_str()), (Some(1), ""));
+    let prefix = format!("error: writing lockfile `{}`: ", lock.display());
     assert!(
-        fs::symlink_metadata(&link)
-            .expect("the link is there")
-            .file_type()
-            .is_symlink()
+        run.stderr.starts_with(&prefix) && run.stderr.lines().count() == 1,
+        "only the write reports the fault, in the platform's own words: {}",
+        run.stderr
     );
-    assert!(
-        fs::symlink_metadata(&artifact).is_err(),
-        "no artifact is written"
+    assert_eq!(
+        fixture.artifacts(),
+        ["notes.txt"],
+        "the staged artifact is thrown away"
     );
 }
