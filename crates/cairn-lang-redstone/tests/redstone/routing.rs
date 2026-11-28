@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use cairn_lang_core::block_array::{BlockArrayIr, Face, ResolvedBlock};
+use cairn_lang_core::block_array::{BlockArrayIr, Face};
 use cairn_lang_core::intent::{Actuator, SENSOR_HOSTS};
 use cairn_lang_core::{Edition, lower, parse};
 use cairn_lang_redstone::geometry::Voxel;
@@ -32,20 +32,38 @@ struct reach size=40x6
   circuit region=floor void=4
 ";
 
+/// [`FLOOR_ROW`] with a row of redstone blocks laid over where the lever's wire would run.
+fn under_redstone() -> String {
+    FLOOR_ROW
+        .replace(
+            "  slot wall -> @oak_planks\n",
+            "  slot wall -> @oak_planks\n  slot rs -> @redstone_block\n",
+        )
+        .replace(
+            "  circuit region=floor",
+            "  fill mat_slot=rs from=32,0,1 to=36,0,1\n  circuit region=floor",
+        )
+}
+
 /// Every source routed by the tests that walk each circuit's dust.
 fn routed_sources() -> Vec<String> {
     EXAMPLES
         .iter()
         .map(|(name, _)| load_example(name))
-        .chain([LONG_WIRE_SOURCE.to_owned(), FLOOR_ROW.to_owned()])
+        .chain([
+            LONG_WIRE_SOURCE.to_owned(),
+            FLOOR_ROW.to_owned(),
+            under_redstone(),
+        ])
         .collect()
 }
 
 /// Cells of a struct, `(x, y, z)` from its origin.
 type Cells = BTreeSet<(i32, i32, i32)>;
 
-/// The floor-row cells of `key` a component holds, and those of a sensor, a Tier 0 part or a raw
-/// member, which power what is beside them, the row over the floor row's included.
+/// The floor-row cells of `key` a component or a redstone block holds, and those of a sensor, a
+/// Tier 0 part, a raw member or a redstone block, which power what is beside them, the row over
+/// the floor row's included.
 fn components(built: &BlockArrayIr, key: &str) -> (Cells, Cells) {
     let unknown = [
         "repeater",
@@ -59,25 +77,28 @@ fn components(built: &BlockArrayIr, key: &str) -> (Cells, Cells) {
     let mut signalling = BTreeSet::new();
     for member in &built.members[key] {
         let role = member.role.as_str();
-        let signals = SENSOR_HOSTS.contains(&role) || unknown.contains(&role);
-        if !signals
-            && !Actuator::ALL
+        let sensor = SENSOR_HOSTS.contains(&role) || unknown.contains(&role);
+        let component = sensor
+            || Actuator::ALL
                 .iter()
-                .any(|actuator| actuator.keyword() == role)
-        {
-            continue;
-        }
-        for (x, y, z) in member.resolved_state.iter().flat_map(ResolvedBlock::cells) {
-            let cell = (
-                i32::try_from(x).expect("small"),
-                i32::try_from(y).expect("small"),
-                i32::try_from(z).expect("small"),
-            );
-            if y == 0 {
-                held.insert(cell);
+                .any(|actuator| actuator.keyword() == role);
+        for block in &member.resolved_state {
+            let gives = block.state.id == "minecraft:redstone_block";
+            if !component && !gives {
+                continue;
             }
-            if signals && y <= 1 {
-                signalling.insert(cell);
+            for (x, y, z) in block.cells() {
+                let cell = (
+                    i32::try_from(x).expect("small"),
+                    i32::try_from(y).expect("small"),
+                    i32::try_from(z).expect("small"),
+                );
+                if y == 0 {
+                    held.insert(cell);
+                }
+                if (sensor || gives) && y <= 1 {
+                    signalling.insert(cell);
+                }
             }
         }
     }

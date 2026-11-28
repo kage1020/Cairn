@@ -1,8 +1,11 @@
 //! `spec/redstone` "Place-and-route": where each sensor's signal enters the circuit under the base
 //! plane, where each actuator's leaves it, and which columns the top layer may wire under.
 
+mod powered;
+
 use std::collections::HashMap;
 
+use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockArray, BlockState, Face, ResolvedBlock, ResolvedMember, TargetRegistry,
 };
@@ -15,6 +18,8 @@ use crate::geometry::Voxel;
 use crate::netlist_ir::NetRef;
 use crate::synth::{actuator_host, patch_candidates, signal_named_by};
 use crate::tile::PadKind;
+
+use self::powered::{Powered, powered};
 
 /// A cell of the built array, `(x, y, z)`, its `y = 0` the base plane.
 type Cell = (u32, u32, u32);
@@ -29,15 +34,17 @@ struct Paint<'a> {
 /// What paints a cell of the base plane or the row over it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Painter {
-    /// A component a circuit reads.
+    /// A component a circuit reads, or a block that gives power.
     Sensor,
-    /// A component power moves.
+    /// A component power moves, or a block it moves.
     Actuator,
-    /// A Tier 0 part or a raw member, whose block no table describes.
-    Unknown,
+    /// A block that gives power and that power moves, or a Tier 0 part or a raw member, which
+    /// coupling takes for one whatever its block.
+    Both,
 }
 
 impl Painter {
+    /// What paints the cells of a member written with `keyword`, or `None` when its blocks do.
     fn of(keyword: &str) -> Option<Self> {
         if SENSOR_HOSTS.contains(&keyword) {
             Some(Self::Sensor)
@@ -55,15 +62,30 @@ impl Painter {
                 | "raw_block"
                 | "raw_fill"
         ) {
-            Some(Self::Unknown)
+            Some(Self::Both)
         } else {
             None
         }
     }
 
+    /// What paints a cell holding `state` at `edition`, or `None` when power neither moves it nor
+    /// gives it.
+    fn of_block(edition: Edition, state: &BlockState) -> Option<Self> {
+        Some(match powered(edition, &state.id)? {
+            Powered::Moves => Self::Actuator,
+            Powered::Gives => Self::Sensor,
+            Powered::Both => Self::Both,
+        })
+    }
+
     /// Whether a block beside it may be powered, or power what is under it, through it.
     const fn signals(self) -> bool {
-        matches!(self, Self::Sensor | Self::Unknown)
+        matches!(self, Self::Sensor | Self::Both)
+    }
+
+    /// Whether power moves it.
+    const fn moves(self) -> bool {
+        matches!(self, Self::Actuator | Self::Both)
     }
 }
 
@@ -175,7 +197,7 @@ pub(crate) fn couple(
     scope: &str,
     registry: Option<&dyn TargetRegistry>,
 ) -> (Coupled, Vec<Diagnostic>) {
-    let painted = painted(resolved);
+    let painted = painted(resolved, netlist.edition);
     let surface = surface(array, &painted);
     let top = i32::try_from(layers).unwrap_or(i32::MAX) - 1;
     let candidates = patch_candidates(members);
@@ -275,7 +297,7 @@ fn unshared<'a>(
         .flatten()
         .filter(|cell| !component.cells.contains(cell))
         .filter_map(|cell| painted.get(&cell))
-        .filter(|paint| matches!(paint.painter, Painter::Actuator | Painter::Unknown))
+        .filter(|paint| paint.painter.moves())
         .map(|paint| paint.span)
         .collect();
     sharing.sort_by_key(|span| (span.start, span.end));
@@ -286,7 +308,7 @@ fn unshared<'a>(
     Err((
         Unreachable::new(
             "the block that drives it from under the floor would power the component beside that block too",
-            "move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+            "move it, or the component beside the block under it, so that no other actuator, block power moves, Tier 0 part or raw member touches that block",
         ),
         sharing,
     ))
@@ -301,21 +323,31 @@ fn has_sinks(netlist: &EditionNetlistIr, net: NetRef) -> bool {
         || netlist.outputs.iter().any(|output| output.driver == net)
 }
 
-/// What paints each cell that a sensor, an actuator, a Tier 0 part or a raw member holds.
-fn painted(resolved: &[ResolvedMember]) -> HashMap<Cell, Paint<'_>> {
+/// What paints each cell that a sensor, an actuator, a Tier 0 part or a raw member holds, and
+/// each other cell of the base plane and the row over it whose block power moves or gives.
+fn painted(resolved: &[ResolvedMember], edition: Edition) -> HashMap<Cell, Paint<'_>> {
     let mut by_cell = HashMap::new();
+    let mut laid = HashMap::new();
     for member in resolved {
-        let Some(painter) = Painter::of(&member.role) else {
-            continue;
-        };
-        for cell in member.resolved_state.iter().flat_map(ResolvedBlock::cells) {
-            by_cell.insert(
-                cell,
-                Paint {
-                    painter,
-                    span: &member.span,
-                },
-            );
+        let painter = Painter::of(&member.role);
+        for block in &member.resolved_state {
+            for cell in block.cells() {
+                let span = &member.span;
+                match painter {
+                    Some(painter) => {
+                        by_cell.insert(cell, Paint { painter, span });
+                    }
+                    None if cell.1 < 2 => {
+                        laid.insert(cell, (&block.state, span));
+                    }
+                    None => {}
+                }
+            }
+        }
+    }
+    for (cell, (state, span)) in laid {
+        if let Some(painter) = Painter::of_block(edition, state) {
+            by_cell.entry(cell).or_insert(Paint { painter, span });
         }
     }
     by_cell

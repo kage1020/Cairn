@@ -330,7 +330,7 @@ fn a_component_over_a_floor_block_the_target_cannot_say_of_is_met() {
     for (floor, edition, target) in [
         ("@mud", Some(Edition::Bedrock), Some("1.26.60")),
         ("@mud", Some(Edition::Bedrock), None),
-        ("@command_block", Some(Edition::Bedrock), Some("1.21.0")),
+        ("@loom", Some(Edition::Bedrock), Some("1.21.0")),
         ("@netherreactor", Some(Edition::Bedrock), Some("1.26.60")),
         ("@netherreactor", Some(Edition::Bedrock), None),
         ("@oak_slab[type=sideways]", None, None),

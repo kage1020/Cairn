@@ -490,7 +490,7 @@ fn actuators_out_of_reach() -> [Unreachable; 7] {
                     &["lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a"],
                 ),
             ],
-            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, block power moves, Tier 0 part or raw member touches that block",
         },
         Unreachable {
             body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
@@ -501,7 +501,7 @@ fn actuators_out_of_reach() -> [Unreachable; 7] {
                 "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
                 &["raw_block mat=minecraft:stone at=2,0,4"],
             )],
-            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, block power moves, Tier 0 part or raw member touches that block",
         },
         Unreachable {
             body: "  lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
@@ -512,7 +512,7 @@ fn actuators_out_of_reach() -> [Unreachable; 7] {
                 "the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too",
                 &["redstone_dust at=2,0,4"],
             )],
-            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, Tier 0 part or raw member touches that block",
+            fix: "Fix: move it, or the component beside the block under it, so that no other actuator, block power moves, Tier 0 part or raw member touches that block",
         },
     ]
 }
@@ -552,6 +552,70 @@ fn a_component_the_circuit_cannot_reach_is_refused_on_its_line_with_its_reason()
                 })
                 .collect();
             assert_eq!(findings(&source, &out.diagnostics), expected, "{source}");
+        }
+    }
+}
+
+/// A room with a lamp in its floor row and `beside` the line of a member, bound to `@{token}`
+/// through the slot `b`, that lays a block beside the lamp.
+fn lamp_beside(token: &str, beside: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @oak_planks\n  slot b -> @{token}\n\n\
+         struct room size=15x11\n  floor mat_slot=wall\n  walls mat_slot=wall height=3\n  \
+         door id=d side=front at=center\n  \
+         lever id=l at=inside.back offset=4 y=0 -> sig.a\n  \
+         lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a\n  \
+         {beside}\n  circuit region=floor void=3\n"
+    )
+}
+
+#[test]
+fn an_actuator_beside_a_block_power_moves_is_refused_whatever_member_lays_that_block() {
+    let cases = [
+        (
+            "oak_trapdoor",
+            "trapdoor id=h at=inside.left offset=5 y=0 mat_slot=b",
+            [Edition::Java, Edition::Bedrock].as_slice(),
+        ),
+        (
+            "note_block",
+            "fill mat_slot=b from=2,0,4 to=2,0,4",
+            &[Edition::Java, Edition::Bedrock],
+        ),
+        (
+            "redstone_lamp",
+            "floor mat_slot=b from=2,0,3 to=3,0,5",
+            &[Edition::Java, Edition::Bedrock],
+        ),
+        (
+            "noteblock",
+            "fill mat_slot=b from=2,0,4 to=2,0,4",
+            &[Edition::Bedrock],
+        ),
+    ];
+    for (token, beside, editions) in cases {
+        let source = lamp_beside(token, beside);
+        for &edition in editions {
+            assert_eq!(
+                findings(&source, &placement_of(&source, edition).diagnostics),
+                [(
+                    "E_ROUTE_UNREACHABLE_COMPONENT",
+                    "lamp id=m at=inside.left offset=4 y=0 lit_by=sig.a",
+                    "struct=room: the lamp `m` at y=0 cannot reach the circuit under the floor: the block that drives it from under the floor would power the component beside that block too".to_owned(),
+                    vec![
+                        (
+                            Some(beside),
+                            "the block that drives it touches this member, which it would power too"
+                                .to_owned(),
+                        ),
+                        (
+                            None,
+                            "Fix: move it, or the component beside the block under it, so that no other actuator, block power moves, Tier 0 part or raw member touches that block".to_owned(),
+                        ),
+                    ],
+                )],
+                "{edition:?}\n{source}",
+            );
         }
     }
 }
