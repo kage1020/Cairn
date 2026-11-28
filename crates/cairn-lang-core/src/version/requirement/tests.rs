@@ -154,6 +154,23 @@ fn a_pre_release_tag_that_is_not_one_is_refused() {
 }
 
 #[test]
+fn a_malformed_pre_release_tag_is_named_whole_in_the_refusal() {
+    let refusal = parse_requirement("version>=26.3-rc--1");
+    assert_eq!(
+        refusal,
+        Err(RequirementError::PreRelease {
+            version: "26.3-rc--1".to_owned(),
+            tag: "rc--1".to_owned(),
+        }),
+    );
+    assert_eq!(
+        refusal.expect_err("refused").to_string(),
+        "version `26.3-rc--1` has the pre-release tag `rc--1`, which is not letters and digits \
+         separated by `.` or `-`, as in `1.21.4-rc1` or `26.3-rc-1`",
+    );
+}
+
+#[test]
 fn the_two_component_failures_read_differently() {
     let letters = parse_requirement("version>=1.beta").expect_err("not a component");
     let overflow = parse_requirement("version>=4294967296").expect_err("too large");
@@ -265,6 +282,11 @@ fn a_pre_release_tag_orders_its_numeric_runs_as_numbers() {
     assert_eq!(compare_versions("26.3-rc-2", "26.3-rc-10"), Ordering::Less);
     assert_eq!(compare_versions("26.3-rc-1", "26.3-rc.1"), Ordering::Equal);
     assert_eq!(compare_versions("26.3-rc", "26.3-rc-1"), Ordering::Less);
+    assert_eq!(compare_versions("1.13-pre2", "1.13-pre10"), Ordering::Less);
+    assert_eq!(
+        compare_versions("1.21.4-rc1", "1.21.4-rc-1"),
+        Ordering::Equal
+    );
 }
 
 #[test]
@@ -327,6 +349,16 @@ fn compare_versions_is_a_total_order_on_input_the_grammar_refuses() {
         "-",
         "1.21-",
         "1.21-rc1",
+        "1.21-rc10",
+        "1.21-rc-1",
+        "1.21-rc.1",
+        "1.21-rc-01",
+        "1.21-rc-10",
+        "1.21-rc",
+        "1.21-rc-a",
+        "1.21-1",
+        "1.21-rc-",
+        "1.21--",
     ];
 
     for &a in ALPHABET {

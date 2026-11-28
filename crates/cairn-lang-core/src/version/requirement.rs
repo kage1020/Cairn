@@ -243,6 +243,28 @@ fn tag_parts(tag: &str) -> impl Iterator<Item = &str> {
     tag.split(['.', '-'])
 }
 
+/// A pre-release tag's runs as they order: [`tag_parts`], each split again where letters meet
+/// digits, so `rc10`, `rc.10` and `rc-10` all order as `rc` then `10`.
+fn tag_runs(tag: &str) -> impl Iterator<Item = &str> {
+    tag_parts(tag).flat_map(letter_digit_runs)
+}
+
+/// `part` split where letters meet digits; an empty part is one empty run.
+fn letter_digit_runs(part: &str) -> impl Iterator<Item = &str> {
+    let mut rest = Some(part);
+    std::iter::from_fn(move || {
+        let left = rest?;
+        let digits = left.bytes().next().is_some_and(|b| b.is_ascii_digit());
+        let end = left
+            .bytes()
+            .position(|b| b.is_ascii_digit() != digits)
+            .unwrap_or(left.len());
+        let (run, tail) = left.split_at(end);
+        rest = (!tail.is_empty()).then_some(tail);
+        Some(run)
+    })
+}
+
 /// [`parse_requirement`] for a caller with no way to report why there is no floor.
 #[must_use]
 pub fn parse_min_version(raw: &str) -> Option<Requirement<'_>> {
@@ -294,8 +316,8 @@ fn compare_tags(a: Option<&str>, b: Option<&str>) -> Ordering {
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
         (Some(l), Some(r)) => {
-            let mut left = tag_parts(l);
-            let mut right = tag_parts(r);
+            let mut left = tag_runs(l);
+            let mut right = tag_runs(r);
             loop {
                 match (left.next(), right.next()) {
                     (None, None) => return Ordering::Equal,
@@ -311,8 +333,8 @@ fn compare_tags(a: Option<&str>, b: Option<&str>) -> Ordering {
     }
 }
 
-/// Order one pair of components, every number below every non-number so the order stays
-/// transitive.
+/// Order one pair of components or tag runs, every number below every non-number so the order
+/// stays transitive.
 fn compare_segments(l: &str, r: &str) -> Ordering {
     match (numeric_key(l), numeric_key(r)) {
         // Without leading zeros, the longer run is the larger value.

@@ -198,6 +198,11 @@ fn the_finding_carries_the_failure_as_data() {
             "trailing_tokens",
             "extra",
         ),
+        (
+            "@requires version>=26.3-rc--1\n",
+            "prerelease_not_a_tag",
+            "rc--1",
+        ),
         ("@requires version>=\n", "empty_version", ""),
         ("@requires nonsense\n", "not_a_version_requirement", ""),
     ] {
