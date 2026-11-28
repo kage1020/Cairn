@@ -126,7 +126,8 @@ fn fixes(
     }
 }
 
-/// Each alias of an id the author wrote, the first preferred, then the nearest spelling.
+/// Each alias of an id the author wrote, preferred when it is the only one, then the nearest
+/// spelling.
 fn id_fixes(
     source: &str,
     span: &Span,
@@ -147,12 +148,12 @@ fn id_fixes(
         }
         .to_owned()
     };
-    let alias_fixes = aliases.iter().enumerate().map(|(i, alias)| {
+    let alias_fixes = aliases.iter().map(|alias| {
         let alias = spelled(alias);
         Fix {
             title: format!("Replace `{text}` with its alias `{alias}`"),
             change: Change::Replace(written.clone(), alias),
-            preferred: i == 0,
+            preferred: aliases.len() == 1,
         }
     });
     let suggestion_fix = suggestion.map(|suggestion| {
