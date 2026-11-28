@@ -473,7 +473,9 @@ its own requirements instead of every consumer restating them.
 **Which parts a build inherits from.** A `def` a `place use=` names, and a `theme` a scope binds. A
 part nothing instantiates contributes nothing: a `def` no `place` names builds no voxels (and is
 already `W_UNUSED_DEF`), so refusing a target over it would be refusing over a template the author
-left in the file.
+left in the file. A body's `place` names the def its `use=` names once every `edit` is applied, the
+def it builds: an `edit` that sets `use=` moves the floor with the def, and `E_VERSION_CAP` then
+points at that edit as well as at the `requires` line.
 
 **A theme's floor applies when the theme is bound**, whether or not a member reads a slot from it.
 Binding a theme is the act of taking on what it declares. Charging the floor only once one of its

@@ -3,7 +3,7 @@
 
 use std::process::Command;
 
-use crate::common::{Fixture, assert_stream, cargo_bin, compile_as};
+use crate::common::{Fixture, assert_stream, cairn, cargo_bin, compile_as};
 
 /// A struct with one painted floor, so a failure cannot be mistaken for an empty build.
 const BUILD: &str =
@@ -724,5 +724,74 @@ fn an_unplaceable_floor_after_a_cap_is_reported_as_unplaceable() {
     assert_the_unplaceable_floor_is_reported_beside_a_cap(
         "@requires version>=1.21.60\n@requires version>=1.21.4\n",
         2,
+    );
+}
+
+/// A struct whose one body `place` names `line`, a `blob` def floored at 1.21.4 beside it, and
+/// `edit`.
+fn placed(line: &str, edit: &str) -> String {
+    format!(
+        "theme t:\n  slot a -> @oak_planks\n\ndef blob size=1x1:\n  requires version>=1.21.4\n  \
+         fill mat_slot=a from=0,0,0 to=0,0,0\n\nstruct s size=5x5:\n  walls mat_slot=a \
+         height=3\n  place use={line} at=1,1,1\n\n{edit}"
+    )
+}
+
+/// `fixture`'s `buildable targets` row.
+fn buildable(fixture: &Fixture) -> String {
+    let out = cairn("info", &[fixture.source().to_str().expect("utf-8 path")]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout)
+        .expect("utf-8")
+        .lines()
+        .find(|line| line.starts_with("buildable targets:"))
+        .expect("the row is printed")
+        .to_owned()
+}
+
+#[test]
+fn an_edit_that_sets_a_body_places_use_to_a_floored_def_is_held_to_its_floor() {
+    let fixture = Fixture::new(&placed("table", "edit place[0] set use=blob\n"));
+    let out = compile_as(&fixture, "java", "1.20.4");
+    let source = fixture.source();
+    assert_eq!(
+        (
+            out.status.code(),
+            String::from_utf8(out.stderr).expect("utf-8")
+        ),
+        (
+            Some(1),
+            format!(
+                "error[E_VERSION_CAP]: {path}:5:3: `def blob` requires version>=1.21.4 (target \
+                 1.20.4).\n  `def blob` declares it, and every `place use=blob` inherits it\n  \
+                 note: {path}:12:1: this `edit` sets `use=blob`, so the `place` it selects builds \
+                 `def blob` and inherits its floor\n  valid java targets: 1.21.4, 26.3\n  fix: \
+                 --target 1.21.4, or lower the `requires` floor\n",
+                path = source.display(),
+            )
+        ),
+    );
+    assert_eq!(
+        buildable(&fixture),
+        "buildable targets:         Java: 1.21.4, 26.3 (1.20.4, 1.21 refuse)   Bedrock: none \
+         (1.21.0, 1.21.40, 1.21.60, 1.26.60 all refuse)",
+    );
+}
+
+#[test]
+fn an_edit_that_sets_a_body_places_use_away_from_a_floored_def_frees_its_floor() {
+    let fixture = Fixture::new(&placed("blob", "edit place[0] set use=table\n"));
+    let out = compile_as(&fixture, "java", "1.20.4");
+    let stderr = String::from_utf8(out.stderr).expect("utf-8");
+    assert_eq!(out.status.code(), Some(0), "stderr={stderr}");
+    assert_stream(&stderr, &[(4, 1, "warning", "W_UNUSED_DEF")]);
+    assert_eq!(
+        buildable(&fixture),
+        "buildable targets:         Java: 1.20.4, 1.21, 1.21.4, 26.3   Bedrock: 1.21.0, 1.21.40, \
+         1.21.60, 1.26.60",
     );
 }

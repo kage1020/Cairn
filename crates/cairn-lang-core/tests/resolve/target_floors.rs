@@ -168,6 +168,47 @@ site v:
     );
 }
 
+/// A struct whose one body `place` names `line`, a `blob` def floored at 1.21.4 beside it, and
+/// `edit`.
+fn placed(line: &str, edit: &str) -> String {
+    format!(
+        "theme t:\n  slot a -> @oak_planks\n\ndef blob size=1x1:\n  requires version>=1.21.4\n  \
+         fill mat_slot=a from=0,0,0 to=0,0,0\n\nstruct s size=5x5:\n  walls mat_slot=a \
+         height=3\n  place use={line} at=1,1,1\n\n{edit}"
+    )
+}
+
+#[test]
+fn an_edit_that_sets_a_body_places_use_moves_the_floor_with_the_def() {
+    let source = placed("table", "edit place[0] set use=blob\n");
+    let d = weighed(&source, "1.20.4").expect("the edited place builds the floored def");
+    assert_eq!(
+        (d.code.as_str(), slice(&source, &d)),
+        ("E_VERSION_CAP", "requires version>=1.21.4")
+    );
+    let edit = d
+        .notes
+        .iter()
+        .find_map(|note| note.span.clone())
+        .expect("a note at the edit");
+    assert_eq!(
+        (&source[edit], notes(&d)),
+        (
+            "edit place[0] set use=blob",
+            vec![
+                "`def blob` declares it, and every `place use=blob` inherits it",
+                "this `edit` sets `use=blob`, so the `place` it selects builds `def blob` and \
+                 inherits its floor",
+                "valid java targets: 1.21.4, 26.3",
+                "fix: --target 1.21.4, or lower the `requires` floor",
+            ]
+        ),
+    );
+
+    let source = placed("blob", "edit place[0] set use=table\n");
+    assert_eq!(weighed(&source, "1.20.4"), None, "no place builds `blob`");
+}
+
 #[test]
 fn the_fix_note_pins_the_lowest_valid_target_the_way_the_front_end_says() {
     let module = parse(&format!("@requires version>=1.21.4\n{BUILD}")).expect("parses");
