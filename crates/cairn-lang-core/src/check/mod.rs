@@ -183,6 +183,7 @@ mod tests {
             | C::StateUnmapped
             | C::IncompatibleMaterial
             | C::InvalidMember
+            | C::FrameCellTaken
             | C::StructNoSize
             | C::DefNoSize
             | C::WalkwayBlocked
@@ -290,6 +291,7 @@ mod tests {
         assert_eq!(
             escapes,
             [
+                "E_FRAME_CELL_TAKEN",
                 "E_INCOMPATIBLE_MATERIAL",
                 "E_INVALID_MEMBER",
                 "E_PARITY_UNSUPPORTED",

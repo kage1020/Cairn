@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use indexmap::IndexMap;
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote, Severity};
+use crate::edition::Edition;
 use crate::error::Span;
 use crate::intent::{DefIr, Member, MemberRole, Size, patched_actuator, role_of};
 use crate::resolve::ScopeResolution;
@@ -23,11 +24,12 @@ use super::canvas::{Canvas, Overflow, ScopePalette, prune_unreferenced};
 use super::cell_box::Cell;
 use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
 use super::connections::derive_connections;
-use super::constraints::{Built, PlacedEntity, constraint_findings, entity_findings};
+use super::constraints::{Built, Grid, PlacedEntity, constraint_findings, entity_findings};
 use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
 use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
 use super::frame::lay_frames;
+use super::hanging::refuse_taken_frame_cells;
 use super::members::{MemberDisposition, StructCtx, flatten_members, member_disposition};
 use super::paint::{Openings, paint_member};
 use super::phase::Phase;
@@ -42,6 +44,8 @@ use super::written::{Written, written_members};
 pub(super) struct BodyInputs<'a> {
     /// The compile target's registry view.
     pub(super) registry: Option<&'a dyn TargetRegistry>,
+    /// The edition the build is for, or `None` for one that pins none.
+    pub(super) edition: Option<Edition>,
     /// The file's defs, which a body's `place` builds ahead of the furniture library's.
     pub(super) defs: &'a [DefIr],
     /// The entries each body's palette may hold, air included.
@@ -82,6 +86,7 @@ pub(super) fn lower_body_to_block_array<'a>(
         registry,
         defs,
         palette_capacity,
+        ..
     } = bodies;
     let (interior_w, interior_h) = (body.size.w.get(), body.size.h.get());
     let raised = diagnostics.len();
@@ -167,7 +172,7 @@ pub(super) fn lower_body_to_block_array<'a>(
 
     let mut array = finished_array(dims, palette, voxels, body.source_scope, &derived);
     array.block_entities = canvas.block_entities();
-    let placed = canvas.entities();
+    let placed = kept_entities(&canvas, &flattened, &array, overhang, bodies, diagnostics);
     array.entities = placed.iter().map(|(_, entity)| entity.clone()).collect();
     let members = resolved_members(&flattened, &canvas, &array, &placed);
     if let Some(registry) = registry {
@@ -189,6 +194,24 @@ pub(super) fn lower_body_to_block_array<'a>(
         walls: ctx.wall_column,
         cut,
     })
+}
+
+/// The entities `canvas` placed, less the item frames a Bedrock build of `bodies` refuses in their
+/// cells of `array`, whose interior starts `overhang` cells in.
+fn kept_entities(
+    canvas: &Canvas,
+    flattened: &[(u32, &Member)],
+    array: &BlockArray,
+    overhang: u32,
+    bodies: BodyInputs<'_>,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Vec<(u32, Entity)> {
+    let mut placed = canvas.entities();
+    if bodies.edition == Some(Edition::Bedrock) {
+        let grid = Grid { array, overhang };
+        refuse_taken_frame_cells(flattened, canvas, &grid, &mut placed, diagnostics);
+    }
+    placed
 }
 
 /// The findings `registry`, a pinned target's, gives on `built` and its `entities`: the constraint

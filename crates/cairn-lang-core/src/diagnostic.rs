@@ -102,6 +102,9 @@ pub enum DiagnosticCode {
     DeferredMember,
     /// A member its own line keeps the block-array pass from building, whatever else builds.
     InvalidMember,
+    /// In a Bedrock build, an `item_frame` that hangs in a cell a member built a block in, or
+    /// another frame hangs in.
+    FrameCellTaken,
     /// A `key=` no pass read on the line it was written on.
     IgnoredArgument,
     /// A body with no theme in which a lowered member reads a `mat_slot=`.
@@ -250,6 +253,7 @@ impl DiagnosticCode {
             Self::EditRipple => "W_EDIT_RIPPLE",
             Self::DeferredMember => "W_DEFERRED_MEMBER",
             Self::InvalidMember => "E_INVALID_MEMBER",
+            Self::FrameCellTaken => "E_FRAME_CELL_TAKEN",
             Self::IgnoredArgument => "W_IGNORED_ARGUMENT",
             Self::NoThemeBound => "W_NO_THEME_BOUND",
             Self::AbstractTokenDeferred => "W_ABSTRACT_TOKEN_DEFERRED",
@@ -335,6 +339,7 @@ impl DiagnosticCode {
             | Self::StateDomain
             | Self::IncompatibleMaterial
             | Self::InvalidMember
+            | Self::FrameCellTaken
             | Self::UnresolvedPlaceRef
             | Self::UnresolvedThemeRef
             | Self::ThemeVariantMissing

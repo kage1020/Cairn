@@ -1,18 +1,20 @@
 //! Hanging a `painting` or an `item_frame` on the face of the block behind it
 //! (`spec/entities` "Hanging entities").
 
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 
 use crate::ast::ValueKind;
-use crate::diagnostic::Diagnostic;
+use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::intent::Member;
 use crate::suggest::{did_you_mean, nearest_match};
 
 use crate::block_array::args::{UnreadArgument, diag_invalid_member, read_or_ignore};
 use crate::block_array::material::PaintingLookup;
-use crate::block_array::{Compass, EntityData};
+use crate::block_array::{BlockState, Compass, Entity, EntityData, PaletteIndex};
 
-use super::canvas::MemberCanvas;
+use super::canvas::{Canvas, MemberCanvas};
+use super::constraints::{Grid, note, written};
 use super::entity::{
     EVERY_FACE, Hold, declare_box, hanging_point, item_of, nbt_of, place, place_one, report_unread,
 };
@@ -123,7 +125,7 @@ fn hang_painting(
     let hung = at((width.get() - 1) / 2, (height.get() - 1) / 2).ok_or_else(outside)?;
     canvas.place_entity(
         member.span.start,
-        crate::block_array::Entity {
+        Entity {
             id: "minecraft:painting".to_owned(),
             pos: painting_point(hung, facing, width, height),
             block_pos: hung,
@@ -273,4 +275,106 @@ pub(super) fn fill_item_frame(
         (true, "glowing") => "the frame does not glow",
         (true, _) => "the frame is hung without it",
     });
+}
+
+/// Refuse, as a Bedrock build does, each item frame of `placed` whose cell of `grid` holds a block
+/// or a frame earlier in `placed`, with an `E_FRAME_CELL_TAKEN`.
+pub(super) fn refuse_taken_frame_cells(
+    flattened: &[(u32, &Member)],
+    canvas: &Canvas,
+    grid: &Grid<'_>,
+    placed: &mut Vec<(u32, Entity)>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let array = grid.array;
+    let mut hung: HashMap<(u32, u32, u32), (&Member, String)> = HashMap::new();
+    placed.retain(|(index, entity)| {
+        if !matches!(entity.data, EntityData::ItemFrame { .. }) {
+            return true;
+        }
+        let (_, member) = flattened[*index as usize];
+        let cell = entity.block_pos;
+        let held = array
+            .dims
+            .index(cell.0, cell.1, cell.2)
+            .map_or(PaletteIndex::AIR, |i| array.voxels[i]);
+        let taker = if held != PaletteIndex::AIR {
+            Taker::Block(
+                &array.palette.entries[usize::from(held.0)],
+                canvas
+                    .owner_at(cell)
+                    .map(|owner| flattened[owner as usize].1),
+            )
+        } else if let Some((first, id)) = hung.get(&cell) {
+            Taker::Frame(first, id)
+        } else {
+            hung.insert(cell, (member, entity.id.clone()));
+            return true;
+        };
+        diagnostics.push(diag_frame_cell_taken(member, entity, grid, &taker));
+        false
+    });
+}
+
+/// What holds the cell a frame hangs in.
+enum Taker<'a> {
+    /// A block, with the member that built it.
+    Block(&'a BlockState, Option<&'a Member>),
+    /// A frame an earlier line hangs there, with its entity id.
+    Frame(&'a Member, &'a str),
+}
+
+fn diag_frame_cell_taken(
+    member: &Member,
+    entity: &Entity,
+    grid: &Grid<'_>,
+    taker: &Taker<'_>,
+) -> Diagnostic {
+    let cell = grid.named(entity.block_pos);
+    let (holds, by, fix) = match *taker {
+        Taker::Block(state, by) => (
+            format!("a cell that holds `{}`", written(state)),
+            by.map(|by| {
+                (
+                    by,
+                    format!(
+                        "`{}` builds `{}` at {cell}",
+                        by.role.keyword(),
+                        written(state)
+                    ),
+                )
+            }),
+            "move the frame, or the block, to a cell of its own",
+        ),
+        Taker::Frame(first, id) => (
+            "a cell another frame hangs in".to_owned(),
+            Some((
+                first,
+                format!("`{}` hangs `{id}` at {cell} first", first.role.keyword()),
+            )),
+            "move one of the two frames to a cell of its own",
+        ),
+    };
+    let there = by.map(|(by, message)| DiagnosticNote {
+        span: Some(by.span.clone()),
+        message,
+    });
+    Diagnostic {
+        code: DiagnosticCode::FrameCellTaken,
+        span: member.span.clone(),
+        primary: format!(
+            "`{}` hangs `{}` at {cell}, {holds}, and Bedrock builds an item frame as a block of \
+             its cell",
+            member.role.keyword(),
+            entity.id,
+        ),
+        notes: there
+            .into_iter()
+            .chain([
+                note("an item frame hangs only in a cell that holds air and no other frame"),
+                note(fix),
+            ])
+            .collect(),
+        data: None,
+    }
 }

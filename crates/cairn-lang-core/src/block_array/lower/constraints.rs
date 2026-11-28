@@ -47,9 +47,9 @@ pub(super) fn constraint_findings(
 }
 
 /// The array the checks read, and where its interior starts.
-struct Grid<'a> {
-    array: &'a BlockArray,
-    overhang: u32,
+pub(super) struct Grid<'a> {
+    pub(super) array: &'a BlockArray,
+    pub(super) overhang: u32,
 }
 
 impl<'a> Grid<'a> {
@@ -78,7 +78,7 @@ impl<'a> Grid<'a> {
     }
 
     /// `cell` as a member's `at=` names it, counted from the interior's corner.
-    fn named(&self, cell: Cell) -> String {
+    pub(super) fn named(&self, cell: Cell) -> String {
         let inward = i64::from(self.overhang);
         format!(
             "{},{},{}",
@@ -258,7 +258,7 @@ fn spilling<'a>(
 }
 
 /// `state` as a state literal writes it, such as `minecraft:lantern[hanging=true]`.
-fn written(state: &BlockState) -> String {
+pub(super) fn written(state: &BlockState) -> String {
     if state.properties.is_empty() {
         state.id.clone()
     } else {
@@ -289,7 +289,8 @@ fn met(failed: &Failed<'_>) -> String {
     }
 }
 
-fn note(message: &str) -> DiagnosticNote {
+/// A note that points at no line.
+pub(super) fn note(message: &str) -> DiagnosticNote {
     DiagnosticNote {
         span: None,
         message: message.to_owned(),

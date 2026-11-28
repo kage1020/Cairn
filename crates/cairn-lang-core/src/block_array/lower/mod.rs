@@ -113,6 +113,7 @@ fn lower_to_block_array_within(
     let mut diagnostics: Vec<Diagnostic> = Vec::new();
     let bodies = BodyInputs {
         registry,
+        edition: resolution.edition,
         defs: &intent.defs,
         palette_capacity,
     };

@@ -77,6 +77,29 @@ const STATE_ONE_MAP_LACKS: &str =
 const VALUE_ONLY_THE_NEWEST_MAP_HOLDS: &str = "theme t:\n  slot f -> @noteblock[instrument=trumpet]\n\n\
      struct s size=3x3\n  floor mat_slot=f\n";
 
+/// An item frame hung in the cell a `fill` builds stone in.
+const FRAME_ON_A_BLOCK: &str = concat!(
+    "theme t:\n",
+    "  slot floor -> @oak_planks\n",
+    "  slot dark -> @stone\n\n",
+    "struct room size=9x9:\n",
+    "  floor mat_slot=floor\n",
+    "  walls mat_slot=floor height=3\n",
+    "  fill mat_slot=dark from=4,1,4 to=4,1,4\n",
+    "  item_frame id=f at=4,1,4 facing=up\n",
+);
+
+/// Two item frames hung in one cell.
+const TWO_FRAMES_IN_ONE_CELL: &str = concat!(
+    "theme t:\n",
+    "  slot floor -> @oak_planks\n\n",
+    "struct room size=9x9:\n",
+    "  floor mat_slot=floor\n",
+    "  walls mat_slot=floor height=3\n",
+    "  item_frame id=a at=4,1,4 facing=up\n",
+    "  item_frame id=b at=4,1,4 facing=north\n",
+);
+
 fn fixture(dir: &std::path::Path, source: &str) -> PathBuf {
     let path = dir.join("s.crn");
     std::fs::write(&path, source).expect("write fixture");
@@ -328,6 +351,46 @@ fn a_value_only_another_versions_map_holds_refuses_check_and_compile_alike() {
             (Some(exit), Some(exit)),
             "at {target}",
         );
+    }
+}
+
+#[test]
+fn a_bedrock_frame_in_a_taken_cell_refuses_check_and_compile_alike_at_its_line() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    for (source, line) in [(FRAME_ON_A_BLOCK, 9), (TWO_FRAMES_IN_ONE_CELL, 8)] {
+        let src = fixture(tmp.path(), source);
+        let path = src.to_str().unwrap();
+        let refused = [(line, 3, "error", "E_FRAME_CELL_TAKEN")];
+        for target in ["1.21.0", "1.21.40", "1.21.60", "1.26.60"] {
+            let checked = cairn("check", &[path, "--edition", "bedrock", "--target", target]);
+            let stderr = String::from_utf8(checked.stderr).expect("utf-8");
+            assert_eq!(checked.status.code(), Some(1), "at {target}: {stderr}");
+            assert_stream(&stderr, &refused);
+
+            let out = tmp.path().join(format!("{line}-{target}"));
+            let compiled = compile(&src, "bedrock", target, &out, Some(&out.join("s.lock")));
+            assert_eq!(compiled.status.code(), Some(1), "at {target}");
+            assert_eq!(
+                String::from_utf8(compiled.stderr).expect("utf-8"),
+                stderr,
+                "at {target}: the compile refuses with the check's findings, before the writer",
+            );
+            assert!(!out.exists(), "at {target}: nothing is written");
+        }
+
+        let edition_wide = cairn("check", &[path, "--edition", "bedrock"]);
+        let stderr = String::from_utf8(edition_wide.stderr).expect("utf-8");
+        assert_eq!(edition_wide.status.code(), Some(1), "{stderr}");
+        assert_stream(&stderr, &refused);
+        let out = tmp.path().join(format!("{line}-java"));
+        let java = compile(&src, "java", "26.3", &out, Some(&out.join("s.lock")));
+        assert_eq!(
+            java.status.code(),
+            Some(0),
+            "Java builds the frame as an entity: {}",
+            String::from_utf8_lossy(&java.stderr),
+        );
+        assert_eq!(cairn("check", &[path]).status.code(), Some(0));
     }
 }
 

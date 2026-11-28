@@ -578,6 +578,7 @@ the author to a line that is correct.
 |---|---|
 | `W_DEFERRED_MEMBER` | A member, or part of one, the block-array pass leaves out because another member did not build or because the pass does not lower what its line writes yet. |
 | `E_INVALID_MEMBER` | A member its own line keeps the block-array pass from building, whatever the rest of its struct builds. |
+| `E_FRAME_CELL_TAKEN` | In a Bedrock build, an `item_frame` hangs in a cell a member has built a block in, or another frame an earlier line hangs in, where Bedrock builds the frame as a block of its cell ([Entities §8.1](/spec/entities/#hanging-entities)). |
 | `W_STRUCT_NO_SIZE` | A `struct` declares no `size=WxH`, so lowering can derive no extent and skips it. |
 | `W_DEF_NO_SIZE` | The same on a `def`, so every `place use=` of it is skipped. |
 | `W_STRUCTURE_TOO_LARGE` | A scope's derived extent exceeds the volume the block-array pass will allocate for. |
@@ -1130,7 +1131,9 @@ edition lacks is `E_PARITY_UNSUPPORTED` ([Versioning and Editions
 §10.7](/spec/versioning-editions/#a-block-only-the-other-edition-has)). Since each edition answers
 these apart, a source with a painting, a display or a `hologram` is lowered once for each edition,
 as one with an `@edition` guard is. `--edition` alone picks that edition's theme variants and keeps
-its `@edition` guards. With neither flag, each edition's variants are lowered, with that edition's
+its `@edition` guards, and it raises `E_FRAME_CELL_TAKEN` as a pinned check of the edition does,
+since that rule reads no version ([Entities §8.1](/spec/entities/#hanging-entities)). With neither
+flag, each edition's variants are lowered, with that edition's
 guards: a finding whose span is on a line only one edition's variant reads, or whose span or one of
 whose notes' spans is on a line under that edition's guard, is that edition's verdict and is
 reported, and any other finding is reported when every edition raises it with the same code at the
