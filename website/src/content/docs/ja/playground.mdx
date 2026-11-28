@@ -11,6 +11,6 @@ import Playground from '../../../components/Playground.astro';
 
 ## ページに表示されるもの
 
-- **指摘**は `cairn check` と `cairn compile` が報告するもので、[Lint](/ja/spec/lint/) の形 (何が誤りか、何なら有効か、どう直すか) で表示します。指摘を選ぶと、その位置にカーソルを移します。`@requires` の下限が除外する `--target` は、`cairn check` がその下限で報告する指摘です。エディションが提供していない `--target` のように、実行全体を拒否するものも一緒に並べます。
+- **指摘**は `cairn check` と `cairn compile` が報告するもので、[Lint](/ja/spec/lint/) の形 (何が誤りか、何なら有効か、どう直すか) で表示します。指摘を選ぶと、その位置にカーソルを移します。`@requires` の下限が除外する `--target` は、`cairn compile` と言語サーバーがその下限で報告する指摘です。エディションが提供していない `--target` のように、実行全体を拒否するものも一緒に並べます。
 - **結果**は、構造物ファイルの元になる [block-array IR](/ja/spec/architecture/) を層ごとに描き、セルが指すパレットを添えます。エラーの指摘がなければ、実行自体が拒否された場合でも表示します。
 - **構造物ファイル**は `cairn compile` が書き出す `.nbt` (Java) または `.mcstructure` (Bedrock) のファイルで、構造物ごとに 1 つです。ロックファイルはここでは書き出しません。ロックファイルはディスク上のビルドを記録するもので、このビルドは保存されないためです。

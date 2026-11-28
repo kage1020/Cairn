@@ -126,7 +126,7 @@ Because the tables are closed, a suggestion cannot name a block that does not ex
 
 The `build` module holds the passes [`cairn`](../cairn-lang-cli/README.md) and [`cairn-lang-wasm`](../cairn-lang-wasm/README.md) both run over a source, so the CLI and the playground report the same findings and refusals in the same words: the gate `cairn check` applies (`build::gate`), the lowering at a pinned target with each struct's circuit laid (`build::lowering`, `build::circuits`), the run-level refusals and the warnings that name no span, which [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) keeps apart from the findings (`build::run_level`), each structure checked for its writer (`build::artifact`), and the refusal of a target a version floor rules out (`build::floors`), with the floors the registry contradicts (`build::conflicts`). The `info` report is built on the same passes, and so is the [`diff_blocks`](src/diff_blocks.rs) run: it builds a lift at its structure file's stamp, checks it with the stamp's backend, compares the two with core's [`voxel_diff`](../cairn-lang-core/src/voxel_diff/mod.rs), and gives the document `cairn diff-blocks --format json` prints and the language server's `cairn.diffBlocks` returns, or which refusal ends the run. The `target` module checks a structure against the backend a resolved target selects. The crate root re-exports none of `build`, `diff_blocks`, `info` and `target`, so the table above does not list them.
 
-## Planned backends
+## Backends
 
 | Format | Edition | Direction | Spec reference |
 |---|---|---|---|
