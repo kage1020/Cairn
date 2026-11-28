@@ -160,3 +160,43 @@ fn an_indentation_failure_after_a_taken_value_is_the_error_reported() {
     );
     assert_eq!(err.position().line.get(), 3);
 }
+
+/// The parse error, as `(line, column, message)`, for a source that does not parse.
+fn refusal(source: &str) -> (u32, u32, String) {
+    let err = parse(source).expect_err("the fixture does not parse");
+    let at = err.position();
+    (at.line.get(), at.col.get(), err.user_message())
+}
+
+#[test]
+fn a_raw_value_after_a_parse_error_is_not_refused_in_its_place() {
+    for (source, expected) in [
+        (
+            "def d size=3x3\n  window size=\n  requires version~=1.21\n",
+            (2, 15, "unexpected end of line in value position"),
+        ),
+        (
+            "@intended_targets [oak]\n@requires version~=1.21\nstruct s size=3x3\n",
+            (
+                1,
+                20,
+                "@intended_targets expects a string such as `\"1.21.4\"`, got `oak`",
+            ),
+        ),
+        (
+            "@crain 2026.6\n@cairn 2026.6+build\nstruct s size=3x3\n",
+            (1, 1, "unknown directive `@crain`"),
+        ),
+        (
+            "theme t\n  slot a ->\n  requires version>=1.21+x\n",
+            (2, 12, "unexpected end of line in value position"),
+        ),
+    ] {
+        let (line, col, message) = expected;
+        assert_eq!(
+            refusal(source),
+            (line, col, message.to_owned()),
+            "{source:?}"
+        );
+    }
+}

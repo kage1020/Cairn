@@ -212,11 +212,19 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
     } = lex_deferring(source);
     let mut parser = Parser::new(source, &tokens);
     let parsed = parser.parse_module();
+    // The parse stopped before a raw line past its failure, so the line's keyword decides.
+    let unread_raw_value = |token: usize| {
+        parsed.as_ref().is_err_and(|err| {
+            let failed = err.position();
+            let at = tokens[token].position;
+            (at.line, at.col) > (failed.line, failed.col) && opens_raw_value_line(&tokens, token)
+        })
+    };
     let taken = |token: usize| {
         !source[tokens[token].span.clone()]
             .chars()
             .any(|c| c.is_whitespace() && c != ' ')
-            && parser.raw_values.iter().any(|raw| raw.contains(&token))
+            && (parser.raw_values.iter().any(|raw| raw.contains(&token)) || unread_raw_value(token))
     };
     if let Some(stray) = deferred.into_iter().find(|d| !taken(d.token)) {
         return Err(stray.error.into());
@@ -225,6 +233,24 @@ pub fn parse(source: &str) -> Result<Module, ParseError> {
         return Err(fatal.into());
     }
     parsed
+}
+
+/// Whether the line holding `tokens[token]` opens with `@cairn`, `@requires` or `requires`, whose
+/// value is raw text, before that token.
+fn opens_raw_value_line(tokens: &[Token], token: usize) -> bool {
+    let start = tokens[..token]
+        .iter()
+        .rposition(|t| matches!(t.kind, TokenKind::Newline))
+        .map_or(0, |newline| newline + 1);
+    let mut line = tokens[start..token]
+        .iter()
+        .map(|t| &t.kind)
+        .skip_while(|kind| matches!(kind, TokenKind::Indent | TokenKind::Dedent));
+    let is_raw_keyword = |kind: Option<&TokenKind>, names: &[&str]| matches!(kind, Some(TokenKind::Ident(name)) if names.contains(&name.as_str()));
+    match line.next() {
+        Some(TokenKind::At) => is_raw_keyword(line.next(), &["cairn", REQUIRES]),
+        first => is_raw_keyword(first, &[REQUIRES]),
+    }
 }
 
 /// Render a parse failure as an `E_PARSE` [`Diagnostic`] running to the end of its line, with a
