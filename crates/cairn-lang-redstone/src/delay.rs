@@ -76,17 +76,17 @@ fn buffer_layout(scope: &str, routed: &CircuitLayout) -> Result<CircuitLayout, D
                     continue;
                 };
                 let at = tile.at(port.at);
-                let mut weakest = u8::MAX;
+                let mut weakest = None;
                 for (group, reach) in reaches.iter().enumerate() {
                     let level = reach.power.get(&at).copied().unwrap_or(0);
-                    weakest = weakest.min(level);
+                    weakest = Some(weakest.map_or(level, |weakest: u8| weakest.min(level)));
                     if level < port.need && failing.is_none() {
                         failing = Some((sink_index, at, group));
                     }
                 }
                 ports.insert(
                     (sink.tile, sink_index_of(&layout, sink.tile, sink.port)),
-                    weakest,
+                    weakest.unwrap_or(0),
                 );
             }
             let Some((sink_index, at, group)) = failing else {
@@ -115,7 +115,8 @@ fn sink_index_of(layout: &CircuitLayout, tile: usize, port: crate::tile::TilePor
         .unwrap_or(0)
 }
 
-/// The dust each part driving `net` powers on its own, and the strength it holds there.
+/// The dust each part driving `net` powers on its own, and the strength it holds there; none for
+/// a part that passes on a reading of 0, which carries nothing to measure.
 fn sources(
     layout: &CircuitLayout,
     net: usize,
@@ -134,6 +135,9 @@ fn sources(
             .unwrap_or(0),
         _ => 15,
     };
+    if level == 0 {
+        return Vec::new();
+    }
     template
         .groups
         .iter()

@@ -510,15 +510,17 @@ left. Every choice in them is ordered, so one source lays one circuit.
 3. **Delay insertion.** A signal leaves a part that restores it, a pad, a torch, a repeater or a
    cell that restores strength ([§14.6](#146-edition-differences)), at strength 15, and loses one
    for each block of dust. The Java `ComparatorAND` restores nothing: it passes on the strength its
-   rear input reads. Each input reads what its net's dust carries to it from each part that drives
-   the net on its own, and needs at least 1, or more where its tile's own dust carries the signal on
-   past the port. Where an input would read less than it needs, a buffer repeater replaces a block
-   of the net's own dust, at the spot nearest the input, on the way back to the part that last
-   restored the signal, where a repeater fits: where the dust runs straight and level through three
-   blocks, joins nothing else, still carries power into the repeater, and is not driven from the
-   side. Repeaters go in one at a time until every input reads what it needs. An input that no such
-   spot lifts far enough is `E_ATTENUATION_LIMIT` at the line of the tile that reads it, and the
-   message says the dust runs past 15 blocks with no straight stretch for a repeater.
+   rear input reads, so one whose rear input reads nothing, as from a plate a deferred member leaves
+   with nowhere to stand, drives nothing to measure and nothing is buffered for it. Each input reads
+   what its net's dust carries to it from each part that drives the net on its own, and needs at
+   least 1, or more where its tile's own dust carries the signal on past the port. Where an input
+   would read less than it needs, a buffer repeater replaces a block of the net's own dust, at the
+   spot nearest the input, on the way back to the part that last restored the signal, where a
+   repeater fits: where the dust runs straight and level through three blocks, joins nothing else,
+   still carries power into the repeater, and is not driven from the side. Repeaters go in one at a
+   time until every input reads what it needs. An input that no such spot lifts far enough is
+   `E_ATTENUATION_LIMIT` at the line of the tile that reads it, and the message says the dust runs
+   past 15 blocks with no straight stretch for a repeater.
 4. **Legalization.** Every part becomes the block it is built as, its id the target's for the part's
    token: `@redstone_dust.default` for dust, `@redstone_torch.wall` for a torch, `@repeater.default`
    for a repeater, `@comparator.default` for a comparator, and `@circuit.block` for every other
