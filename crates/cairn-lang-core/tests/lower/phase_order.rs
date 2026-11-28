@@ -1,7 +1,7 @@
 //! Source is order-free (`spec/compilation` "Phase evaluation"): members land in phases, the
 //! palette describes the finished grid, and a last write within a phase is a `W_PHASE_CONFLICT`.
 
-use cairn_lang_core::block_array::{BlockArray, BlockArrayIr};
+use cairn_lang_core::block_array::{BlockArray, BlockArrayIr, BlockEntityData};
 use cairn_lang_core::check::DiagnosticCode;
 
 use crate::common::{lowered, only_structure};
@@ -172,33 +172,49 @@ fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal
     );
 }
 
+/// Each block entity of `ir`'s one structure as its cell and what it keeps.
+fn block_entities(ir: &BlockArrayIr) -> Vec<((u32, u32, u32), String)> {
+    only_structure(ir)
+        .block_entities
+        .iter()
+        .map(|entity| {
+            let kept = match &entity.data {
+                BlockEntityData::Sign { front, .. } => format!("sign {}", front.lines().join("/")),
+                BlockEntityData::Bed { .. } => "bed".to_owned(),
+                other => format!("{other:?}"),
+            };
+            (entity.pos, kept)
+        })
+        .collect()
+}
+
 #[test]
 fn permuting_two_members_with_block_entities_that_share_no_voxel_leaves_the_array_equal() {
-    for (first, second) in [
+    for (first, second, expected) in [
         (
             "  sign at=inside.back offset=1 y=1 text=\"A\"\n",
             "  sign at=inside.back offset=3 y=1 text=\"B\"\n",
+            vec![((3, 1, 1), "sign B"), ((5, 1, 1), "sign A")],
         ),
         (
+            "  sign at=inside.front offset=1 y=1 text=\"A\"\n",
             "  bed at=inside.back offset=4 y=1\n",
-            "  chest at=inside.front offset=1 y=1\n",
+            vec![
+                ((2, 1, 1), "bed"),
+                ((2, 1, 2), "bed"),
+                ((1, 1, 3), "sign A"),
+            ],
         ),
     ] {
+        let expected: Vec<_> = expected
+            .into_iter()
+            .map(|(pos, kept)| (pos, kept.to_owned()))
+            .collect();
         let written = lowered(&source(&format!("{first}{second}")));
         let swapped = lowered(&source(&format!("{second}{first}")));
+        assert_eq!(block_entities(&written), expected, "{first}{second}");
+        assert_eq!(block_entities(&swapped), expected, "{second}{first}");
         assert_eq!(hashed(&written), hashed(&swapped), "{first}{second}");
-        let entities = &only_structure(&written).block_entities;
-        // Guard: members that set no block entity would compare equal too.
-        assert!(entities.len() >= 2, "{entities:?}");
-        let dims = only_structure(&written).dims;
-        let cells: Vec<usize> = entities
-            .iter()
-            .map(|entity| {
-                let (x, y, z) = entity.pos;
-                dims.index(x, y, z).expect("on the grid")
-            })
-            .collect();
-        assert!(cells.is_sorted(), "{cells:?}");
     }
 }
 

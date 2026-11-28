@@ -259,17 +259,17 @@ impl Canvas {
     /// Each block entity whose member still holds its cell, in the order of their cells, as
     /// [`Dims::index`] lays them out, and in the order they were set within one cell.
     pub(super) fn block_entities(&self) -> Vec<BlockEntity> {
-        let mut kept: Vec<BlockEntity> = self
+        let mut kept: Vec<(usize, BlockEntity)> = self
             .block_entities
             .iter()
-            .filter(|(member, entity)| self.owner_at(entity.pos) == Some(*member))
-            .map(|(_, entity)| entity.clone())
+            .filter_map(|(member, entity)| {
+                let (x, y, z) = entity.pos;
+                let cell = self.dims.index(x, y, z)?;
+                (self.owner_of(cell) == Some(*member)).then(|| (cell, entity.clone()))
+            })
             .collect();
-        kept.sort_by_key(|entity| {
-            let (x, y, z) = entity.pos;
-            self.dims.index(x, y, z).unwrap_or(usize::MAX)
-        });
-        kept
+        kept.sort_by_key(|(cell, _)| *cell);
+        kept.into_iter().map(|(_, entity)| entity).collect()
     }
 
     /// Record that a write named `slot`, for a state a member settled on in a cell it no longer
@@ -358,8 +358,12 @@ impl Canvas {
     /// The member of the flattened paint list that wrote `pos` last, or `None` for a cell no member
     /// wrote or one outside the grid.
     pub(super) fn owner_at(&self, pos: (u32, u32, u32)) -> Option<u32> {
-        let i = self.dims.index(pos.0, pos.1, pos.2)?;
-        self.owners[i].checked_sub(1)
+        self.owner_of(self.dims.index(pos.0, pos.1, pos.2)?)
+    }
+
+    /// [`Self::owner_at`] for the cell at `index`, as [`Dims::index`] numbers it.
+    fn owner_of(&self, index: usize) -> Option<u32> {
+        self.owners[index].checked_sub(1)
     }
 
     /// Borrow the canvas as the member at `index` of the flattened paint list sees it.

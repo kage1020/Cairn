@@ -226,10 +226,11 @@ text, a bed's colour, and the strength a circuit comparator outputs ([Redstone
 §14.5](/spec/redstone/#145-place-and-route)), which only a Java circuit lays. The block array holds
 each beside its block's cell: a sign's text and a bed's colour in no edition's shape, and a
 comparator's strength under the id and field Java gives it, which the Bedrock writer maps to
-Bedrock's. Each writer saves them in its own edition's shape: Java as the `nbt` of the block's entry
-in the `blocks` of its `.nbt`, and Bedrock under the `block_position_data` of its `.mcstructure`,
-keyed by the block's place in `block_indices`. A block entity is kept only while the member that set
-it holds its block's cell, so a member that builds over a sign later takes the sign's text with it.
+Bedrock's. It lists them in the order of their cells, x fastest, then z, then y. Each writer saves
+them in its own edition's shape: Java as the `nbt` of the block's entry in the `blocks` of its
+`.nbt`, and Bedrock under the `block_position_data` of its `.mcstructure`, keyed by the block's place
+in `block_indices`. A block entity is kept only while the member that set it holds its block's cell,
+so a member that builds over a sign later takes the sign's text with it.
 A member of the same phase that builds the same block over it with another block entity, such as a
 sign of the same wood with other text, is a contest as one that builds another block is
 ([Compilation Model §4.8](/spec/compilation/#48-within-phase-conflicts-and-the-palette)). Every

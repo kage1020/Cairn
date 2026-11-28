@@ -133,7 +133,7 @@ pub struct BlockArray {
     /// Palette indices in `(y, z, x)` order, as [`Dims::index`] lays them out.
     pub voxels: Vec<PaletteIndex>,
     /// Block entities on the grid, each beside the block that keeps it, in the order of their
-    /// cells, as [`Dims::index`] lays them out, and in line order within one cell.
+    /// cells, as [`Dims::index`] lays them out.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub block_entities: Vec<BlockEntity>,
     /// The entities the body's members place, in the order of their cells, as [`Dims::index`]

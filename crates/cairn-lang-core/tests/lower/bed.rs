@@ -79,7 +79,7 @@ fn bed(id: &str, facing: &str, head: (u32, u32, u32), foot: (u32, u32, u32)) -> 
 /// Both halves' block entities, each keeping `color`, in the order of their cells.
 fn kept(color: DyeColor, head: (u32, u32, u32), foot: (u32, u32, u32)) -> Vec<Colored> {
     let mut halves = vec![(head, Some(color)), (foot, Some(color))];
-    halves.sort_by_key(|(pos, _)| *pos);
+    halves.sort_by_key(|&((x, y, z), _)| (y, z, x));
     halves
 }
 
