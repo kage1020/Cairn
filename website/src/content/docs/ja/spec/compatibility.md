@@ -114,7 +114,7 @@ Rust API の行は、計画中のロードマップの範囲では昇格しま�
 
 - `E_UNKNOWN_KEYWORD`。仕様が定めていて、コンパイラがまだ知らないキーワードに出ます。たとえば `water` です。
 - `W_IGNORED_ARGUMENT`。まだ届いていないキーに出ます。どのキーがそれにあたるかは [Lint §11.3](/ja/spec/lint/#113-エラーと警告の区分) が挙げています。
-- `W_DEFERRED_MEMBER`。block-array パスがまだ lowering しないものを行が書いたメンバー ([Lint](/ja/spec/lint/#lowering)) に出ます。たとえば、lowering がまだ扱わないキーワードのメンバー、持ち上げた `level` の下の `floor` や `roof`、`repeat=` が 1 より大きく `sym=true` も持つ `window` です。
+- `W_DEFERRED_MEMBER`。block-array パスがまだ lowering しないものを行が書いたメンバー ([Lint](/ja/spec/lint/#lowering)) に出ます。たとえば、持ち上げた `level` の下の `floor` や `roof`、`repeat=` が 1 より大きく `sym=true` も持つ `window` です。
 
 どこでも出なくなった仮置きのコードも、[Lint §11.1](/ja/spec/lint/#111-診断コード) の行は残し、どのリリースから出なくなったかをそこに書きます。その名前を別の意味に使うことはありません。
 

@@ -1,11 +1,8 @@
-//! Findings about a body or member lowering skips, and about a scope
-//! with no theme to paint with.
+//! Findings about a body lowering skips, and about a scope with no theme to paint with.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;
-use crate::intent::{DefIr, Member, MemberRole, StructIr};
-
-use crate::block_array::args::diag_deferred_member_reason;
+use crate::intent::{DefIr, StructIr};
 
 /// Which lowering entry point produced this body: what is voxelised, not what was written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -87,12 +84,4 @@ pub(super) fn diag_def_no_size(def: &DefIr) -> Diagnostic {
         }],
         data: None,
     }
-}
-
-pub(super) fn diag_deferred_member(member: &Member) -> Diagnostic {
-    let role = MemberRole::keyword(&member.role);
-    diag_deferred_member_reason(
-        member,
-        &format!("`{role}` is not yet handled by block-array lowering"),
-    )
 }

@@ -220,8 +220,8 @@ code. The placeholders today include:
 - `W_IGNORED_ARGUMENT`, on an unreached key, which [Lint §11.3](/spec/lint/#113-error-vs-warning)
   lists;
 - `W_DEFERRED_MEMBER`, on a member whose line writes what the block-array pass does not lower yet
-  ([Lint](/spec/lint/#lowering)), such as a member whose keyword lowering does not handle yet, a
-  `floor` or `roof` under a raised `level`, and a `window` with `repeat=` above 1 and `sym=true`.
+  ([Lint](/spec/lint/#lowering)), such as a `floor` or `roof` under a raised `level` and a `window`
+  with `repeat=` above 1 and `sym=true`.
 
 A placeholder that nothing raises any more keeps its row in
 [Lint §11.1](/spec/lint/#111-diagnostic-codes), which says from which release nothing raises it,

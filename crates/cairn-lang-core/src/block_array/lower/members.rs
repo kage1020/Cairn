@@ -188,8 +188,8 @@ pub(super) enum MemberDisposition {
     Paints(Phase),
     /// Reserves something a later pass reads and paints nothing; its shape is still checked.
     Reserves,
-    /// Nothing in this pass lowers it; it earns a `W_DEFERRED_MEMBER`.
-    NotLowered,
+    /// The check pass refuses its line, so this pass builds and reports nothing for it.
+    Refused,
 }
 
 /// Where a member's role puts it, per `spec/compilation` "Phase evaluation".
@@ -237,7 +237,7 @@ pub(super) fn member_disposition(member: &Member) -> MemberDisposition {
         | MemberRole::Place => MemberDisposition::Paints(Phase::Fixtures),
         MemberRole::RawBlock | MemberRole::RawFill => MemberDisposition::Paints(Phase::Raw),
         MemberRole::Circuit => MemberDisposition::Reserves,
-        MemberRole::Connect | MemberRole::Other(_) => MemberDisposition::NotLowered,
+        MemberRole::Connect | MemberRole::Other(_) => MemberDisposition::Refused,
         MemberRole::Level | MemberRole::RawRepeat => unreachable!(
             "`{}` members must be flattened before phase-bucketing (see `flatten_members`)",
             member.role.keyword(),

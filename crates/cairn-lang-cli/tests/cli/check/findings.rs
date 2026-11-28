@@ -163,13 +163,7 @@ fn unknown_keyword_fixture_lists_known_keywords_in_a_note() {
     let out = cairn("check", &[path.to_str().unwrap()]);
     assert_eq!(out.status.code(), Some(1));
     let reported = String::from_utf8(out.stderr).expect("utf-8");
-    assert_stream(
-        &reported,
-        &[
-            (2, 3, "error", "E_UNKNOWN_KEYWORD"),
-            (2, 3, "warning", "W_DEFERRED_MEMBER"),
-        ],
-    );
+    assert_stream(&reported, &[(2, 3, "error", "E_UNKNOWN_KEYWORD")]);
     assert!(
         reported.contains("note:") && reported.contains("floor"),
         "expected a known-keywords note, got: {reported}",

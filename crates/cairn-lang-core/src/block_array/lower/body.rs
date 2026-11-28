@@ -24,7 +24,7 @@ use super::cell_box::Cell;
 use super::circuit::{recognize_actuator_patch, recognize_circuit_region, refused_sensor_selector};
 use super::connections::derive_connections;
 use super::constraints::{Built, PlacedEntity, constraint_findings, entity_findings};
-use super::diag::{VoxelSource, diag_deferred_member, diag_no_theme_bound_generic};
+use super::diag::{VoxelSource, diag_no_theme_bound_generic};
 use super::door::{hang_doors, split_doors};
 use super::fill::pour_fluids;
 use super::frame::lay_frames;
@@ -560,7 +560,7 @@ fn bucket_members<'a>(
         let disposition = member_disposition(member);
         buckets.phases.push(match disposition {
             MemberDisposition::Paints(phase) => Some(phase),
-            MemberDisposition::Reserves | MemberDisposition::NotLowered => None,
+            MemberDisposition::Reserves | MemberDisposition::Refused => None,
         });
         match disposition {
             MemberDisposition::Paints(phase) => {
@@ -568,7 +568,7 @@ fn bucket_members<'a>(
             }
             // A `circuit` region is left for `spec/redstone` "Place-and-route".
             MemberDisposition::Reserves => recognize_circuit_region(member, diagnostics),
-            MemberDisposition::NotLowered => diagnostics.push(diag_deferred_member(member)),
+            MemberDisposition::Refused => {}
         }
     }
     (buckets, patched)
