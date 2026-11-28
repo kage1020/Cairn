@@ -1,27 +1,40 @@
-//! The NBT encoder both dialects share; they differ only in the byte order of multi-byte scalars.
+//! The NBT encoder both dialects share; they differ in the byte order of multi-byte scalars and
+//! in how a string's characters are encoded.
 
+use std::borrow::Cow;
 use std::io::Write;
 
 use crate::error::NbtIoError;
-use crate::tag::{Compound, List, Tag, string_len};
+use crate::tag::{Compound, List, Tag};
 
-/// The byte order of every multi-byte scalar.
+/// An NBT dialect: Java's, big-endian with Modified UTF-8 strings, or Bedrock's, little-endian
+/// with UTF-8 strings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Endian {
+pub(crate) enum Dialect {
     /// Java.
-    Big,
+    Java,
     /// Bedrock.
-    Little,
+    Bedrock,
+}
+
+impl Dialect {
+    /// The name of the encoding the dialect writes a string in.
+    pub(crate) const fn string_encoding(self) -> &'static str {
+        match self {
+            Dialect::Java => "Modified UTF-8",
+            Dialect::Bedrock => "UTF-8",
+        }
+    }
 }
 
 macro_rules! scalar_writers {
     ($($name:ident: $ty:ty),* $(,)?) => {
-        impl Endian {
+        impl Dialect {
             $(
                 fn $name<W: Write>(self, w: &mut W, v: $ty) -> std::io::Result<()> {
                     match self {
-                        Endian::Big => w.write_all(&v.to_be_bytes()),
-                        Endian::Little => w.write_all(&v.to_le_bytes()),
+                        Dialect::Java => w.write_all(&v.to_be_bytes()),
+                        Dialect::Bedrock => w.write_all(&v.to_le_bytes()),
                     }
                 }
             )*
@@ -40,13 +53,13 @@ scalar_writers! {
 
 pub(crate) fn write_named_root<W: Write>(
     writer: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     root_name: &str,
     root: &Compound,
 ) -> Result<(), NbtIoError> {
     write_tag_id(writer, 10)?;
-    write_string(writer, endian, root_name)?;
-    write_compound_body(writer, endian, root)?;
+    write_string(writer, dialect, root_name)?;
+    write_compound_body(writer, dialect, root)?;
     Ok(())
 }
 
@@ -55,39 +68,85 @@ pub(crate) fn write_tag_id<W: Write>(w: &mut W, id: u8) -> Result<(), NbtIoError
     Ok(())
 }
 
-pub(crate) fn write_string<W: Write>(w: &mut W, endian: Endian, s: &str) -> Result<(), NbtIoError> {
-    let len = string_len(s)?;
-    endian.write_u16(w, len)?;
-    w.write_all(s.as_bytes())?;
+pub(crate) fn write_string<W: Write>(
+    w: &mut W,
+    dialect: Dialect,
+    s: &str,
+) -> Result<(), NbtIoError> {
+    let bytes = encode(s, dialect);
+    dialect.write_u16(w, length_prefix(bytes.len(), dialect)?)?;
+    w.write_all(&bytes)?;
     Ok(())
+}
+
+/// Whether `dialect`'s writers accept `s`, without writing it.
+pub(crate) fn check_string(s: &str, dialect: Dialect) -> Result<(), NbtIoError> {
+    length_prefix(encode(s, dialect).len(), dialect).map(drop)
+}
+
+/// `s` in `dialect`'s string encoding.
+fn encode(s: &str, dialect: Dialect) -> Cow<'_, [u8]> {
+    if dialect == Dialect::Bedrock || !needs_modified_utf8(s) {
+        return Cow::Borrowed(s.as_bytes());
+    }
+    let low = |bits: u16| bits.to_le_bytes()[0];
+    let mut bytes = Vec::with_capacity(s.len() + s.len() / 2);
+    for unit in s.encode_utf16() {
+        match unit {
+            0x0001..=0x007F => bytes.push(low(unit)),
+            0x0000 | 0x0080..=0x07FF => {
+                bytes.extend_from_slice(&[0xC0 | low(unit >> 6), 0x80 | low(unit & 0x3F)]);
+            }
+            _ => bytes.extend_from_slice(&[
+                0xE0 | low(unit >> 12),
+                0x80 | low((unit >> 6) & 0x3F),
+                0x80 | low(unit & 0x3F),
+            ]),
+        }
+    }
+    Cow::Owned(bytes)
+}
+
+/// The prefix of a string whose encoding in `dialect` takes `len` bytes.
+fn length_prefix(len: usize, dialect: Dialect) -> Result<u16, NbtIoError> {
+    u16::try_from(len).map_err(|_| NbtIoError::StringTooLong {
+        len,
+        encoding: dialect.string_encoding(),
+    })
+}
+
+/// Whether `s` holds a character Java's Modified UTF-8 writes apart from UTF-8: NUL, or one past
+/// U+FFFF, which UTF-8 opens with a byte of `0xF0` or more.
+fn needs_modified_utf8(s: &str) -> bool {
+    s.bytes().any(|byte| byte == 0 || byte >= 0xF0)
 }
 
 pub(crate) fn write_payload<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     tag: &Tag,
 ) -> Result<(), NbtIoError> {
     match tag {
         Tag::Byte(v) => w.write_all(&v.to_ne_bytes())?,
-        Tag::Short(v) => endian.write_i16(w, *v)?,
-        Tag::Int(v) => endian.write_i32(w, *v)?,
-        Tag::Long(v) => endian.write_i64(w, *v)?,
-        Tag::Float(v) => endian.write_f32(w, *v)?,
-        Tag::Double(v) => endian.write_f64(w, *v)?,
+        Tag::Short(v) => dialect.write_i16(w, *v)?,
+        Tag::Int(v) => dialect.write_i32(w, *v)?,
+        Tag::Long(v) => dialect.write_i64(w, *v)?,
+        Tag::Float(v) => dialect.write_f32(w, *v)?,
+        Tag::Double(v) => dialect.write_f64(w, *v)?,
         Tag::ByteArray(bytes) => {
-            write_byte_array_payload(w, endian, bytes.len(), bytes.iter().copied())?;
+            write_byte_array_payload(w, dialect, bytes.len(), bytes.iter().copied())?;
         }
-        Tag::String(s) => write_string(w, endian, s)?,
-        Tag::List(list) => write_list(w, endian, list)?,
-        Tag::Compound(c) => write_compound_body(w, endian, c)?,
+        Tag::String(s) => write_string(w, dialect, s)?,
+        Tag::List(list) => write_list(w, dialect, list)?,
+        Tag::Compound(c) => write_compound_body(w, dialect, c)?,
         Tag::IntArray(values) => {
-            write_array_len(w, endian, "int_array", values.len())?;
+            write_array_len(w, dialect, "int_array", values.len())?;
             for v in values {
-                endian.write_i32(w, *v)?;
+                dialect.write_i32(w, *v)?;
             }
         }
         Tag::LongArray(values) => {
-            write_long_array_payload(w, endian, values.len(), values.iter().copied())?;
+            write_long_array_payload(w, dialect, values.len(), values.iter().copied())?;
         }
     }
     Ok(())
@@ -100,13 +159,13 @@ pub(crate) fn write_payload<W: Write>(
 /// When `values` yields a number of values other than `len`.
 pub(crate) fn write_long_array_payload<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     len: usize,
     values: impl IntoIterator<Item = i64>,
 ) -> Result<(), NbtIoError> {
-    write_array_len(w, endian, "long_array", len)?;
+    write_array_len(w, dialect, "long_array", len)?;
     write_counted(w, ("long array", len), values, |w, value| {
-        endian.write_i64(w, value)
+        dialect.write_i64(w, value)
     })
 }
 
@@ -117,11 +176,11 @@ pub(crate) fn write_long_array_payload<W: Write>(
 /// When `values` yields a number of values other than `len`.
 pub(crate) fn write_byte_array_payload<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     len: usize,
     values: impl IntoIterator<Item = i8>,
 ) -> Result<(), NbtIoError> {
-    write_array_len(w, endian, "byte_array", len)?;
+    write_array_len(w, dialect, "byte_array", len)?;
     // A single byte has no byte order.
     write_counted(w, ("byte array", len), values, |w, value| {
         w.write_all(&value.to_ne_bytes())
@@ -151,7 +210,7 @@ fn write_counted<W: Write, T>(
 
 fn write_array_len<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     context: &'static str,
     len: usize,
 ) -> Result<(), NbtIoError> {
@@ -160,22 +219,22 @@ fn write_array_len<W: Write>(
         len,
         limit: i32::MAX as usize,
     })?;
-    endian.write_i32(w, len)?;
+    dialect.write_i32(w, len)?;
     Ok(())
 }
 
-fn write_list<W: Write>(w: &mut W, endian: Endian, list: &List) -> Result<(), NbtIoError> {
-    write_list_header(w, endian, list.element_type_id, list.items.len())?;
+fn write_list<W: Write>(w: &mut W, dialect: Dialect, list: &List) -> Result<(), NbtIoError> {
+    write_list_header(w, dialect, list.element_type_id, list.items.len())?;
     for (index, item) in list.items.iter().enumerate() {
         check_item_type(list.element_type_id, index, item.type_id())?;
-        write_payload(w, endian, item)?;
+        write_payload(w, dialect, item)?;
     }
     Ok(())
 }
 
 pub(crate) fn write_list_header<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     element_type_id: u8,
     len: usize,
 ) -> Result<(), NbtIoError> {
@@ -185,7 +244,7 @@ pub(crate) fn write_list_header<W: Write>(
         });
     }
     w.write_all(&[element_type_id])?;
-    write_array_len(w, endian, "list", len)
+    write_array_len(w, dialect, "list", len)
 }
 
 pub(crate) fn check_item_type(declared: u8, index: usize, actual: u8) -> Result<(), NbtIoError> {
@@ -202,13 +261,13 @@ pub(crate) fn check_item_type(declared: u8, index: usize, actual: u8) -> Result<
 
 pub(crate) fn write_compound_body<W: Write>(
     w: &mut W,
-    endian: Endian,
+    dialect: Dialect,
     compound: &Compound,
 ) -> Result<(), NbtIoError> {
     for (name, tag) in &compound.entries {
         write_tag_id(w, tag.type_id())?;
-        write_string(w, endian, name)?;
-        write_payload(w, endian, tag)?;
+        write_string(w, dialect, name)?;
+        write_payload(w, dialect, tag)?;
     }
     // TAG_End terminator.
     write_tag_id(w, 0)?;

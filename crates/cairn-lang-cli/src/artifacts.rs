@@ -190,7 +190,7 @@ fn schem_fix(refusal: &SchemError) -> Option<&'static str> {
             "split the structure along that axis, or compile with `--structure-format nbt`, \
              which stores each extent as an int",
         ),
-        SchemError::UnspellableState { .. } => Some(
+        SchemError::UnspellableState { .. } | SchemError::UnencodableState { .. } => Some(
             "compile with `--structure-format nbt` or `litematic`, which store each property \
              apart rather than spelled into one key",
         ),

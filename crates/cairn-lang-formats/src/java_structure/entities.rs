@@ -2,6 +2,7 @@
 //! and its `nbt`, in the shape the target's `DataVersion` reads (`spec/entities` "Two tiers").
 
 use cairn_lang_core::block_array::{Billboard, Compass, Entity, EntityData, Face, Item, Trade};
+use cairn_lang_nbt::check_java_string;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
 
 use super::{JavaStructureError, palette_entry, palette_entry_keys, text_component};
@@ -43,7 +44,7 @@ fn entity_entry(entity: &Entity, data_version: i32) -> Result<Compound, JavaStru
         })?;
         put_over(&mut nbt, tags);
     }
-    if let Some((text, source)) = first_unencodable(&nbt) {
+    if let Some((text, source)) = first_unencodable(&nbt, check_java_string) {
         return Err(JavaStructureError::UnencodableEntity {
             id: entity.id.clone(),
             pos: entity.block_pos,

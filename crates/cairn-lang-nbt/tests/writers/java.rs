@@ -3,7 +3,10 @@
 use std::io::Read;
 
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{NbtIoError, write_java_gzip, write_java_uncompressed};
+use cairn_lang_nbt::{
+    NbtIoError, check_bedrock_string, check_java_string, read_java_uncompressed, write_java_gzip,
+    write_java_uncompressed,
+};
 
 use crate::find_subsequence;
 
@@ -93,19 +96,48 @@ fn gzip_decompresses_to_uncompressed_form() {
     assert_eq!(decoded, raw_buf);
 }
 
+/// The bytes `text` is written as, after its length prefix, as the one string of a root.
+fn string_bytes(text: &str) -> Vec<u8> {
+    crate::string_bytes(write_java_uncompressed, u16::from_be_bytes, text)
+}
+
 #[test]
-fn string_with_nul_byte_rejected() {
+fn a_string_is_written_as_modified_utf8() {
+    assert_eq!(string_bytes("a\0b"), [b'a', 0xC0, 0x80, b'b']);
+    assert_eq!(string_bytes("Café"), "Café".as_bytes());
+    assert_eq!(string_bytes("日本"), "日本".as_bytes());
+    // U+1F600 as its surrogate pair, U+D83D U+DE00, three bytes each.
+    assert_eq!(string_bytes("😀"), [0xED, 0xA0, 0xBD, 0xED, 0xB8, 0x80]);
+    // The NUL sends every character after it through the UTF-16 encoder too.
+    assert_eq!(
+        string_bytes("\0\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}"),
+        [
+            0xC0, 0x80, 0x7F, 0xC2, 0x80, 0xDF, 0xBF, 0xE0, 0xA0, 0x80, 0xEF, 0xBF, 0xBF
+        ]
+    );
+    assert_eq!(
+        string_bytes("\u{10000}"),
+        [0xED, 0xA0, 0x80, 0xED, 0xB0, 0x80]
+    );
+    assert_eq!(
+        string_bytes("\u{10ffff}"),
+        [0xED, 0xAF, 0xBF, 0xED, 0xBF, 0xBF]
+    );
+}
+
+#[test]
+fn every_string_round_trips_through_the_java_reader() {
     let mut root = Compound::new();
-    root.insert("bad", Tag::String("a\0b".to_owned()));
-    let mut buf = Vec::new();
-    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("nul rejected");
-    match err {
-        NbtIoError::InvalidString { byte, index } => {
-            assert_eq!(byte, 0);
-            assert_eq!(index, 1);
-        }
-        other => panic!("expected InvalidString, got {other:?}"),
+    for (name, text) in [
+        ("nul", "a\0b"),
+        ("latin", "Café"),
+        ("cjk", "看板の文字"),
+        ("astral", "x😀y"),
+    ] {
+        root.insert(name, Tag::String(text.to_owned()));
     }
+    let (_, read) = read_java_uncompressed(encode("", &root).as_slice()).expect("reads back");
+    assert_eq!(read, root);
 }
 
 #[test]
@@ -187,37 +219,43 @@ fn an_empty_list_claiming_an_element_type_is_rejected() {
 }
 
 #[test]
-fn a_string_past_the_u16_length_prefix_is_a_length_overflow() {
-    let long = "a".repeat(usize::from(u16::MAX) + 1);
+fn a_string_holds_65535_bytes_of_modified_utf8_and_no_more() {
+    let fits = "a".repeat(usize::from(u16::MAX));
+    assert_eq!(string_bytes(&fits), fits.as_bytes());
     let mut root = Compound::new();
-    root.insert("s", Tag::String(long));
-    let mut buf = Vec::new();
-    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("too long");
-    match err {
-        NbtIoError::LengthOverflow {
-            context,
-            len,
-            limit,
-        } => {
-            assert_eq!(context, "string");
-            assert_eq!(len, usize::from(u16::MAX) + 1);
-            assert_eq!(limit, usize::from(u16::MAX));
-        }
-        other => panic!("expected LengthOverflow, got {other:?}"),
-    }
+    root.insert("s", Tag::String(format!("{fits}a")));
+    let err = write_java_uncompressed(&mut Vec::new(), "", &root).expect_err("too long");
+    assert_eq!(
+        err.to_string(),
+        "nbt: the string takes 65536 bytes of Modified UTF-8, past the 65535 an NBT string holds"
+    );
+    assert!(
+        matches!(
+            err,
+            NbtIoError::StringTooLong {
+                len: 65_536,
+                encoding: "Modified UTF-8"
+            }
+        ),
+        "{err:?}"
+    );
 }
 
 #[test]
-fn non_ascii_string_rejected_with_offending_byte_index() {
-    let mut root = Compound::new();
-    root.insert("u8", Tag::String("café".to_owned()));
-    let mut buf = Vec::new();
-    let err = write_java_uncompressed(&mut buf, "", &root).expect_err("non ascii");
-    match err {
-        NbtIoError::InvalidString { byte, index } => {
-            assert!(byte >= 0x80);
-            assert_eq!(index, 3);
+fn the_length_limit_counts_the_modified_utf8_bytes() {
+    // An astral character is 4 bytes of UTF-8 and 6 of Modified UTF-8, a NUL 1 and 2.
+    for (fits, refused, len) in [
+        ("😀".repeat(10_922), "😀".repeat(10_923), 65_538),
+        ("\0".repeat(32_767), "\0".repeat(32_768), 65_536),
+    ] {
+        assert!(check_java_string(&fits).is_ok());
+        assert!(check_bedrock_string(&refused).is_ok());
+        match check_java_string(&refused) {
+            Err(NbtIoError::StringTooLong {
+                len: counted,
+                encoding: "Modified UTF-8",
+            }) => assert_eq!(counted, len),
+            other => panic!("expected StringTooLong, got {other:?}"),
         }
-        other => panic!("expected InvalidString, got {other:?}"),
     }
 }

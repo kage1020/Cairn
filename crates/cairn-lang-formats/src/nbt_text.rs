@@ -2,8 +2,8 @@
 //! tiers"): typed as SNBT reads it, and put over what the writer builds, key by key.
 
 use cairn_lang_core::lex::{NbtCompound, NbtValue, parse_compound};
+use cairn_lang_nbt::NbtIoError;
 use cairn_lang_nbt::tag::{Compound, List, Tag};
-use cairn_lang_nbt::{NbtIoError, check_string};
 
 /// The tags of `text`, a compound as a line's `nbt=` writes it; `None` for text the lexer refuses.
 pub(crate) fn compound_of(text: &str) -> Option<Compound> {
@@ -47,24 +47,40 @@ pub(crate) fn put_over(base: &mut Compound, written: Compound) {
     }
 }
 
-/// The first string of `compound`, a key or a value at any depth, that the NBT encoder refuses,
-/// with its refusal.
-pub(crate) fn first_unencodable(compound: &Compound) -> Option<(String, NbtIoError)> {
+/// `text` as a refusal quotes it: whole when short, else its first characters and an ellipsis.
+pub(crate) fn excerpt(text: &str) -> String {
+    const SHOWN: usize = 32;
+    match text.char_indices().nth(SHOWN) {
+        Some((end, _)) => format!("{}…", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+/// How an edition's writer checks a string it is about to write.
+pub(crate) type StringCheck = fn(&str) -> Result<(), NbtIoError>;
+
+/// The first string of `compound`, a key or a value at any depth, that `check` refuses, with its
+/// refusal.
+pub(crate) fn first_unencodable(
+    compound: &Compound,
+    check: StringCheck,
+) -> Option<(String, NbtIoError)> {
     compound.entries.iter().find_map(|(key, value)| {
-        check_string(key)
+        check(key)
             .err()
             .map(|refusal| (key.clone(), refusal))
-            .or_else(|| unencodable_in(value))
+            .or_else(|| unencodable_in(value, check))
     })
 }
 
-fn unencodable_in(tag: &Tag) -> Option<(String, NbtIoError)> {
+fn unencodable_in(tag: &Tag, check: StringCheck) -> Option<(String, NbtIoError)> {
     match tag {
-        Tag::String(text) => check_string(text)
-            .err()
-            .map(|refusal| (text.clone(), refusal)),
-        Tag::List(list) => list.items.iter().find_map(unencodable_in),
-        Tag::Compound(compound) => first_unencodable(compound),
+        Tag::String(text) => check(text).err().map(|refusal| (text.clone(), refusal)),
+        Tag::List(list) => list
+            .items
+            .iter()
+            .find_map(|item| unencodable_in(item, check)),
+        Tag::Compound(compound) => first_unencodable(compound, check),
         _ => None,
     }
 }

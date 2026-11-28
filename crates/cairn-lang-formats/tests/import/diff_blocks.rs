@@ -421,9 +421,11 @@ fn a_floor_past_the_stamp_refuses_the_run_with_a_note_naming_the_stamp() {
 
 #[test]
 fn what_the_stamp_cannot_write_refuses_the_run_and_what_it_degrades_is_warned_of() {
+    // The target saves the line as a JSON string, so its quotes take it past 65,535 bytes.
+    let long = "a".repeat(usize::from(u16::MAX));
     let sign = format!(
         "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  walls mat_slot=wall \
-         height=3\n  sign at=inside.front offset=2 y=1 back=\"Caf\u{e9}\"\n{SPARE}"
+         height=3\n  sign at=inside.front offset=2 y=1 back=\"{long}\"\n{SPARE}"
     );
     let run = diff_blocks(&sign, &java_structure(STONE));
     let Err(DiffBlocksRefusal::Backend(refusal)) = &run.outcome else {
@@ -439,12 +441,13 @@ fn what_the_stamp_cannot_write_refuses_the_run_and_what_it_degrades_is_warned_of
             json(&run, &sign)
         ),
         (
-            vec![
-                "error: checking `struct::s`: the sign at (2, 1, 3) has the line `Caf\u{e9}`, \
-                 which cannot be written as NBT: nbt: string contains byte 0xc3 at index 4, not \
-                 encodable here. Fix: write the sign's text in printable ASCII"
-                    .to_owned()
-            ],
+            vec![format!(
+                "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{}…`, saved as \
+                 a JSON string with its quotes and escapes, which cannot be written as NBT: nbt: \
+                 the string takes 65537 bytes of Modified UTF-8, past the 65535 an NBT string \
+                 holds. Fix: shorten the sign's text",
+                "a".repeat(32)
+            )],
             at(&[("W_UNUSED_DEF", 8, 1)]),
             serde_json::json!({ "diagnostics": [] }),
         ),

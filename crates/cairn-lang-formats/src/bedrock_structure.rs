@@ -18,7 +18,7 @@ use cairn_lang_core::resolve::DroppedIntent;
 pub use cairn_lang_nbt::Compound;
 use cairn_lang_nbt::tag::{List, Tag};
 use cairn_lang_nbt::{
-    CompoundStream, NbtIoError, check_string, stream_bedrock_uncompressed,
+    CompoundStream, NbtIoError, check_bedrock_string, stream_bedrock_uncompressed,
     write_bedrock_uncompressed,
 };
 use thiserror::Error;
@@ -27,8 +27,8 @@ use crate::bedrock_state::{BedrockStateError, StateEntity, translate_states};
 use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
-use crate::java_structure::{java_entity_id, sign_text_fix};
-use crate::nbt_text::{compound_of, first_unencodable};
+use crate::java_structure::java_entity_id;
+use crate::nbt_text::{compound_of, excerpt, first_unencodable};
 use crate::registry::VersionStates;
 
 pub use read::{
@@ -131,9 +131,9 @@ pub enum BedrockStructureError {
     },
     /// A sign's text the NBT encoder cannot write.
     #[error(
-        "the sign at {pos:?} has the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: {}",
-        sign_text_fix(source)
+        "the sign at {pos:?} has the text `{}`, which cannot be written as NBT: {source}. Fix: \
+         shorten the sign's text",
+        excerpt(text)
     )]
     UnencodableSignText {
         /// The sign's voxel.
@@ -144,7 +144,11 @@ pub enum BedrockStructureError {
         source: NbtIoError,
     },
     /// A palette string the NBT encoder cannot write, checked first since the file writes it last.
-    #[error("palette entry `{id}`: {field} cannot be written as NBT: {source}")]
+    #[error(
+        "palette entry `{}`: {field} cannot be written as NBT: {source}. Fix: shorten the `mat=` \
+         of the `raw_block` or `raw_fill` that names it",
+        excerpt(id)
+    )]
     UnencodablePaletteString {
         /// The entry's id.
         id: String,
@@ -217,8 +221,9 @@ pub enum BedrockStructureError {
     },
     /// A string of an entity, or one its `nbt=` writes, the NBT encoder cannot write.
     #[error(
-        "the `{id}` at {pos:?} holds the text `{text}`, which cannot be written as NBT: {source}. \
-         Fix: write its text in printable ASCII"
+        "the `{id}` at {pos:?} holds the string `{}`, which cannot be written as NBT: {source}. \
+         Fix: shorten that string",
+        excerpt(text)
     )]
     UnencodableEntity {
         /// The entity's id.
@@ -641,7 +646,7 @@ fn member_entity(
                 pos,
                 text: compound.clone(),
             })?;
-            if let Some((text, source)) = first_unencodable(&nbt) {
+            if let Some((text, source)) = first_unencodable(&nbt, check_bedrock_string) {
                 return Err(BedrockStructureError::UnencodableEntity {
                     id: "raw_block".to_owned(),
                     pos,
@@ -657,7 +662,7 @@ fn member_entity(
 /// One face of a sign as Bedrock saves it: its lines as one text, black and glowing or not.
 fn sign_face(text: &SignText, pos: (u32, u32, u32)) -> Result<Compound, BedrockStructureError> {
     let joined = text.lines().join("\n");
-    check_string(&joined).map_err(|source| BedrockStructureError::UnencodableSignText {
+    check_bedrock_string(&joined).map_err(|source| BedrockStructureError::UnencodableSignText {
         pos,
         text: joined.clone(),
         source,
@@ -735,11 +740,12 @@ fn check_palette_strings(id: &str, states: &Compound) -> Result<(), BedrockStruc
             field,
             source,
         };
-    check_string(id).map_err(|source| refuse("its id".to_owned(), source))?;
+    check_bedrock_string(id).map_err(|source| refuse("its id".to_owned(), source))?;
     for (key, value) in &states.entries {
-        check_string(key).map_err(|source| refuse(format!("state name `{key}`"), source))?;
+        check_bedrock_string(key)
+            .map_err(|source| refuse(format!("state name `{key}`"), source))?;
         if let Tag::String(value) = value {
-            check_string(value)
+            check_bedrock_string(value)
                 .map_err(|source| refuse(format!("the value of state `{key}`"), source))?;
         }
     }

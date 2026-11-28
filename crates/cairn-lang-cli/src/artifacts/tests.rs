@@ -1,5 +1,6 @@
 use cairn_lang_core::Edition;
-use cairn_lang_formats::data_version::resolve_target;
+use cairn_lang_core::block_array::BlockState;
+use cairn_lang_formats::data_version::{resolve_java_target, resolve_target};
 
 use crate::name_case::NameCase;
 use crate::pipeline::lowered_probe;
@@ -366,5 +367,37 @@ fn a_litematic_refusal_another_format_avoids_says_so() {
             ),
             None,
         ]
+    );
+}
+
+#[test]
+fn a_schem_palette_key_nbt_cannot_hold_is_sent_to_a_format_that_stores_properties_apart() {
+    let mut block_ir = lowered_probe(Edition::Java);
+    let array = block_ir
+        .structures
+        .values_mut()
+        .next()
+        .expect("the probe lowers to one structure");
+    let mut stairs = BlockState::bare("minecraft:oak_stairs");
+    stairs
+        .properties
+        .insert("facing".to_owned(), "n".repeat(usize::from(u16::MAX)));
+    array.voxels[0] = array.palette.intern(stairs);
+    let file = schem_files(&block_ir)
+        .into_iter()
+        .next()
+        .expect("the probe writes one file");
+    let target = resolve_java_target("latest").expect("the latest target resolves");
+    let refusal = prepare_schem(file, &target).expect_err("the key runs past 65,535 bytes");
+    assert!(
+        matches!(refusal, SchemError::UnencodableState { .. }),
+        "got {refusal:?}"
+    );
+    assert_eq!(
+        schem_fix(&refusal),
+        Some(
+            "compile with `--structure-format nbt` or `litematic`, which store each property \
+             apart rather than spelled into one key"
+        )
     );
 }

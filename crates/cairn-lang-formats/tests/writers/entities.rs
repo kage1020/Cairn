@@ -6,7 +6,10 @@ use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, EntityData};
 use cairn_lang_formats::bedrock_structure::{BedrockStructureError, build_mcstructure_tag};
 use cairn_lang_formats::data_version::{resolve_bedrock_target, resolve_java_target};
-use cairn_lang_formats::java_structure::{JavaStructureError, build_structure_tag};
+use cairn_lang_formats::java_structure::{
+    JavaStructureError, build_structure_tag, prepare_structure,
+};
+use cairn_lang_nbt::read_java_gzip;
 use cairn_lang_nbt::tag::{Compound, Tag};
 
 use crate::common::{
@@ -209,14 +212,140 @@ fn an_nbt_compound_is_put_over_what_the_writer_builds_key_by_key() {
 }
 
 #[test]
-fn an_entity_string_the_nbt_encoder_cannot_write_is_refused() {
-    let source = java_room().replace("text=[\"Inn\", \"rooms\"]", "text=\"Café\"");
+fn an_entity_string_outside_ascii_reads_back_as_it_was_built() {
+    let text = "Caf\u{e9} \u{770b}\u{677f}";
+    let source = java_room().replace("text=[\"Inn\", \"rooms\"]", &format!("text={text:?}"));
+    let array = lowered(&source, Edition::Java, "26.3");
+    assert_eq!(
+        java_nbt(&array, "26.3", 5),
+        format!(
+            "{{id:\"minecraft:text_display\",Rotation:[0f,0f],billboard:\"fixed\",\
+             transformation:{TRANSFORMATION},text:{text:?}}}"
+        ),
+    );
+    let target = resolve_java_target("26.3").expect("a shipped target");
+    let mut bytes = Vec::new();
+    prepare_structure(&array, &target)
+        .expect("the structure prepares")
+        .write_gzip(&mut bytes)
+        .expect("the file writes");
+    let (_, read) = read_java_gzip(bytes.as_slice()).expect("the bytes read back");
+    assert_eq!(read, build_structure_tag(&array, &target).expect("build"));
+}
+
+#[test]
+fn an_entity_string_longer_than_an_nbt_string_holds_is_refused() {
+    let long = "a".repeat(usize::from(u16::MAX) + 1);
+    let source = java_room().replace("text=[\"Inn\", \"rooms\"]", &format!("text={long:?}"));
     let array = lowered(&source, Edition::Java, "26.3");
     let target = resolve_java_target("26.3").expect("a shipped target");
     match build_structure_tag(&array, &target) {
-        Err(JavaStructureError::UnencodableEntity { id, pos, text, .. }) => assert_eq!(
-            (id.as_str(), pos, text.as_str()),
-            ("minecraft:text_display", (3, 2, 2), "Café"),
+        Err(err @ JavaStructureError::UnencodableEntity { .. }) => assert_eq!(
+            err.to_string(),
+            format!(
+                "the `minecraft:text_display` at (3, 2, 2) holds the string `{}…`, which cannot \
+                 be written as NBT: nbt: the string takes 65536 bytes of Modified UTF-8, past the \
+                 65535 an NBT string holds. Fix: shorten that string",
+                "a".repeat(32)
+            ),
+        ),
+        other => panic!("expected UnencodableEntity, got {other:?}"),
+    }
+}
+
+/// A 7x5 room holding `line` under `edition`'s guard.
+fn guarded(edition: &str, line: &str) -> String {
+    format!(
+        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=7x5\n  floor mat_slot=wall\n  \
+         walls mat_slot=wall height=3\n  @edition {edition}\n    {line}\n"
+    )
+}
+
+#[test]
+fn each_writer_measures_an_nbt_string_in_its_own_encoding() {
+    // An astral character is 6 bytes of Modified UTF-8 and 4 of UTF-8, so Java holds 10,922.
+    let fits = "\u{1f600}".repeat(10_922);
+    let refused = format!("{fits}\u{1f600}");
+    let stand = |name: &str| format!("armor_stand at=2,1,2 nbt={{CustomName:{name:?}}}");
+    let chest =
+        |lock: &str| format!("raw_block mat=minecraft:chest at=3,1,3 nbt={{Lock:{lock:?}}}");
+    let target = resolve_java_target("26.3").expect("a shipped target");
+
+    let java = lowered(&guarded("java", &stand(&fits)), Edition::Java, "26.3");
+    assert_eq!(
+        java_nbt(&java, "26.3", 0),
+        format!("{{id:\"minecraft:armor_stand\",Rotation:[0f,0f],CustomName:{fits:?}}}")
+    );
+    let mut bytes = Vec::new();
+    prepare_structure(&java, &target)
+        .expect("the structure prepares")
+        .write_gzip(&mut bytes)
+        .expect("the file writes");
+    let (_, read) = read_java_gzip(bytes.as_slice()).expect("the bytes read back");
+    assert_eq!(read, build_structure_tag(&java, &target).expect("build"));
+
+    let shown = "\u{1f600}".repeat(32);
+    for (line, id, pos) in [
+        (stand(&refused), "minecraft:armor_stand", (2, 1, 2)),
+        (chest(&refused), "raw_block", (3, 1, 3)),
+    ] {
+        let java = lowered(&guarded("java", &line), Edition::Java, "26.3");
+        match build_structure_tag(&java, &target) {
+            Err(err @ JavaStructureError::UnencodableEntity { .. }) => assert_eq!(
+                err.to_string(),
+                format!(
+                    "the `{id}` at {pos:?} holds the string `{shown}…`, which cannot be written \
+                     as NBT: nbt: the string takes 65538 bytes of Modified UTF-8, past the 65535 \
+                     an NBT string holds. Fix: shorten that string"
+                ),
+            ),
+            other => panic!("expected UnencodableEntity, got {other:?}"),
+        }
+    }
+
+    let bedrock = lowered(
+        &guarded("bedrock", &stand(&refused)),
+        Edition::Bedrock,
+        "1.21.60",
+    );
+    assert_eq!(
+        listed(structure_compound(&bedrock_root(&bedrock, "1.21.60"))),
+        [format!(
+            "{{identifier:\"minecraft:armor_stand\",Pos:[2.5f,1f,2.5f],Rotation:[0f,0f],\
+             Motion:[0f,0f,0f],UniqueID:1L,definitions:[\"+minecraft:armor_stand\"],\
+             CustomName:{refused:?}}}"
+        )],
+    );
+    let bedrock = lowered(
+        &guarded("bedrock", &chest(&refused)),
+        Edition::Bedrock,
+        "1.21.60",
+    );
+    assert_eq!(
+        position_data(&bedrock_root(&bedrock, "1.21.60")),
+        [(
+            "68".to_owned(),
+            format!("{{block_entity_data:{{Lock:{refused:?},x:3,y:1,z:3}}}}")
+        )],
+    );
+}
+
+#[test]
+fn a_bedrock_entity_string_longer_than_an_nbt_string_holds_is_refused() {
+    // Each `é` takes two bytes of UTF-8.
+    let name = "\u{e9}".repeat(32_768);
+    let line = format!("armor_stand at=2,1,2 nbt={{CustomName:{name:?}}}");
+    let bedrock = lowered(&guarded("bedrock", &line), Edition::Bedrock, "1.21.60");
+    let target = resolve_bedrock_target("1.21.60").expect("a shipped target");
+    match build_mcstructure_tag(&bedrock, &target, &states_for(&target)) {
+        Err(err @ BedrockStructureError::UnencodableEntity { .. }) => assert_eq!(
+            err.to_string(),
+            format!(
+                "the `minecraft:armor_stand` at (2, 1, 2) holds the string `{}…`, which cannot \
+                 be written as NBT: nbt: the string takes 65536 bytes of UTF-8, past the 65535 \
+                 an NBT string holds. Fix: shorten that string",
+                "\u{e9}".repeat(32)
+            ),
         ),
         other => panic!("expected UnencodableEntity, got {other:?}"),
     }

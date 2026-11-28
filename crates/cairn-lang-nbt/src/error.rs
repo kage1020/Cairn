@@ -6,15 +6,6 @@ use thiserror::Error;
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum NbtIoError {
-    /// A string held a NUL or non-ASCII byte, outside the range where Java's Modified UTF-8 and
-    /// Bedrock's UTF-8 agree.
-    #[error("nbt: string contains byte 0x{byte:02x} at index {index}, not encodable here")]
-    InvalidString {
-        /// The rejected byte.
-        byte: u8,
-        /// Its byte index in the string.
-        index: usize,
-    },
     /// A [`List`](crate::tag::List) declared one element type but an item carried another.
     #[error("nbt: list declared element type {declared} but item {index} has type {actual}")]
     HeterogeneousList {
@@ -31,10 +22,18 @@ pub enum NbtIoError {
         /// The declared element type id.
         declared: u8,
     },
-    /// A length overflowed its wire prefix.
+    /// A string whose encoding takes more bytes than its `u16` length prefix counts.
+    #[error("nbt: the string takes {len} bytes of {encoding}, past the 65535 an NBT string holds")]
+    StringTooLong {
+        /// The bytes the string's encoding takes.
+        len: usize,
+        /// `"Modified UTF-8"` (Java) or `"UTF-8"` (Bedrock).
+        encoding: &'static str,
+    },
+    /// A list or array longer than its `i32` length prefix counts.
     #[error("nbt: {context} length {len} exceeds wire limit {limit}")]
     LengthOverflow {
-        /// What the length measures, such as `"string"` or `"list"`.
+        /// `"list"`, `"byte_array"`, `"int_array"` or `"long_array"`.
         context: &'static str,
         /// The length.
         len: usize,

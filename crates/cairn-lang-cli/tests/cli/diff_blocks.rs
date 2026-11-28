@@ -596,24 +596,32 @@ fn a_partial_build_is_refused_in_either_format() {
 #[test]
 fn a_structure_the_backend_cannot_write_is_refused_in_either_format() {
     let (tmp, _src, artifact) = built_hut();
+    // The target saves the line as a JSON string, so its quotes take it past 65,535 bytes.
+    let long = "a".repeat(usize::from(u16::MAX));
     let sign = write_source(
         tmp.path(),
         "sign.crn",
-        "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  \
-         walls mat_slot=wall height=3\n  sign at=inside.front offset=2 y=1 back=\"Café\"\n",
+        &format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  \
+             walls mat_slot=wall height=3\n  sign at=inside.front offset=2 y=1 back=\"{long}\"\n"
+        ),
     );
-    let stderr = "error: checking `struct::s`: the sign at (2, 1, 3) has the line `Café`, which \
-                  cannot be written as NBT: nbt: string contains byte 0xc3 at index 4, not \
-                  encodable here. Fix: write the sign's text in printable ASCII\n";
+    let stderr = format!(
+        "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{}…`, saved as a JSON \
+         string with its quotes and escapes, which cannot be written as NBT: nbt: the string \
+         takes 65537 bytes of Modified UTF-8, past the 65535 an NBT string holds. Fix: shorten \
+         the sign's text\n",
+        "a".repeat(32)
+    );
     let run = diff_blocks(&[&artifact, &sign]);
     assert_eq!(
         (run.code, run.stdout.as_str(), run.stderr.as_str()),
-        (Some(1), "", stderr)
+        (Some(1), "", stderr.as_str())
     );
     let json = diff_blocks(&[&artifact, &sign, Path::new("--format"), Path::new("json")]);
     assert_eq!(
         (json.code, json.stdout.as_str(), json.stderr.as_str()),
-        (Some(1), "{\n  \"diagnostics\": []\n}\n", stderr)
+        (Some(1), "{\n  \"diagnostics\": []\n}\n", stderr.as_str())
     );
 }
 

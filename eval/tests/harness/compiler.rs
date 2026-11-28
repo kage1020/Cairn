@@ -36,25 +36,30 @@ fn a_build_of_no_block_is_empty() {
 
 #[test]
 fn a_program_check_passes_and_compile_refuses_is_a_failed_compile() {
-    let program = "\
+    // The target saves the line as a JSON string, whose quotes count toward its length.
+    let line = "a".repeat(usize::from(u16::MAX) + 1);
+    let program = format!(
+        "\
 theme t:
   slot wall -> @cobblestone
   slot board -> @sign.oak
 
 struct s size=5x5
   walls mat_slot=wall height=3
-  sign at=inside.front offset=2 y=1 mat_slot=board back=\"Caf\u{e9}\"
-";
-    let evaluation = evaluated(program);
+  sign at=inside.front offset=2 y=1 mat_slot=board back={line:?}
+"
+    );
+    let evaluation = evaluated(&program);
     assert_eq!(evaluation.diagnostics, []);
     assert_eq!(
         evaluation.checked,
-        Checked::Compile(
-            "error: checking `struct::s`: the sign at (2, 1, 3) has the line `Caf\u{e9}`, which \
-             cannot be written as NBT: nbt: string contains byte 0xc3 at index 4, not encodable \
-             here. Fix: write the sign's text in printable ASCII\n"
-                .to_owned()
-        )
+        Checked::Compile(format!(
+            "error: checking `struct::s`: the sign at (2, 1, 3) has the line `{}…`, saved as a \
+             JSON string with its quotes and escapes, which cannot be written as NBT: nbt: the \
+             string takes 65538 bytes of Modified UTF-8, past the 65535 an NBT string holds. Fix: \
+             shorten the sign's text\n",
+            "a".repeat(32)
+        ))
     );
 }
 

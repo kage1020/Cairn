@@ -5,7 +5,7 @@ use std::io::{ErrorKind, Read};
 
 pub use crate::error::NbtReadError;
 use crate::tag::{Compound, List, Tag};
-use crate::writer::Endian;
+use crate::writer::Dialect;
 
 /// The deepest nesting of compounds and lists the reader accepts, the game's own limit.
 pub const MAX_DEPTH: usize = 512;
@@ -15,12 +15,12 @@ const PREALLOCATE_AT_MOST: usize = 1 << 16;
 
 macro_rules! scalar_readers {
     ($($name:ident: $ty:ty),* $(,)?) => {
-        impl Endian {
+        impl Dialect {
             $(
                 fn $name(self, bytes: [u8; size_of::<$ty>()]) -> $ty {
                     match self {
-                        Endian::Big => <$ty>::from_be_bytes(bytes),
-                        Endian::Little => <$ty>::from_le_bytes(bytes),
+                        Dialect::Java => <$ty>::from_be_bytes(bytes),
+                        Dialect::Bedrock => <$ty>::from_le_bytes(bytes),
                     }
                 }
             )*
@@ -97,22 +97,12 @@ enum State {
 #[derive(Debug)]
 pub struct NbtReader<R: Read> {
     reader: R,
-    endian: Endian,
     dialect: Dialect,
     offset: u64,
     stack: Vec<Frame>,
     state: State,
     max_list_len: usize,
     max_array_len: usize,
-}
-
-/// How strings are encoded, which is where the two dialects differ beyond byte order.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Dialect {
-    /// Big-endian, Modified UTF-8.
-    Java,
-    /// Little-endian, UTF-8.
-    Bedrock,
 }
 
 /// What a payload read produced: the tag, or nothing when it was skipped.
@@ -133,13 +123,8 @@ impl<R: Read> NbtReader<R> {
     }
 
     fn new(reader: R, dialect: Dialect) -> Self {
-        let endian = match dialect {
-            Dialect::Java => Endian::Big,
-            Dialect::Bedrock => Endian::Little,
-        };
         Self {
             reader,
-            endian,
             dialect,
             offset: 0,
             stack: Vec::new(),
@@ -403,11 +388,11 @@ impl<R: Read> NbtReader<R> {
     fn read_payload(&mut self, id: u8, skip: bool) -> Result<Payload, NbtReadError> {
         let tag = match id {
             1 => Tag::Byte(i8::from_ne_bytes(self.read_bytes::<1>()?)),
-            2 => Tag::Short(self.endian.i16(self.read_bytes()?)),
-            3 => Tag::Int(self.endian.i32(self.read_bytes()?)),
-            4 => Tag::Long(self.endian.i64(self.read_bytes()?)),
-            5 => Tag::Float(self.endian.f32(self.read_bytes()?)),
-            6 => Tag::Double(self.endian.f64(self.read_bytes()?)),
+            2 => Tag::Short(self.dialect.i16(self.read_bytes()?)),
+            3 => Tag::Int(self.dialect.i32(self.read_bytes()?)),
+            4 => Tag::Long(self.dialect.i64(self.read_bytes()?)),
+            5 => Tag::Float(self.dialect.f32(self.read_bytes()?)),
+            6 => Tag::Double(self.dialect.f64(self.read_bytes()?)),
             7 => {
                 let len = self.read_len("byte_array")?;
                 if skip {
@@ -418,7 +403,7 @@ impl<R: Read> NbtReader<R> {
                 Tag::ByteArray(bytes.into_iter().map(|b| i8::from_ne_bytes([b])).collect())
             }
             8 if skip => {
-                let len = usize::from(self.endian.u16(self.read_bytes()?));
+                let len = usize::from(self.dialect.u16(self.read_bytes()?));
                 self.discard(len)?;
                 return Ok(Payload::Skipped);
             }
@@ -430,13 +415,13 @@ impl<R: Read> NbtReader<R> {
                     return Ok(Payload::Skipped);
                 }
                 let bytes = self.read_growing(len)?;
-                let endian = self.endian;
+                let dialect = self.dialect;
                 Tag::IntArray(
                     bytes
                         .as_chunks::<4>()
                         .0
                         .iter()
-                        .map(|c| endian.i32(*c))
+                        .map(|c| dialect.i32(*c))
                         .collect(),
                 )
             }
@@ -447,13 +432,13 @@ impl<R: Read> NbtReader<R> {
                     return Ok(Payload::Skipped);
                 }
                 let bytes = self.read_growing(len)?;
-                let endian = self.endian;
+                let dialect = self.dialect;
                 Tag::LongArray(
                     bytes
                         .as_chunks::<8>()
                         .0
                         .iter()
-                        .map(|c| endian.i64(*c))
+                        .map(|c| dialect.i64(*c))
                         .collect(),
                 )
             }
@@ -475,7 +460,7 @@ impl<R: Read> NbtReader<R> {
     /// An `i32` length prefix, refused when negative or past the limit for `context`.
     fn read_len(&mut self, context: &'static str) -> Result<usize, NbtReadError> {
         let offset = self.offset;
-        let len = self.endian.i32(self.read_bytes()?);
+        let len = self.dialect.i32(self.read_bytes()?);
         let len = usize::try_from(len).map_err(|_| NbtReadError::NegativeLength {
             context,
             len,
@@ -545,7 +530,7 @@ impl<R: Read> NbtReader<R> {
 
     fn read_string(&mut self) -> Result<String, NbtReadError> {
         let offset = self.offset;
-        let len = usize::from(self.endian.u16(self.read_bytes()?));
+        let len = usize::from(self.dialect.u16(self.read_bytes()?));
         let mut bytes = vec![0; len];
         self.fill(&mut bytes)?;
         let decoded = match self.dialect {
@@ -553,10 +538,7 @@ impl<R: Read> NbtReader<R> {
             Dialect::Bedrock => String::from_utf8(bytes).ok(),
         };
         decoded.ok_or(NbtReadError::InvalidString {
-            encoding: match self.dialect {
-                Dialect::Java => "Modified UTF-8",
-                Dialect::Bedrock => "UTF-8",
-            },
+            encoding: self.dialect.string_encoding(),
             offset,
         })
     }

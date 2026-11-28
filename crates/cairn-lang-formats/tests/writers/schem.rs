@@ -469,16 +469,62 @@ fn an_array_the_nbt_writer_would_refuse_is_refused() {
 fn a_name_the_nbt_encoder_cannot_write_is_refused() {
     let array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
     let mut file = struct_file(&array);
-    file.stem = "h\u{f6}me".to_owned();
-    let err = prepare_schem(file, &target("1.21.4")).expect_err("not ASCII");
+    let long = "h".repeat(usize::from(u16::MAX) + 1);
+    file.stem.clone_from(&long);
+    let err = prepare_schem(file, &target("1.21.4")).expect_err("too long");
     assert!(
         matches!(
             &err,
             SchemError::UnencodableName {
                 name,
-                source: NbtIoError::InvalidString { byte: 0xc3, index: 1 },
-            } if name == "h\u{f6}me"
+                source: NbtIoError::StringTooLong { len: 65_536, encoding: "Modified UTF-8" },
+            } if *name == long
         ),
         "got {err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        format!(
+            "the name `{}…` cannot be written as NBT: nbt: the string takes 65536 bytes of \
+             Modified UTF-8, past the 65535 an NBT string holds. Fix: shorten the name of the \
+             struct, site, placement or walkway it comes from",
+            "h".repeat(32)
+        )
+    );
+}
+
+#[test]
+fn a_palette_key_longer_than_an_nbt_string_holds_is_refused_though_each_part_fits() {
+    let mut array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
+    let mut stairs = BlockState::bare("minecraft:oak_stairs");
+    stairs
+        .properties
+        .insert("facing".to_owned(), "n".repeat(usize::from(u16::MAX)));
+    array.voxels[0] = array.palette.intern(stairs);
+    let err = prepare_schem(struct_file(&array), &target("1.21.4")).expect_err("too long");
+    let key = format!(
+        "minecraft:oak_stairs[facing={}]",
+        "n".repeat(usize::from(u16::MAX))
+    );
+    assert!(
+        matches!(&err, SchemError::UnencodableState { state, .. } if *state == key),
+        "got {err:?}"
+    );
+    assert_eq!(
+        err.to_string(),
+        "palette entry `minecraft:oak_stairs[facing=nnnn…` cannot be written as NBT: nbt: the \
+         string takes 65564 bytes of Modified UTF-8, past the 65535 an NBT string holds"
+    );
+}
+
+#[test]
+fn a_name_outside_ascii_reads_back_as_it_was_given() {
+    let array = array_of("probe", Dims { x: 1, y: 1, z: 1 }, &[], &[0]);
+    let mut file = struct_file(&array);
+    file.stem = "h\u{f6}me \u{1f3e0}".to_owned();
+    let schematic = written_schematic(file, &target("1.21.4"));
+    assert_eq!(
+        entry(&schematic, "Metadata").entries.get("Name"),
+        Some(&string("h\u{f6}me \u{1f3e0}"))
     );
 }
