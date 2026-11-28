@@ -139,7 +139,8 @@ file itself: one that reaches it, or whose `.tmp` or `.bak` scratch path the sou
 through does, by any spelling or link, counted as the paths that reach a compile's source are
 ([Versioning and Editions §10.6](/spec/versioning-editions/#106-provenance-and-lock)).
 `<stem>.raw.crn` is refused the same way when a link makes one of its paths the file, and a path the
-file system cannot answer for refuses the import with exit 1.
+file system cannot answer for refuses the import with exit 1. An entry already at either scratch
+path refuses the import with exit 1 before the file is read, as it refuses a compile.
 `raw` is the one mode, since L1 is the compiler's ceiling
 ([§12.3](#123-three-tiers-of-transliteration)) and the lift is a refactor of what it writes.
 

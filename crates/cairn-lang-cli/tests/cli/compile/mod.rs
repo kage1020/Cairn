@@ -13,6 +13,7 @@ mod over_source;
 mod requires_conflict;
 mod respelled;
 mod roof_material;
+mod scratch_paths;
 mod state_literal;
 mod structure_format;
 mod unknown_argument;

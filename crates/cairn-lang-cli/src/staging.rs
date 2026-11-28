@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use cairn_lang_formats::write_path::Scratch;
+use cairn_lang_formats::write_path::{Scratch, scratch_paths};
 
 /// What a staged file is going to become, so a failure can name it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +94,70 @@ enum Occupant {
     Directory,
 }
 
+/// A scratch path beside a destination that already holds an entry, or that the file system cannot
+/// look at, which a write would go through or delete.
+#[derive(Debug)]
+pub struct ScratchBlocked {
+    kind: Kind,
+    final_path: PathBuf,
+    scratch: PathBuf,
+    /// Why the path could not be looked at, or `None` for an entry there.
+    unlookable: Option<io::Error>,
+}
+
+impl ScratchBlocked {
+    /// Say what is in the way and how to clear it, then run `command` again.
+    pub fn report(&self, command: &str) {
+        let Self {
+            kind,
+            final_path,
+            scratch,
+            unlookable,
+        } = self;
+        let (shown, at) = (final_path.display(), scratch.display());
+        match unlookable {
+            None => {
+                eprintln!(
+                    "error: {kind} `{shown}` is written through `{at}`, which already exists"
+                );
+                eprintln!(
+                    "  note: a file is written at its path with `.tmp` added and renamed into \
+                     place, and one it replaces is moved aside to its path with `.bak` added"
+                );
+                eprintln!("  fix: move `{at}` aside, then {command} again");
+            }
+            Some(err) => {
+                eprintln!(
+                    "error: cannot tell whether `{at}`, which {kind} `{shown}` is written \
+                     through, is free: {err}"
+                );
+                eprintln!("  fix: check that `{at}` can be read, then {command} again");
+            }
+        }
+    }
+}
+
+/// Each scratch path beside `final_path` that holds an entry, a symbolic link included, or that
+/// the file system cannot look at.
+pub fn blocked_scratch(kind: Kind, final_path: &Path) -> Vec<ScratchBlocked> {
+    scratch_paths(final_path)
+        .into_iter()
+        .filter_map(|scratch| {
+            let unlookable = match fs::symlink_metadata(&scratch) {
+                Err(err) if err.kind() == io::ErrorKind::NotFound => return None,
+                Ok(_) => None,
+                Err(err) => Some(err),
+            };
+            Some(ScratchBlocked {
+                kind,
+                final_path: final_path.to_path_buf(),
+                scratch,
+                unlookable,
+            })
+        })
+        .collect()
+}
+
 /// An unreadable destination is an error, never a vacancy the commit could overwrite.
 fn occupant(path: &Path) -> io::Result<Occupant> {
     match fs::symlink_metadata(path) {
@@ -105,11 +169,12 @@ fn occupant(path: &Path) -> io::Result<Occupant> {
 }
 
 impl StagedSet {
-    /// Write one file beside `final_path`.
+    /// Write one file beside `final_path`, at a scratch path that holds nothing yet.
     ///
     /// # Errors
     ///
-    /// The I/O failure, after removing the partial scratch file.
+    /// The I/O failure, after removing the partial scratch file, or `AlreadyExists` for an entry
+    /// at the scratch path, which is left as it is.
     pub fn stage(
         &mut self,
         final_path: &Path,
@@ -119,8 +184,13 @@ impl StagedSet {
         use std::io::Write as _;
 
         let tmp_path = Scratch::Staged.of(final_path);
+        // `create_new` neither truncates an entry there nor follows a symbolic link.
+        let created = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)?;
         let result = (|| {
-            let mut file = io::BufWriter::new(fs::File::create(&tmp_path)?);
+            let mut file = io::BufWriter::new(created);
             write(&mut file)?;
             file.flush()?;
             // Unsynced, a crash after the rename can leave a correctly named, half-written file.
@@ -157,7 +227,12 @@ impl StagedSet {
             match occupant(&entry.final_path) {
                 Ok(Occupant::Movable) => {
                     let backup_path = Scratch::Backup.of(&entry.final_path);
-                    if let Err(err) = fs::rename(&entry.final_path, &backup_path) {
+                    let moved = match occupant(&backup_path) {
+                        Ok(Occupant::Vacant) => fs::rename(&entry.final_path, &backup_path),
+                        Ok(_) => Err(io::Error::from(io::ErrorKind::AlreadyExists)),
+                        Err(err) => Err(err),
+                    };
+                    if let Err(err) = moved {
                         undo(&displaced, &committed);
                         self.discard_scratch();
                         return Err(CommitFailure {
@@ -250,3 +325,6 @@ fn undo(displaced: &[Displaced], committed: &[PathBuf]) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

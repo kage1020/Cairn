@@ -422,6 +422,28 @@ pub(crate) fn check_source_is_left_alone(
     Ok(())
 }
 
+/// Refuse a build that would write any of its files through a scratch path already holding an
+/// entry (`spec/versioning-editions` "Provenance and lock").
+pub(crate) fn check_scratch_is_free(
+    prepared: &[(PathBuf, PreparedStructure<'_>)],
+    lock_path: &Path,
+) -> Result<(), ExitCode> {
+    let blocked: Vec<_> = prepared
+        .iter()
+        .map(|(path, _)| (staging::Kind::Artifact, path.as_path()))
+        .chain([(staging::Kind::Lockfile, lock_path)])
+        .flat_map(|(kind, output)| staging::blocked_scratch(kind, output))
+        .collect();
+    for scratch in &blocked {
+        scratch.report("compile");
+    }
+    if blocked.is_empty() {
+        Ok(())
+    } else {
+        Err(ExitCode::from(1))
+    }
+}
+
 /// Say that the file system cannot tell `unidentified`'s path, one `what` is written through, from
 /// the source `file`, and that the path should be readable, with `fix` after.
 pub(crate) fn report_unidentified(what: &str, file: &Path, unidentified: &Unidentified, fix: &str) {

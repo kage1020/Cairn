@@ -109,11 +109,11 @@ const OBSTRUCTIONS: &[&str] = &[
     "lockfile",
     // Commit fails on one artifact, with others already committed.
     "artifact",
-    // Staging fails: the scratch file cannot be created.
+    // An entry at an artifact's `.tmp` refuses the build before anything is staged.
     "artifact-staging",
     // The first entry, so the undo runs with nothing displaced and nothing committed.
     "first-artifact",
-    // A leftover backup blocks the displace step.
+    // An entry at an artifact's `.bak` refuses it the same way.
     "artifact-backup",
 ];
 
