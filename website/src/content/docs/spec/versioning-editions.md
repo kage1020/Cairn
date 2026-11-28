@@ -337,9 +337,12 @@ check runs where the ID check runs and nowhere else
 both to a build that pins one.
 
 A state literal ([Syntax](/spec/syntax/)) is checked at its token, and the member or walkway that
-binds it is not built. A state a member's own line writes, such as a `note_block`'s `instrument=`
-([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)), is checked
-the same way at its value. The finding names the pair, the values the property takes, or the
+binds it is not built. A canonical token's literal takes its Java block's states on Bedrock as on
+Java, even where its ID is also the spelling other Java blocks are written under there:
+`@torch[facing=east]` is outside `torch`'s states on both, and a wall torch is
+`@wall_torch[facing=east]`. A state a member's own line writes, such as a `note_block`'s
+`instrument=` ([Blockstate Model §6.1](/spec/blockstate/#61-derive-by-default-promote-on-override)),
+is checked the same way at its value. The finding names the pair, the values the property takes, or the
 properties the block has when it has no such property, and the other versions whose tables take the
 pair: a domain that changed between releases is the likeliest cause of a literal that is valid
 somewhere, and the repair is then a target rather than an edit. Lowering checks the states it

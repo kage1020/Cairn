@@ -260,11 +260,11 @@ impl TargetRegistry for PackView<'_> {
     }
 
     fn state_domain(&self, state: &BlockState) -> StateDomain {
-        self.domain_check(state, None)
+        self.domain_check(state, Reading::Entry)
     }
 
     fn token_state_domain(&self, state: &BlockState) -> StateDomain {
-        self.domain_check(state, self.meanings.meaning_of(&state.id))
+        self.domain_check(state, Reading::Token)
     }
 
     fn joins(&self, state: &BlockState) -> Option<Joins> {
@@ -287,7 +287,7 @@ impl TargetRegistry for PackView<'_> {
             .get(key)
             .is_some_and(|value| value == filled);
         let holds_at = |version: &str| {
-            let domain = self.domain_at(version, &state.id)?;
+            let domain = self.domain_at(version, &state.id, Reading::Entry)?;
             Some(
                 !fills_its_cell
                     && domain
@@ -488,6 +488,15 @@ fn gives(domain: &Domain, properties: &IndexMap<String, String>) -> bool {
         .all(|(key, value)| domain.get(key).is_some_and(|values| values.contains(value)))
 }
 
+/// What a Bedrock domain is read for, where several Java blocks may be written under one id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reading {
+    /// A palette entry, which may be any block written under its id.
+    Entry,
+    /// A canonical token's literal, which names its own Java block.
+    Token,
+}
+
 /// What one version's tables say of whether a block state conducts redstone power.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Conduction {
@@ -597,11 +606,7 @@ impl<'a> PackView<'a> {
 
     /// What the pinned version's tables say about `state`'s properties, with `meaning`, a meaning
     /// token and the values it takes, read as one of them.
-    fn domain_check(
-        &self,
-        state: &BlockState,
-        meaning: Option<(&str, Vec<String>)>,
-    ) -> StateDomain {
+    fn domain_check(&self, state: &BlockState, reading: Reading) -> StateDomain {
         let Some(version) = self.mc_version else {
             return StateDomain::Unpinned;
         };
@@ -616,10 +621,10 @@ impl<'a> PackView<'a> {
         if !recorded {
             return StateDomain::Unrecorded;
         }
-        let Some(mut domain) = self.domain_at(version, id) else {
+        let Some(mut domain) = self.domain_at(version, id, reading) else {
             return StateDomain::AnsweredElsewhere;
         };
-        if let Some((meaning, values)) = meaning {
+        if let (Reading::Token, Some((meaning, values))) = (reading, self.meanings.meaning_of(id)) {
             domain.insert(meaning.to_owned(), values);
         }
         let outside = state.properties.iter().filter_map(|(key, value)| {
@@ -636,7 +641,7 @@ impl<'a> PackView<'a> {
                 key: key.clone(),
                 value: value.clone(),
                 fault,
-                valid_at: self.valid_at(version, id, key, value),
+                valid_at: self.valid_at(version, id, reading, key, value),
             })
         });
         StateDomain::Checked(outside.collect())
@@ -720,7 +725,7 @@ impl<'a> PackView<'a> {
         }
         let declared = self.blocks.ids_for(version).map(|ids| contains(ids, id));
         let outside = self
-            .domain_at(version, id)
+            .domain_at(version, id, Reading::Entry)
             .is_some_and(|domain| !gives(&domain, &state.properties));
         // A Bedrock id its own table does not declare may still spell a canonical block.
         if outside || (self.edition == Edition::Java && declared == Some(false)) {
@@ -749,23 +754,34 @@ impl<'a> PackView<'a> {
         }
     }
 
-    /// The canonical states `id` takes at `version`, or `None` when the tables give it none to
-    /// check against there.
-    fn domain_at(&self, version: &str, id: &str) -> Option<Domain> {
-        match self.edition {
-            Edition::Java => self.blocks.states_of(version, id).map(domain_of),
-            Edition::Bedrock => self.state_maps?.at(version)?.canonical_domain(id),
+    /// The canonical states `id` takes at `version` read as `reading`, or `None` when the tables
+    /// give it none to check against there.
+    fn domain_at(&self, version: &str, id: &str, reading: Reading) -> Option<Domain> {
+        match (self.edition, reading) {
+            (Edition::Java, _) => self.blocks.states_of(version, id).map(domain_of),
+            (Edition::Bedrock, Reading::Entry) => {
+                self.state_maps?.at(version)?.canonical_domain(id)
+            }
+            (Edition::Bedrock, Reading::Token) => self.state_maps?.at(version)?.token_domain(id),
         }
     }
 
-    /// The targetable versions other than `pinned` whose tables take `key=value` on `id`.
-    fn valid_at(&self, pinned: &str, id: &str, key: &str, value: &str) -> Vec<String> {
+    /// The targetable versions other than `pinned` whose tables take `key=value` on `id` read as
+    /// `reading`.
+    fn valid_at(
+        &self,
+        pinned: &str,
+        id: &str,
+        reading: Reading,
+        key: &str,
+        value: &str,
+    ) -> Vec<String> {
         self.targetable
             .iter()
             .copied()
             .filter(|version| *version != pinned)
             .filter(|version| {
-                self.domain_at(version, id).is_some_and(|domain| {
+                self.domain_at(version, id, reading).is_some_and(|domain| {
                     domain
                         .get(key)
                         .is_some_and(|values| values.iter().any(|held| held == value))

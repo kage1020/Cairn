@@ -2,11 +2,13 @@
 //! block tables, Bedrock's from the canonical vocabulary its state map reads
 //! (`spec/versioning-editions` "A state is checked against its block's states at the target").
 
-use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{
     BlockState, DomainFault, OutOfDomain, StateDomain, TargetRegistry,
 };
+use cairn_lang_core::{DiagnosticCode, Edition};
 use cairn_lang_formats::registry::builtin_pack;
+
+use crate::common::{lower_source, supported_versions};
 
 fn state(id: &str, pairs: &[(&str, &str)]) -> BlockState {
     BlockState {
@@ -190,6 +192,55 @@ fn a_bedrock_id_that_is_its_own_java_block_takes_the_states_of_every_block_it_re
             },
             &[],
         ),
+    );
+}
+
+#[test]
+fn a_canonical_tokens_literal_takes_its_java_blocks_states_on_every_version_of_both_editions() {
+    let source = "theme t:\n  slot a -> @torch[facing=east]\n  \
+                  slot b -> @redstone_torch[facing=east]\n  slot c -> @cauldron[level=2]\n\n\
+                  struct s size=3x3\n  fill from=0,0,0 to=0,0,0 mat_slot=a\n  \
+                  fill from=1,0,1 to=1,0,1 mat_slot=b\n  fill from=2,0,2 to=2,0,2 mat_slot=c\n";
+    let at = |offset: usize| {
+        let before = &source[..offset];
+        let line = before.matches('\n').count() + 1;
+        (
+            line,
+            offset - before.rfind('\n').map_or(0, |newline| newline + 1) + 1,
+        )
+    };
+    for (edition, name) in [(Edition::Java, "java"), (Edition::Bedrock, "bedrock")] {
+        for version in supported_versions(builtin_pack(edition)) {
+            let target = format!("{name} {version}");
+            let found: Vec<_> = lower_source(source, edition, Some(version))
+                .diagnostics
+                .into_iter()
+                .map(|d| (d.code, at(d.span.start), d.primary))
+                .collect();
+            let refused = |line: usize, block: &str, key: &str, takes: &str| {
+                (
+                    DiagnosticCode::StateDomain,
+                    (line, 13),
+                    format!("`minecraft:{block}` has no state `{key}` at {target}; {takes}"),
+                )
+            };
+            assert_eq!(
+                found,
+                [
+                    refused(2, "torch", "facing", "it takes no state"),
+                    refused(3, "redstone_torch", "facing", "its states are lit"),
+                    refused(4, "cauldron", "level", "its states are fluid"),
+                ],
+                "{target}",
+            );
+        }
+    }
+    // The wall torch a `facing` names is its own token.
+    assert_eq!(
+        builtin_pack(Edition::Bedrock)
+            .view(Some("1.21.60"))
+            .token_state_domain(&state("wall_torch", &[("facing", "east")])),
+        StateDomain::Checked(Vec::new()),
     );
 }
 

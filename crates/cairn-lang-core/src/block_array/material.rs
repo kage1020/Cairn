@@ -102,9 +102,9 @@ pub trait TargetRegistry {
         StateDomain::Unrecorded
     }
 
-    /// [`Self::state_domain`] for the state a canonical token names, whose block also takes the
-    /// meaning token [`Self::meant`] reads (`spec/materials-themes` "Mappings across version and
-    /// edition").
+    /// [`Self::state_domain`] for the state a canonical token names: its own block's, though the
+    /// target writes other blocks under its id, and the meaning token [`Self::meant`] reads
+    /// (`spec/materials-themes` "Mappings across version and edition").
     fn token_state_domain(&self, state: &BlockState) -> StateDomain {
         self.state_domain(state)
     }

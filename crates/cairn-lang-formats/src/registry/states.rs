@@ -961,6 +961,18 @@ impl VersionStates<'_> {
     /// tell which states it takes.
     #[must_use]
     pub fn canonical_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
+        self.domain(id, true)
+    }
+
+    /// Every canonical property the canonical token `id` takes here with the values it holds: its
+    /// own Java block's where the id names one, though other blocks share its Bedrock spelling, and
+    /// otherwise as [`Self::canonical_domain`].
+    #[must_use]
+    pub fn token_domain(&self, id: &str) -> Option<IndexMap<String, Vec<String>>> {
+        self.domain(id, false)
+    }
+
+    fn domain(&self, id: &str, with_sharers: bool) -> Option<IndexMap<String, Vec<String>>> {
         let own = self.reads_as_java(id);
         let (forms, refused) = if own {
             (self.map.from.get(id), self.map.refused_from.contains(id))
@@ -972,7 +984,7 @@ impl VersionStates<'_> {
             .map
             .onto
             .get(id)
-            .filter(|_| own && !self.map.refused_onto.contains(id))
+            .filter(|_| with_sharers && own && !self.map.refused_onto.contains(id))
             .into_iter()
             .flatten()
             .filter(|(java, _)| java != id);
