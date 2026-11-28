@@ -616,8 +616,10 @@ whose line writes what the pass does not lower yet: a `floor` or `roof` under a 
 `window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, or a `pressure_plate`
 whose slot binds a state literal. And part of a member that is built: the mirror of a `sym=true`
 window that would overlap it, or the states a `mat_slot=` binding carries onto a roof, door, chest
-or button that takes its own. The `place` and `connect` rows of a site it covers are in [Components, Editing, and
-Multi-building](/spec/components-editing-sites/).
+or button that takes its own. The `place` and `connect` rows of a site it covers are in
+[Components, Editing, and Multi-building](/spec/components-editing-sites/). A line the check pass
+refuses for its keyword, as `E_UNKNOWN_KEYWORD` or as an `E_MISPLACED_MEMBER` such as a `connect`
+in a `struct` or `def` body, is not deferred: lowering builds nothing for it and adds no finding.
 
 `E_INVALID_MEMBER` is an error for the reason `E_MISSING_MATERIAL` is
 ([§11.3](#113-error-vs-warning)): the member is dropped with nothing in its place, and the

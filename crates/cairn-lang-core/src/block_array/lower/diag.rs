@@ -1,5 +1,4 @@
-//! Findings about a body or member lowering skips, and about a scope
-//! with no theme to paint with.
+//! Findings about a body lowering skips, and about a scope with no theme to paint with.
 
 use crate::diagnostic::{Diagnostic, DiagnosticCode, DiagnosticNote};
 use crate::error::Span;

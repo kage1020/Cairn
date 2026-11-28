@@ -89,6 +89,20 @@ pub fn diagnose(source: &str) -> Vec<Diagnostic> {
     check(&module, &ir, None)
 }
 
+/// Every finding `check` and block-array lowering for `edition` raise over `source`, with no
+/// registry pack.
+///
+/// # Panics
+///
+/// When `source` does not parse.
+pub fn checked_and_lowered(source: &str, edition: Option<Edition>) -> Vec<Diagnostic> {
+    let module = parse(source).unwrap_or_else(|e| panic!("parse failed: {e}\nsource:\n{source}"));
+    let ir = lower(&module);
+    let mut found = check(&module, &ir, edition);
+    found.extend(lower_to_block_array(&ir, &resolve(&ir, edition), None).diagnostics);
+    found
+}
+
 /// The findings `source` raises with `code`, in report order.
 ///
 /// # Panics
@@ -169,6 +183,19 @@ pub fn code_spans(found: &[Diagnostic]) -> Vec<(&'static str, Range<usize>)> {
     found
         .iter()
         .map(|d| (d.code.as_str(), d.span.clone()))
+        .collect()
+}
+
+/// Each finding as its code and the 1-based `line:column` it starts at.
+pub fn positioned(source: &str, found: &[Diagnostic]) -> Vec<(&'static str, String)> {
+    found
+        .iter()
+        .map(|d| {
+            let before = &source[..d.span.start];
+            let line = before.matches('\n').count() + 1;
+            let column = before.len() - before.rfind('\n').map_or(0, |i| i + 1) + 1;
+            (d.code.as_str(), format!("{line}:{column}"))
+        })
         .collect()
 }
 

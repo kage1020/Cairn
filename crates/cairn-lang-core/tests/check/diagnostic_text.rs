@@ -3,16 +3,13 @@
 
 use std::collections::BTreeSet;
 
-use cairn_lang_core::block_array::lower_to_block_array;
-use cairn_lang_core::check::{Diagnostic, check};
-use cairn_lang_core::resolve::resolve;
-use cairn_lang_core::{lower, parse};
+use crate::common::checked_and_lowered;
 
 /// Every string a diagnostic renders, tagged with where it came from.
 fn rendered_strings() -> Vec<(String, String)> {
     let mut out = Vec::new();
     for source in noisy_sources() {
-        for d in diagnostics_for(&source) {
+        for d in checked_and_lowered(&source, None) {
             let code = d.code.as_str();
             out.push((format!("{code} primary"), d.primary.clone()));
             for (i, note) in d.notes.iter().enumerate() {
@@ -156,7 +153,7 @@ fn the_corpus_reaches_the_mirror_prose() {
 fn the_corpus_reaches_the_codes_its_prose_assertions_are_written_for() {
     let mut seen: BTreeSet<&'static str> = BTreeSet::new();
     for source in noisy_sources() {
-        for d in diagnostics_for(&source) {
+        for d in checked_and_lowered(&source, None) {
             seen.insert(d.code.as_str());
         }
     }
@@ -455,14 +452,4 @@ fn device_name_sources() -> Vec<String> {
         ),
         format!("{THEME}{HUT}site prn:\n  place id=a use=hut theme=t at=origin\n"),
     ]
-}
-
-/// Every finding `check` and the block-array pass raise over `source`.
-fn diagnostics_for(source: &str) -> Vec<Diagnostic> {
-    let module = parse(source).expect("fixture parses");
-    let ir = lower(&module);
-    let resolution = resolve(&ir, None);
-    let mut all = check(&module, &ir, None);
-    all.extend(lower_to_block_array(&ir, &resolution, None).diagnostics);
-    all
 }

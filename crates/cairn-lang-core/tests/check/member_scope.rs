@@ -654,7 +654,6 @@ mod lowering {
         );
     }
 
-    /// `W_DEFERRED_MEMBER` says so during `cairn lower`, which `cairn check` never runs.
     #[test]
     fn a_site_row_in_a_geometry_body_builds_nothing() {
         let src = format!(
