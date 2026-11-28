@@ -1014,9 +1014,10 @@ replacement carries both only when no version of the edition declares it.
 
 `aliases` is the other half, and the two are different claims about the same ID. A suggestion is a
 guess from a string distance; an alias is the registry pack's `aliases` component stating that two
-names are one block, so a quick-fix may apply an alias unasked and should not apply a suggestion. It
-holds every ID the target declares for that block, the closed set, never a pick from it, in the
-pack's own order, and is absent when the pack names none. The rendered note prints the first few and
+names are one block, so a quick-fix may apply an alias unasked when it is the only one, and should
+not apply a suggestion. It holds every ID the target declares for that block, the closed set, never
+a pick from it, in the pack's own order, and is absent when the pack names none. A set of two or
+more is a block the target split, and picking one of them is the author's choice. The rendered note prints the first few and
 counts the rest; the payload is where the whole set lives. See [Versioning and Editions
 §10.4](/spec/versioning-editions/#104-fail-loud-and-minimum-version-inference).
 
@@ -1056,7 +1057,7 @@ holds `2^130`.
 
 **Quick-fixes** in the language server are built from these payloads and from nothing else:
 `primary` and the notes are prose for a person. An `authored` `E_UNKNOWN_ID` offers each of its
-`aliases`, the first as the preferred fix, then its `suggestion`, which is not preferred; a
+`aliases`, preferred only when it is the one alias, then its `suggestion`, which is not preferred; a
 `catalog` or `builtin` one offers nothing, since the repair is in the pack. `E_UNKNOWN_KEYWORD` and
 `E_UNKNOWN_ARGUMENT` offer their `suggestion`, not preferred. `E_VERSION_CAP` offers lowering
 `floor` to `target` on the floor's line and, alongside it, to a client that says it runs the
