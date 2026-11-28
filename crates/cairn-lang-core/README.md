@@ -33,7 +33,7 @@ Everything past the block-array IR — the NBT codec, the format backends, redst
 
 L2, the semantic lift of a transliterated structure into named, themed Cairn, is specified but unimplemented.
 
-`block_array` lowers every member role the language defines. What it does not lower yet is a few lines, each a `W_DEFERRED_MEMBER` warning rather than blocks ([lint "Lowering"](https://cairn.kage1020.com/spec/lint/)): a `floor` or `roof` under a raised `level`, a `window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, and a `pressure_plate` whose slot binds a state literal. The same warning marks a member another member keeps out, such as a `door` in walls that paint nothing, and the part of a built member that is left out, such as the mirror of a `sym=true` window that would overlap it.
+`block_array` builds or reserves every member role the language defines. What it does not lower yet is a few lines, each of which draws a `W_DEFERRED_MEMBER` warning rather than blocks ([lint "Lowering"](https://cairn.kage1020.com/spec/lint/)): in a struct body, a `floor` or `roof` under a raised `level`, a `window` with `repeat=` above 1 and a `sym=` that is `true` or unreadable, and a `pressure_plate` whose slot binds a state literal; and on a site, the `place` and `connect` rows [components-editing-sites](https://cairn.kage1020.com/spec/components-editing-sites/) lists. The same warning marks a member another member keeps out, such as a `door` in walls that paint nothing, and the part of a built member that is left out, such as the mirror of a `sym=true` window that would overlap it.
 
 ## Versioning
 
