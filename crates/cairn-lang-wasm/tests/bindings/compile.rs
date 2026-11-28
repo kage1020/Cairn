@@ -154,7 +154,7 @@ fn an_unshipped_target_is_refused_beside_the_findings_with_the_ir_kept() {
 }
 
 #[test]
-fn a_floor_the_target_is_below_is_the_finding_cairn_check_reports_at_its_line() {
+fn a_floor_the_target_is_below_is_a_finding_at_its_line_and_no_run_level_refusal() {
     let source = format!("@cairn 2026.7\n\n@requires version>=1.21\n{BUILD}");
     let compiled = compile(&source, Edition::Java, "1.20.4");
     assert!(!compiled.ok);

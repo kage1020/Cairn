@@ -35,8 +35,8 @@ wasm-pack test --node crates/cairn-lang-wasm   # the exports as a JavaScript cal
 What `compile` answers:
 
 - `ok` is whether `cairn compile` would exit 0.
-- `diagnostics` holds every finding the run reports, warnings included, each in the shape [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) gives a finding. A source that does not parse answers its one `E_PARSE`.
-- `run_level` holds what refuses the run without being a finding at a span: an unshipped `target`, a lost scope (`E_PARTIAL_BUILD`), a `@requires` floor the target is below (`E_VERSION_CAP`), a floor no target declaring a painted block clears (`E_REQUIRES_CONFLICT`), and two structures written to one file. The warnings that name no span, such as `W_INTENT_DEGRADED`, are here too, in the order they arose. Each carries `severity` and `primary`, and `code`, `line`, `col` and `notes` where it has them.
+- `diagnostics` holds every finding the run reports, warnings included, each in the shape [lint "Machine-readable payload"](https://cairn.kage1020.com/spec/lint/) gives a finding. A source that does not parse answers its one `E_PARSE`. A `@requires` floor the target is below is the `E_VERSION_CAP` finding at the floor's line, as the language server marks it, and the run builds nothing.
+- `run_level` holds what refuses the run without being a finding at a span: an unshipped `target`, a lost scope (`E_PARTIAL_BUILD`), a floor no target declaring a painted block clears (`E_REQUIRES_CONFLICT`), and two structures written to one file. The warnings that name no span, such as `W_INTENT_DEGRADED`, are here too, in the order they arose. Each carries `severity` and `primary`, and `code`, `line`, `col` and `notes` where it has them.
 - `ir` is the block-array IR the structure files are written from, once no finding is an error, even when the run is refused; `null` otherwise. Its layout is Internal.
 - `artifacts` holds one `{ name, bytes }` per structure, `bytes` a `Uint8Array` of the file `cairn compile` writes, when the build is `ok`. No lockfile is written.
 
