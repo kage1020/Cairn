@@ -129,8 +129,8 @@ fn a_sign_is_built_from_the_standing_sign_its_slot_binds() {
                 ((2, 1, 2), "minecraft:spruce_sign[rotation=0]".to_owned()),
             ],
             vec![
-                sign_entity((1, 2, 1), &[], &[], false),
                 sign_entity((2, 1, 2), &[], &[], false),
+                sign_entity((1, 2, 1), &[], &[], false),
             ],
         ),
     );

@@ -76,9 +76,11 @@ fn bed(id: &str, facing: &str, head: (u32, u32, u32), foot: (u32, u32, u32)) -> 
     halves
 }
 
-/// Both halves' block entities, each keeping `color`, head first.
+/// Both halves' block entities, each keeping `color`, in the order of their cells.
 fn kept(color: DyeColor, head: (u32, u32, u32), foot: (u32, u32, u32)) -> Vec<Colored> {
-    vec![(head, Some(color)), (foot, Some(color))]
+    let mut halves = vec![(head, Some(color)), (foot, Some(color))];
+    halves.sort_by_key(|(pos, _)| *pos);
+    halves
 }
 
 #[test]
@@ -355,16 +357,16 @@ fn a_fixture_over_one_half_of_a_bed_leaves_the_other_half_split_off() {
         only_structure(&out).block_entities,
         [
             BlockEntity {
-                pos: (3, 1, 2),
-                data: BlockEntityData::Bed {
-                    color: Some(DyeColor::Red),
-                },
-            },
-            BlockEntity {
                 pos: (2, 1, 2),
                 data: BlockEntityData::Sign {
                     front: blank.clone(),
                     back: blank,
+                },
+            },
+            BlockEntity {
+                pos: (3, 1, 2),
+                data: BlockEntityData::Bed {
+                    color: Some(DyeColor::Red),
                 },
             },
         ],
@@ -444,21 +446,21 @@ fn a_bed_the_target_spells_as_every_dyed_bed_keeps_the_colour_its_token_names() 
                bed at=inside.back offset=1 y=1 mat_slot=plain\n";
     let out = lowered_with(src, &OneBed);
     assert_eq!(findings(src, &out), Vec::<Finding<'_>>::new());
-    let at = |x: u32| [(x, 1, 1), (x, 1, 2)];
+    let colors = [
+        (1, Some(DyeColor::Red)),
+        (3, Some(DyeColor::Blue)),
+        (5, None),
+    ];
     assert_eq!(
         only_structure(&out).block_entities,
-        [
-            (at(1), Some(DyeColor::Red)),
-            (at(3), Some(DyeColor::Blue)),
-            (at(5), None),
-        ]
-        .into_iter()
-        .flat_map(|(cells, color)| {
-            cells.map(|pos| BlockEntity {
-                pos,
-                data: BlockEntityData::Bed { color },
+        [1, 2]
+            .into_iter()
+            .flat_map(|z| {
+                colors.map(|(x, color)| BlockEntity {
+                    pos: (x, 1, z),
+                    data: BlockEntityData::Bed { color },
+                })
             })
-        })
-        .collect::<Vec<_>>(),
+            .collect::<Vec<_>>(),
     );
 }

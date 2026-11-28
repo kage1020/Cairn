@@ -173,17 +173,21 @@ impl BlockArrayIr {
         array.derived = derived;
         array.dims = dims;
         raise_entities(array, void);
-        for (_, block) in &sorted {
-            if let Some(entity) = &block.entity {
-                array.block_entities.push(BlockEntity {
+        // The circuit's layers lie under every member's cell, so its entities come first.
+        let mut block_entities: Vec<BlockEntity> = sorted
+            .iter()
+            .filter_map(|(_, block)| {
+                block.entity.as_ref().map(|entity| BlockEntity {
                     pos: block.at,
                     data: BlockEntityData::Fields {
                         id: entity.id.clone(),
                         fields: entity.fields.clone(),
                     },
-                });
-            }
-        }
+                })
+            })
+            .collect();
+        block_entities.append(&mut array.block_entities);
+        array.block_entities = block_entities;
         if let Some(members) = self.members.get_mut(key) {
             for resolved in members.iter_mut() {
                 resolved.geometry = resolved.geometry.raised(void);

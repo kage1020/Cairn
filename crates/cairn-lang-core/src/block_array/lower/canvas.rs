@@ -256,13 +256,20 @@ impl Canvas {
             .collect()
     }
 
-    /// Each block entity whose member still holds its cell, in the order they were set.
+    /// Each block entity whose member still holds its cell, in the order of their cells, as
+    /// [`Dims::index`] lays them out, and in the order they were set within one cell.
     pub(super) fn block_entities(&self) -> Vec<BlockEntity> {
-        self.block_entities
+        let mut kept: Vec<BlockEntity> = self
+            .block_entities
             .iter()
             .filter(|(member, entity)| self.owner_at(entity.pos) == Some(*member))
             .map(|(_, entity)| entity.clone())
-            .collect()
+            .collect();
+        kept.sort_by_key(|entity| {
+            let (x, y, z) = entity.pos;
+            self.dims.index(x, y, z).unwrap_or(usize::MAX)
+        });
+        kept
     }
 
     /// Record that a write named `slot`, for a state a member settled on in a cell it no longer

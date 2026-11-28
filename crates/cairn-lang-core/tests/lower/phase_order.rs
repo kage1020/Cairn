@@ -173,6 +173,36 @@ fn permuting_two_members_of_one_phase_that_share_no_voxel_leaves_the_array_equal
 }
 
 #[test]
+fn permuting_two_members_with_block_entities_that_share_no_voxel_leaves_the_array_equal() {
+    for (first, second) in [
+        (
+            "  sign at=inside.back offset=1 y=1 text=\"A\"\n",
+            "  sign at=inside.back offset=3 y=1 text=\"B\"\n",
+        ),
+        (
+            "  bed at=inside.back offset=4 y=1\n",
+            "  chest at=inside.front offset=1 y=1\n",
+        ),
+    ] {
+        let written = lowered(&source(&format!("{first}{second}")));
+        let swapped = lowered(&source(&format!("{second}{first}")));
+        assert_eq!(hashed(&written), hashed(&swapped), "{first}{second}");
+        let entities = &only_structure(&written).block_entities;
+        // Guard: members that set no block entity would compare equal too.
+        assert!(entities.len() >= 2, "{entities:?}");
+        let dims = only_structure(&written).dims;
+        let cells: Vec<usize> = entities
+            .iter()
+            .map(|entity| {
+                let (x, y, z) = entity.pos;
+                dims.index(x, y, z).expect("on the grid")
+            })
+            .collect();
+        assert!(cells.is_sorted(), "{cells:?}");
+    }
+}
+
+#[test]
 fn the_palette_is_sorted_rather_than_left_in_the_order_the_phases_painted() {
     // Paint order here is not sorted: `birch_fence` is painted last and sorts first.
     let out = lowered(concat!(
