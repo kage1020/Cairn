@@ -234,12 +234,14 @@ piston retracted and a dispenser not triggered. The circuit powers it in the wor
 those states is written on its line, and `facing=` is the one state promoted to intent
 ([Blockstate Model §6.2](/spec/blockstate/#62-intent_state-and-resolved_state)).
 
-**What a component is built from.** A `button` reads `mat_slot=`, and the slot must bind a button:
-any other block is `E_INCOMPATIBLE_MATERIAL`, and the button is built from `@button.default` instead.
-With no `mat_slot=` it is built from `@button.default`. Every other component is built from its
-tier-1 tokens ([Materials and Themes](/spec/materials-themes/#tier-1-tokens)), a piston from
-`@piston.default` or, with `sticky=true`, `@piston.sticky`. No `mat_slot=` chooses among them, so
-one on it is `W_IGNORED_ARGUMENT`.
+**What a component is built from.** A `pressure_plate` and a `button` read `mat_slot=`, and the slot
+must bind a block of their kind, one whose id ends in `_pressure_plate` or `_button`, as Bedrock's
+`wooden_pressure_plate` does: any other block is `E_INCOMPATIBLE_MATERIAL`, and the plate or button
+is built from `@pressure_plate.default` or `@button.default` instead. With no `mat_slot=` it is
+built from that token. Every other component is built from its tier-1 tokens ([Materials and
+Themes](/spec/materials-themes/#tier-1-tokens)), a piston from `@piston.default` or, with
+`sticky=true`, `@piston.sticky`. No `mat_slot=` chooses among them, so one on it is
+`W_IGNORED_ARGUMENT`.
 
 **What a lever or button hangs on is not checked.** It is written against whatever the wall cell
 holds, and the build does not ask whether that block is one the game lets it hang on. Where no

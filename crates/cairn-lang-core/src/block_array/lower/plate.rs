@@ -9,6 +9,7 @@ use crate::block_array::geometry::Declared;
 
 use super::canvas::{MemberCanvas, ScopePalette};
 use super::fixture::{Fixture, Refusal, fixture_cell, note_unbuilt_binding, outside_the_array};
+use super::geometry_material::{Family, GeometryMemberDescription, incompatible_material};
 use super::members::{MemberState, StructCtx, default_block_id, resolve_member_state};
 
 /// Catalog token a `pressure_plate`'s default material comes from; the pack spells it per edition.
@@ -70,13 +71,20 @@ fn place_plate(
 /// The block id a `pressure_plate` paints: its `mat_slot=`, or the pack's default; `None` for a
 /// binding whose state literal the target refused, which paints nothing.
 ///
-/// A binding with a state literal the target takes defers and paints nothing. An unresolved
-/// binding was already reported, so falling back adds no finding about the binding.
+/// A taken state literal defers and paints nothing; an unresolved binding was already reported.
 fn plate_id_for_member(
     member: &Member,
     ctx: &StructCtx<'_>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Result<Option<String>, Refusal> {
+    let fallback = || {
+        default_block_id(
+            member,
+            ctx.registry,
+            PRESSURE_PLATE_TOKEN,
+            PRESSURE_PLATE_BASE_ID,
+        )
+    };
     match resolve_member_state(
         member,
         ctx.scope,
@@ -84,7 +92,21 @@ fn plate_id_for_member(
         diagnostics,
         ctx.theme_missing,
     ) {
-        MemberState::Bound(state) if !state.properties.is_empty() => {
+        MemberState::Bound(state) => {
+            let shape = GeometryMemberDescription {
+                subject: PLATE.keyword.to_owned(),
+                states_from: "the cell it stands in",
+                requires: Some(Family::PressurePlate),
+            };
+            if let Some(refusal) =
+                incompatible_material(member, ctx.scope, ctx.registry, &state, &shape)
+            {
+                diagnostics.push(refusal);
+                return fallback().map(Some);
+            }
+            if state.properties.is_empty() {
+                return Ok(Some(state.id));
+            }
             Err(Box::new(diag_deferred_member_reason(
                 member,
                 &format!(
@@ -93,14 +115,7 @@ fn plate_id_for_member(
                 ),
             )))
         }
-        MemberState::Bound(state) => Ok(Some(state.id)),
-        MemberState::Unbound => default_block_id(
-            member,
-            ctx.registry,
-            PRESSURE_PLATE_TOKEN,
-            PRESSURE_PLATE_BASE_ID,
-        )
-        .map(Some),
+        MemberState::Unbound => fallback().map(Some),
         MemberState::Refused => Ok(None),
     }
 }

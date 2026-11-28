@@ -16,6 +16,7 @@ mod eave_stair_shapes;
 mod entities;
 mod furniture;
 mod ids_exist;
+mod plates;
 mod respelling;
 mod signs;
 mod spelling;

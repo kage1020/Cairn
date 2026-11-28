@@ -31,6 +31,8 @@ pub(super) enum Family {
     Sign,
     /// The bed blocks a `bed` lays two of.
     Bed,
+    /// The `*_pressure_plate` blocks a `pressure_plate` builds, which sense what stands on them.
+    PressurePlate,
 }
 
 /// The path of `id`, without its namespace.
@@ -91,6 +93,11 @@ fn is_button(id: &str) -> bool {
     path_of(id).ends_with("_button")
 }
 
+/// Whether `id` names a pressure plate: its path ends in `_pressure_plate`.
+fn is_pressure_plate(id: &str) -> bool {
+    path_of(id).ends_with("_pressure_plate")
+}
+
 /// Whether `id` names a trapdoor block: its path is `trapdoor` or ends in `_trapdoor`.
 fn is_trapdoor(id: &str) -> bool {
     let path = path_of(id);
@@ -147,6 +154,7 @@ impl Family {
             Self::Pillar => is_pillar(id, registry),
             Self::Sign => return sign_misfit(id, registry),
             Self::Bed => is_bed(id),
+            Self::PressurePlate => is_pressure_plate(id),
         };
         (!admitted).then_some(Misfit::Outside)
     }
@@ -162,12 +170,14 @@ impl Family {
             Self::Pillar => "pillar",
             Self::Sign => "sign",
             Self::Bed => "bed",
+            Self::PressurePlate => "pressure_plate",
         }
     }
 
-    /// The states the geometry derives, as a finding lists them.
-    fn derived_states(self) -> &'static str {
-        match self {
+    /// The primary of a finding on `subject`, whose states come from `states_from`, bound to `id`
+    /// outside this family.
+    fn outside(self, subject: &str, states_from: &str, id: &str) -> String {
+        let derived = match self {
             Self::Stair => "`facing` / `half` / `shape`",
             Self::Door => "`facing` / `half` / `hinge`",
             Self::Chest => "`facing` / `type`",
@@ -176,7 +186,18 @@ impl Family {
             Self::Pillar => "`axis`",
             Self::Sign => "`facing` / `rotation`",
             Self::Bed => "`facing` / `part`",
-        }
+            Self::PressurePlate => {
+                return format!(
+                    "{subject} senses what stands on it and `{id}` is not a pressure plate, so \
+                     nothing would sense it"
+                );
+            }
+        };
+        format!(
+            "{subject} derives {derived} from {states_from} and `{id}` is not a {}, so those \
+             states have nowhere to go",
+            self.name(),
+        )
     }
 
     /// The note naming the materials of this family a slot can bind.
@@ -214,6 +235,10 @@ impl Family {
             Self::Bed => {
                 "bind the slot to a bed material — the registry pack's `bed.default` and \
                  `bed.<colour>` tokens resolve to one"
+            }
+            Self::PressurePlate => {
+                "bind the slot to a `*_pressure_plate` material — the registry pack's \
+                 `pressure_plate.default` resolves to one"
             }
         }
     }
@@ -262,17 +287,8 @@ pub(super) fn geometry_material_id<E>(
         }
         return Ok(fallback);
     };
-    let slot_value = scope
-        .and_then(|scope| scope.members.get(&member.span.start))
-        .and_then(|binding| binding.slot_value.as_ref());
-    // Whether a stand-in belongs to the family is the target's pack to say.
-    if let Some(family) = shape.requires
-        && !is_stand_in(state)
-        && let Some(misfit) = family.misfit(&state.id, registry)
-    {
-        diagnostics.push(diag_incompatible_material(
-            member, state, family, &misfit, shape, slot_value,
-        ));
+    if let Some(refusal) = incompatible_material(member, scope, registry, state, shape) {
+        diagnostics.push(refusal);
         return fallback();
     }
     if !state.properties.is_empty() {
@@ -289,6 +305,29 @@ pub(super) fn geometry_material_id<E>(
     Ok(state.id.clone())
 }
 
+/// The `E_INCOMPATIBLE_MATERIAL` on `member`, bound to `state`, when `state` is outside the family
+/// `shape` requires at the target, or `None` when it is in it or the pack is to say.
+pub(super) fn incompatible_material(
+    member: &Member,
+    scope: Option<&ScopeResolution>,
+    registry: Option<&dyn TargetRegistry>,
+    state: &BlockState,
+    shape: &GeometryMemberDescription,
+) -> Option<Diagnostic> {
+    let family = shape.requires?;
+    // Whether a stand-in belongs to the family is the target's pack to say.
+    if is_stand_in(state) {
+        return None;
+    }
+    let misfit = family.misfit(&state.id, registry)?;
+    let slot_value = scope
+        .and_then(|scope| scope.members.get(&member.span.start))
+        .and_then(|binding| binding.slot_value.as_ref());
+    Some(diag_incompatible_material(
+        member, state, family, &misfit, shape, slot_value,
+    ))
+}
+
 /// A member whose geometry attaches blockstates was bound to a material outside the family it
 /// needs at the target.
 ///
@@ -302,14 +341,7 @@ fn diag_incompatible_material(
     slot_value: Option<&ValueWithSpan>,
 ) -> Diagnostic {
     let primary = match misfit {
-        Misfit::Outside => format!(
-            "{} derives {} from {} and `{}` is not a {}, so those states have nowhere to go",
-            shape.subject,
-            family.derived_states(),
-            shape.states_from,
-            state.id,
-            family.name(),
-        ),
+        Misfit::Outside => family.outside(&shape.subject, shape.states_from, &state.id),
         Misfit::NoWallSign(wall) => format!(
             "{} is built from a standing sign whose wall sign the target has, and `{}`, the wall \
              sign of `{}`, is not a block in `{}`",
