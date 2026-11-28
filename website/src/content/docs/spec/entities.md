@@ -266,7 +266,10 @@ A Bedrock writer also fills the block entity of a block whose Java states Bedroc
 than in the block's own. Each half of a chest pair names its other half's cell, in the structure's
 coordinates as its own position is, and the right half leads the pair. A half whose other half, the
 same block facing the same way, does not stand beside it stands single, and `W_INTENT_DEGRADED` says
-that its `type` is lost. A note block keeps its `note` there, where it is not 0.
+that its `type` is lost. A note block keeps its `note` there, where it is not 0. On a `raw_block`
+that writes its own block entity, the compound is put over what the writer fills, key by key, as
+it is over an entity's: a key the compound names stays as written, and the writer adds the others,
+so a paired chest keeps its `Items` and its pairing both.
 
 ## 8.2 Anchor conventions
 
