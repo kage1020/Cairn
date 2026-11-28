@@ -91,6 +91,7 @@ pub(crate) fn prepare_artifacts<'a>(
         case,
         litematic: matches!(backend, Backend::Litematic(_)),
         seen: std::collections::HashMap::with_capacity(block_ir.structures.len()),
+        folded: std::collections::HashMap::new(),
     };
     let target = match backend {
         Backend::PerArray(target) => target,
@@ -212,12 +213,29 @@ struct Claims<'o> {
     case: NameCase,
     litematic: bool,
     seen: std::collections::HashMap<EntryLocation, (PathBuf, String)>,
+    /// Under `litematic`, each file name folded to lower case, which no resolver check compares
+    /// for a site (`spec/ecosystem-interop` "Litematica").
+    folded: std::collections::HashMap<String, (PathBuf, String)>,
 }
 
 impl Claims<'_> {
     /// Where `scope`'s artifact `file_name` goes, refused when an earlier scope's goes there too.
     fn claim(&mut self, scope: &str, file_name: &str) -> Result<PathBuf, PrepareRefusal> {
         let path = artifact_path(self.out_dir, scope, file_name)?;
+        if self.litematic {
+            let claimed = (path.clone(), scope.to_owned());
+            if let Some((first_path, first)) = self.folded.insert(file_name.to_lowercase(), claimed)
+                && first_path != path
+            {
+                return Err(PrepareRefusal::Collision(ArtifactCollision {
+                    first,
+                    first_path,
+                    scope: scope.to_owned(),
+                    path,
+                    litematic: true,
+                }));
+            }
+        }
         // Distinct scope keys can name one file, and the resolver's `E_OUTPUT_NAME_COLLISION`
         // sees only resolved scopes.
         let location = entry_location(&path, self.case).map_err(|err| {
@@ -275,21 +293,34 @@ impl ArtifactCollision {
             litematic,
         } = self;
         let mut refusal = artifact_collision(&path.display().to_string(), first, scope);
-        // Only a site written as one `.litematic` takes a name a struct can also have.
-        let site = first.starts_with("site::") || scope.starts_with("site::");
-        if *litematic && site && first_path == path {
-            refusal.notes.push(RunLevelNote::note(
-                "rename the site or the struct, or compile with `--structure-format nbt`, which \
-                 writes the site as a file per placement",
-            ));
-        }
+        let (first_shown, shown) = (first_path.display(), path.display());
         if first_path != path {
-            refusal.notes.push(RunLevelNote::note(format!(
-                "`{}` and `{}` name one file on this file system; rename one of the scopes so \
-                 their names differ by more than case",
-                first_path.display(),
-                path.display(),
-            )));
+            refusal.notes.push(RunLevelNote::note(if *litematic {
+                format!(
+                    "`{first_shown}` and `{shown}` differ only in case, which makes them one file \
+                     on the case-insensitive file systems macOS and Windows use by default; \
+                     rename one of the scopes so their names differ by more than case"
+                )
+            } else {
+                format!(
+                    "`{first_shown}` and `{shown}` name one file on this file system; rename one \
+                     of the scopes so their names differ by more than case"
+                )
+            }));
+        }
+        // Only a site written as one `.litematic` takes a name a struct or another site can have.
+        let sites = [first, scope]
+            .iter()
+            .filter(|key| key.starts_with("site::"))
+            .count();
+        if *litematic && sites > 0 {
+            refusal.notes.push(RunLevelNote::note(if sites == 2 {
+                "rename one of the sites, or compile with `--structure-format nbt`, which writes \
+                 each site as a file per placement"
+            } else {
+                "rename the site or the struct, or compile with `--structure-format nbt`, which \
+                 writes the site as a file per placement"
+            }));
         }
         report_structure_message(&refusal);
     }

@@ -33,7 +33,9 @@ its array would be (`home1`, `hamlet_walkway_home1_entry__home2_entry`). Each re
 struct of its own, its name and corner kept as provenance
 ([§12.4](#124-import-stamping-and-pitfalls)). A site and a struct that share a name would write one
 file, and the compile refuses the pair before writing anything, as it refuses two `.nbt` files of
-one name.
+one name. The names of sites and structs are compared ignoring case, as `.nbt` names are, so
+`site s` beside `site S` or `struct S` is refused on every host, not only where the file system
+makes them one file.
 
 The root holds:
 
