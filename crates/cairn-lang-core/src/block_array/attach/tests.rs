@@ -125,17 +125,17 @@ fn a_circuit_lays_under_the_structure_which_rises_over_it() {
         array.block_entities,
         [
             BlockEntity {
-                pos: (1, 2, 1),
-                data: BlockEntityData::Fields {
-                    id: "minecraft:chest".to_owned(),
-                    fields: IndexMap::new(),
-                },
-            },
-            BlockEntity {
                 pos: (0, 1, 1),
                 data: BlockEntityData::Fields {
                     id: "minecraft:comparator".to_owned(),
                     fields: IndexMap::from([("OutputSignal".to_owned(), 3)]),
+                },
+            },
+            BlockEntity {
+                pos: (1, 2, 1),
+                data: BlockEntityData::Fields {
+                    id: "minecraft:chest".to_owned(),
+                    fields: IndexMap::new(),
                 },
             },
         ],

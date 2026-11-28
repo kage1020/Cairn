@@ -18,7 +18,9 @@ use crate::block_array::material::{
 use crate::block_array::roof::is_stair;
 use crate::block_array::walkway::{ROUTE_AREA_CAP, SearchRect, l_path_area};
 use crate::block_array::wall_column::WallColumn;
-use crate::block_array::{BlockState, Dims, Footprint, Palette, PaletteFull, PaletteIndex};
+use crate::block_array::{
+    BlockEntityData, BlockState, Dims, Footprint, Palette, PaletteFull, PaletteIndex,
+};
 use crate::diagnostic::{DiagnosticCode, DiagnosticData, Severity};
 use crate::intent::ValueWithSpan;
 
@@ -2892,6 +2894,36 @@ fn a_slot_a_later_write_covered_is_pruned_and_the_rest_renumber() {
         ["minecraft:air", "minecraft:cobblestone"],
     );
     assert_eq!(voxels, [PaletteIndex(1)]);
+}
+
+/// Source sets at most one block entity in a cell, so the canvas is written directly.
+#[test]
+fn block_entities_in_one_cell_keep_the_order_they_were_set() {
+    let nbt = |compound: &str| BlockEntityData::Nbt {
+        compound: compound.to_owned(),
+    };
+    let mut canvas = Canvas::new(Dims { x: 2, y: 1, z: 1 }, vec![Some(Phase::Fixtures)]);
+    for (pos, compound) in [
+        ((1, 0, 0), "{a:1}"),
+        ((0, 0, 0), "{b:1}"),
+        ((1, 0, 0), "{c:1}"),
+    ] {
+        canvas
+            .for_member(0)
+            .paint_with_entity(pos, || PaletteIndex(1), nbt(compound));
+    }
+    assert_eq!(
+        canvas
+            .block_entities()
+            .into_iter()
+            .map(|entity| (entity.pos, entity.data))
+            .collect::<Vec<_>>(),
+        [
+            ((0, 0, 0), nbt("{b:1}")),
+            ((1, 0, 0), nbt("{a:1}")),
+            ((1, 0, 0), nbt("{c:1}")),
+        ],
+    );
 }
 
 /// Unreachable from source, so called directly; a release build clips and carries on.

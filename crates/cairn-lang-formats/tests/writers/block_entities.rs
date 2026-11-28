@@ -3,7 +3,9 @@
 
 use cairn_lang_core::Edition;
 use cairn_lang_core::block_array::{BlockArray, BlockEntity, BlockEntityData, DyeColor};
-use cairn_lang_formats::bedrock_structure::{BedrockStructureError, build_mcstructure_tag};
+use cairn_lang_formats::bedrock_structure::{
+    BedrockStructureError, build_mcstructure_tag, write_mcstructure,
+};
 use cairn_lang_formats::data_version::{JavaTarget, resolve_bedrock_target, resolve_java_target};
 use cairn_lang_formats::java_structure::{JavaStructureError, build_structure_tag};
 use cairn_lang_formats::litematic::{litematic_files, prepare_litematic};
@@ -238,9 +240,9 @@ fn a_sign_that_does_not_glow_is_saved_unlit_by_both_writers() {
     assert_eq!(
         bedrock_data(&bedrock, "1.21.60"),
         [
-            bedrock_sign(false),
             bedrock_bed("46", (2, 1, 1), 11),
             bedrock_bed("47", (2, 1, 2), 11),
+            bedrock_sign(false),
         ],
     );
 }
@@ -296,9 +298,9 @@ fn a_bedrock_sign_and_bed_keep_their_text_and_colour_in_their_block_entities() {
     assert_eq!(
         bedrock_data(&array, "1.21.60"),
         [
-            bedrock_sign(true),
             bedrock_bed("46", (2, 1, 1), 11),
             bedrock_bed("47", (2, 1, 2), 11),
+            bedrock_sign(true),
         ],
     );
 }
@@ -334,9 +336,9 @@ fn a_bedrock_bed_of_no_colour_is_saved_white() {
     assert_eq!(
         bedrock_data(&array, "1.21.60"),
         [
-            bedrock_sign(true),
             bedrock_bed("46", (2, 1, 1), 0),
             bedrock_bed("47", (2, 1, 2), 0),
+            bedrock_sign(true),
         ],
     );
 }
@@ -398,4 +400,34 @@ fn sign_text_the_nbt_encoder_cannot_write_is_refused_by_both_writers_with_its_fi
             other => panic!("expected UnencodableSignText, got {other:?}"),
         }
     }
+}
+
+/// `spec/compilation` "Within-phase conflicts and the palette": two signs that share no voxel
+/// write the same `.mcstructure` bytes whichever line comes first.
+#[test]
+fn swapping_two_signs_leaves_the_bedrock_bytes_equal() {
+    let walled = |signs: &str| {
+        format!(
+            "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x5\n  \
+             walls mat_slot=wall height=3\n{signs}"
+        )
+    };
+    let a = "  sign at=inside.back offset=1 y=1 text=\"A\"\n";
+    let b = "  sign at=inside.back offset=3 y=1 text=\"B\"\n";
+    let root =
+        |source: &str| bedrock_root(&lowered(source, Edition::Bedrock, "1.21.60"), "1.21.60");
+    let bytes = |source: &str| {
+        let mut out = Vec::new();
+        write_mcstructure(&mut out, &root(source)).expect("writes");
+        out
+    };
+    assert_eq!(
+        bytes(&walled(&format!("{a}{b}"))),
+        bytes(&walled(&format!("{b}{a}")))
+    );
+    let keys: Vec<String> = position_data(&root(&walled(&format!("{a}{b}"))))
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    assert_eq!(keys, ["26", "66"]);
 }
