@@ -11,7 +11,7 @@ use crate::geometry::{SIDES, Voxel};
 use crate::grid::{Collision, Grid, Label, Slot};
 use crate::part::{Part, RepeaterDelay};
 use crate::placement_ir::{Buffer, CircuitLayout, LayoutStage, ScopedCircuitLayout, TileKind};
-use crate::tile::Strength;
+use crate::tile::{Strength, TilePort};
 
 /// Tick delay of one buffer repeater: a repeater at its shortest delay.
 pub const BUFFER_REPEATER_TICKS: u32 = 1;
@@ -93,7 +93,10 @@ fn buffer_layout(scope: &str, routed: &CircuitLayout) -> Result<CircuitLayout, D
                 break;
             };
             let Some(buffer) = site(&grid, &graph, &reaches[group], at) else {
-                return Err(unreachable_input(scope, &layout, net, sink_index));
+                let shortfall = Shortfall::at(&graph, &reaches[group], at);
+                return Err(unreachable_input(
+                    scope, &layout, net, sink_index, shortfall,
+                ));
             };
             grid.lay_buffer(buffer);
             layout.nets[net].wire.buffers.push(buffer);
@@ -350,8 +353,50 @@ impl Grid {
     }
 }
 
-fn unreachable_input(scope: &str, layout: &CircuitLayout, net: usize, sink: usize) -> Diagnostic {
-    let Some(circuit) = layout.nets.get(net) else {
+/// What an input no buffer lifts far enough reads, and over how much of its net's dust.
+#[derive(Debug, Clone, Copy)]
+struct Shortfall {
+    /// The strength the input reads.
+    reads: u8,
+    /// The blocks of dust the signal runs over since the part that last restored it.
+    dust: u32,
+}
+
+impl Shortfall {
+    /// What `reach` leaves at `at`, the input's voxel.
+    fn at(graph: &NetGraph, reach: &Reach, at: Voxel) -> Self {
+        let mut dust = 0;
+        let mut cursor = at;
+        while let Some(&from) = reach.came.get(&cursor) {
+            dust += 1;
+            if graph.restorers.contains(&from) {
+                break;
+            }
+            cursor = from;
+        }
+        Self {
+            reads: reach.power.get(&at).copied().unwrap_or(0),
+            dust,
+        }
+    }
+}
+
+/// `E_ATTENUATION_LIMIT` at the tile whose input `sink` of `net` reads `shortfall`, naming the
+/// input, the signal, and the strength it reads and needs.
+fn unreachable_input(
+    scope: &str,
+    layout: &CircuitLayout,
+    net: usize,
+    sink: usize,
+    shortfall: Shortfall,
+) -> Diagnostic {
+    let (Some(circuit), Some(sink)) = (
+        layout.nets.get(net),
+        layout
+            .nets
+            .get(net)
+            .and_then(|circuit| circuit.sinks.get(sink)),
+    ) else {
         return error_with_footer(
             DiagnosticCode::AttenuationLimit,
             layout.region.span.clone(),
@@ -359,23 +404,63 @@ fn unreachable_input(scope: &str, layout: &CircuitLayout, net: usize, sink: usiz
             "Fix: widen the struct's `size=WxH` or increase `void`",
         );
     };
-    let target = circuit
-        .sinks
-        .get(sink)
-        .map_or(circuit.driver, |sink| sink.tile);
-    let tile = &layout.tiles[target];
-    let what = match tile.kind {
-        TileKind::Cell { cell } => format!("this `{}` cell", cell.name()),
-        TileKind::Pad { .. } => "this sensor's pad".to_owned(),
-        TileKind::Riser => "the riser under this actuator".to_owned(),
+    let tile = &layout.tiles[sink.tile];
+    let needs = tile
+        .kind
+        .template()
+        .port(sink.port)
+        .map_or(1, |port| port.need);
+    let input = match (tile.kind, sink.port) {
+        (TileKind::Cell { cell }, TilePort::Cell(port)) => {
+            format!(
+                "the `{}` input of this `{}` cell",
+                port.as_str(),
+                cell.name()
+            )
+        }
+        (TileKind::Cell { cell }, _) => {
+            format!("the feedback input of this `{}` cell", cell.name())
+        }
+        (TileKind::Pad { .. }, _) => "this sensor's pad".to_owned(),
+        (TileKind::Riser, _) => "the riser under this actuator".to_owned(),
+    };
+    let signal = layout
+        .signal_defs
+        .iter()
+        .find(|(_, defines)| **defines == circuit.source)
+        .map(|(name, _)| format!("`{name}`"));
+    let driver = match layout.tiles[circuit.driver].kind {
+        TileKind::Cell { cell } => format!("the `{}` cell", cell.name()),
+        TileKind::Pad { .. } | TileKind::Riser => "its sensor".to_owned(),
+    };
+    let read = signal
+        .clone()
+        .unwrap_or_else(|| format!("the output of {driver}"));
+    let Shortfall { reads, dust } = shortfall;
+    let past = if dust >= DUST_ATTENUATION_LIMIT {
+        format!(", more than the {DUST_ATTENUATION_LIMIT} a signal runs,")
+    } else {
+        String::new()
+    };
+    let fix = match &signal {
+        Some(signal) => format!(
+            "Fix: move what drives {signal} nearer, or line it up with this input so that its \
+             wire runs straight and level for three blocks, where a buffer repeater fits"
+        ),
+        None => format!(
+            "Fix: move what feeds {driver} nearer this input, or line them up so that the wire \
+             runs straight and level for three blocks, where a buffer repeater fits"
+        ),
     };
     error_with_footer(
         DiagnosticCode::AttenuationLimit,
         tile.span.clone(),
         format!(
-            "{scope} {what} reads its signal too weak: the dust runs past {DUST_ATTENUATION_LIMIT} blocks with no straight stretch where a buffer repeater can restore it"
+            "{scope} {input} reads {read} at {reads} over {dust} blocks of dust{past} and needs \
+             {needs}, and no stretch of that dust runs straight and level where a buffer repeater \
+             fits"
         ),
-        "Fix: widen the struct's `size=WxH` or increase `void`, so the wire has room to run straight, or move what feeds it nearer",
+        fix,
     )
 }
 
