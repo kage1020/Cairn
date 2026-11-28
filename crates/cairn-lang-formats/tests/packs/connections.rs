@@ -453,6 +453,36 @@ fn a_chest_pair_facing_north_or_west_pairs_its_halves_on_bedrock() {
 }
 
 #[test]
+fn a_raw_blocks_compound_is_put_over_the_pairing_and_the_note_bedrock_fills() {
+    let source = "theme t:\n  slot wall -> @cobblestone\n\nstruct s size=5x3\n  \
+                  walls mat_slot=wall height=3\n  @edition bedrock\n    \
+                  raw_block mat=minecraft:chest[facing=north,type=left] at=1,1,1 \
+                  nbt={id:\"Chest\",Items:[{Slot:0b,Name:\"minecraft:apple\",Count:3b}]}\n    \
+                  raw_block mat=minecraft:chest[facing=north,type=right] at=2,1,1\n    \
+                  raw_block mat=minecraft:noteblock[note=5] at=3,1,1 \
+                  nbt={CustomName:\"x\",note:9b}\n";
+    let (root, notes) = bedrock_root(source, "1.21.0");
+    assert_eq!(notes, []);
+    assert_eq!(
+        position_data(&root),
+        [
+            (
+                "16".to_owned(),
+                "{block_entity_data:{id:\"Chest\",pairlead:0b,pairx:2,pairz:1,Items:[{Slot:0b,\
+                 Name:\"minecraft:apple\",Count:3b}],x:1,y:1,z:1}}"
+                    .to_owned()
+            ),
+            (
+                "40".to_owned(),
+                "{block_entity_data:{id:\"Music\",note:9b,CustomName:\"x\",x:3,y:1,z:1}}"
+                    .to_owned()
+            ),
+            chest_half(28, (2, 1, 1), (1, 1), true),
+        ],
+    );
+}
+
+#[test]
 fn chest_halves_that_do_not_make_a_pair_each_stand_single_on_bedrock() {
     for (halves, lost) in [
         (

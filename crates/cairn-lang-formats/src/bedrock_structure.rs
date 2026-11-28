@@ -28,7 +28,7 @@ use crate::block_id::is_concrete_id;
 use crate::data_version::BedrockTarget;
 use crate::dims::{VolumeError, dims_to_i32, fits_list_limit, list_volume};
 use crate::java_structure::{java_entity_id, sign_text_fix};
-use crate::nbt_text::{compound_of, first_unencodable};
+use crate::nbt_text::{compound_of, first_unencodable, put_over};
 use crate::registry::VersionStates;
 
 pub use read::{
@@ -536,7 +536,7 @@ fn position_data(
                 let Some((slot, (id, entity))) = held_at(i64::from(x), y, i64::from(z)) else {
                     continue;
                 };
-                let nbt = match *entity {
+                let mut nbt = match *entity {
                     StateEntity::ChestHalf { toward, lead } => {
                         let (px, pz) = (
                             i64::from(x) + i64::from(toward.0),
@@ -571,7 +571,11 @@ fn position_data(
                         nbt
                     }
                 };
-                data.insert(index((x, y, z)).to_string(), placed(nbt, (x, y, z))?);
+                let key = index((x, y, z)).to_string();
+                if let Some(written) = written_at(&data, &key) {
+                    put_over(&mut nbt, written);
+                }
+                data.insert(key, placed(nbt, (x, y, z))?);
             }
         }
     }
@@ -595,6 +599,17 @@ fn position_data(
         })
         .collect();
     Ok((data, notes))
+}
+
+/// The `block_entity_data` of the entry `data` stores at `key`, as a member wrote it.
+fn written_at(data: &Compound, key: &str) -> Option<Compound> {
+    let Some(Tag::Compound(block)) = data.entries.get(key) else {
+        return None;
+    };
+    match block.entries.get("block_entity_data") {
+        Some(Tag::Compound(written)) => Some(written.clone()),
+        _ => None,
+    }
 }
 
 /// One of the IR's block entities as Bedrock saves it, without its position.
