@@ -380,6 +380,35 @@ fn an_out_whose_scratch_file_reaches_the_imported_file_is_refused() {
 }
 
 #[test]
+fn a_file_at_a_scratch_path_of_the_source_refuses_the_import_and_is_left_as_it_was() {
+    let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
+    let out = artifact.with_file_name("cottage.raw.crn");
+    for suffix in [".tmp", ".bak"] {
+        let scratch = artifact.with_file_name(format!("cottage.raw.crn{suffix}"));
+        fs::write(&scratch, "my notes").expect("plant the file");
+        assert_import_refused(
+            &artifact,
+            &[],
+            1,
+            &format!(
+                "error: source `{}` is written through `{}`, which already exists\n  note: a \
+                 file is written at its path with `.tmp` added and renamed into place, and one it \
+                 replaces is moved aside to its path with `.bak` added, so the entry may be one \
+                 an earlier run left behind\n  fix: move `{}` aside, then import again\n",
+                out.display(),
+                scratch.display(),
+                scratch.display(),
+            ),
+        );
+        assert_eq!(
+            fs::read_to_string(&scratch).expect("the planted file reads"),
+            "my notes"
+        );
+        fs::remove_file(&scratch).expect("clear the planted file");
+    }
+}
+
+#[test]
 fn a_default_out_linked_to_the_imported_file_is_refused_with_no_default_offered() {
     let (_tmp, artifact) = built("cottage.crn", "java", "1.21.4", "cottage.nbt");
     let out = artifact.with_file_name("cottage.raw.crn");

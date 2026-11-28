@@ -12,7 +12,7 @@ use cairn_lang_formats::import::{ImportFormat, import_raw};
 use cairn_lang_formats::write_path::WritePath;
 
 use crate::report::report_diagnostics;
-use crate::staging::{Kind, StagedSet};
+use crate::staging::{Kind, StagedSet, blocked_scratch};
 use crate::structure_file::{file_name, open_structure, refuse_extension};
 
 pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
@@ -24,6 +24,13 @@ pub(crate) fn run_import(file: &Path, out: Option<&Path>) -> ExitCode {
     let out = out.map_or_else(|| default_out(file), Path::to_path_buf);
     if let Err(code) = check_file_is_left_alone(file, flag, &out) {
         return code;
+    }
+    let blocked = blocked_scratch(Kind::Source, &out);
+    if !blocked.is_empty() {
+        for scratch in &blocked {
+            scratch.report("import");
+        }
+        return ExitCode::from(1);
     }
     let reader = match open_structure(file) {
         Ok(reader) => reader,

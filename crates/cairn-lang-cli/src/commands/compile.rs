@@ -17,8 +17,9 @@ use cairn_lang_formats::lock_path::{
 use cairn_lang_formats::write_path::WritePath;
 
 use crate::artifacts::{
-    Backend, PrepareRefusal, check_lock_path_is_free, check_source_is_left_alone,
-    prepare_artifacts, prepare_out_dir, report_unidentified, write_artifacts_and_lock,
+    Backend, PrepareRefusal, check_lock_path_is_free, check_scratch_is_free,
+    check_source_is_left_alone, prepare_artifacts, prepare_out_dir, report_unidentified,
+    write_artifacts_and_lock,
 };
 use crate::cli::StructureFormat;
 use crate::lockfile::{report_previous_target, sensitive_members};
@@ -174,6 +175,9 @@ fn check_and_write(
         return code;
     }
     if let Err(code) = check_lock_path_is_free(&prepared, lock_path, case) {
+        return code;
+    }
+    if let Err(code) = check_scratch_is_free(&prepared, lock_path) {
         return code;
     }
     // Before the lockfile is replaced: it is the only record of what was verified before.
