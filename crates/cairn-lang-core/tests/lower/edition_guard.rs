@@ -180,3 +180,62 @@ fn a_build_keeps_a_raw_repeat_of_its_editions_guard_with_every_copy() {
     );
     assert_eq!(built(Some(Edition::Bedrock)), []);
 }
+
+#[test]
+fn a_raw_repeat_over_guarded_lines_repeats_its_editions_own_and_writes_nothing_for_none() {
+    let source = bin("raw_repeat count=2 step=2,0,0\n    @edition java\n      \
+         raw_block mat=minecraft:light at=0,1,1\n    @edition bedrock\n      \
+         raw_block mat=minecraft:light_block_15 at=0,1,1");
+    let built = |edition| raw_blocks(&lowered_for(&source, edition));
+    assert_eq!(
+        built(Some(Edition::Java)),
+        [("minecraft:light".to_owned(), vec![(1, 1, 2), (3, 1, 2)])],
+    );
+    assert_eq!(
+        built(Some(Edition::Bedrock)),
+        [(
+            "minecraft:light_block_15".to_owned(),
+            vec![(1, 1, 2), (3, 1, 2)]
+        )],
+    );
+    assert_eq!(built(None), []);
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(lowered_for(&source, edition).diagnostics, [], "{edition:?}");
+        assert_eq!(unpinned(&source, edition), [], "{edition:?}");
+    }
+}
+
+#[test]
+fn a_raw_repeat_whose_lines_are_all_another_editions_writes_nothing_there() {
+    let source = bin(
+        "raw_repeat count=2 step=2,0,0\n    @edition bedrock\n      \
+         raw_block mat=minecraft:light_block_15 at=0,1,1",
+    );
+    assert_eq!(
+        raw_blocks(&lowered_for(&source, Some(Edition::Bedrock))),
+        [(
+            "minecraft:light_block_15".to_owned(),
+            vec![(1, 1, 2), (3, 1, 2)]
+        )],
+    );
+    for edition in [None, Some(Edition::Java)] {
+        let out = lowered_for(&source, edition);
+        assert_eq!(raw_blocks(&out), [], "{edition:?}");
+        assert_eq!(out.diagnostics, [], "{edition:?}");
+    }
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(unpinned(&source, edition), [], "{edition:?}");
+    }
+}
+
+#[test]
+fn a_raw_repeat_with_no_raw_line_under_it_is_refused_by_every_edition() {
+    let source = bin("raw_repeat count=2 step=2,0,0");
+    for edition in [None, Some(Edition::Java), Some(Edition::Bedrock)] {
+        assert_eq!(
+            unpinned(&source, edition),
+            [("E_INVALID_MEMBER", "raw_repeat count=2 step=2,0,0")],
+            "{edition:?}",
+        );
+    }
+}

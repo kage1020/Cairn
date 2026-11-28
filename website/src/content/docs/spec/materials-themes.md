@@ -340,8 +340,10 @@ either way no copy is built. Copies of one member that overlap contest nothing, 
 `W_PHASE_CONFLICT`, while a copy and another line still contest their cells. A `raw_repeat` with no
 `count=` or `step=`, a `count=` that is not a positive integer, a `step=` that is not a triple, a
 `step=0,0,0` over more than one copy, or no raw member under it is `E_INVALID_MEMBER`, and none of
-its members is built. It puts down nothing of its own, so a `mat_slot=` on its line is
-`W_IGNORED_ARGUMENT`.
+its members is built. A raw member under either edition's guard counts, and a build that drops all
+of them drops the repeat too ([Versioning and Editions
+§10.7](/spec/versioning-editions/#an-edition-guard-holds-the-escape-hatch)). It puts down nothing
+of its own, so a `mat_slot=` on its line is `W_IGNORED_ARGUMENT`.
 
 `origin=imported` marks a raw member `cairn import` wrote ([Ecosystem Interop
 §12.4](/spec/ecosystem-interop/#124-import-stamping-and-pitfalls)), and changes two things. The
