@@ -187,6 +187,21 @@ struct keep size=5x5
 }
 
 #[test]
+fn a_part_floor_may_name_a_date_based_pre_release() {
+    for label in ["26.3-rc-1", "26.3-pre-1", "26.3-snapshot-1"] {
+        let source = format!(
+            "theme medieval:\n  requires java version>={label}\n  slot wall -> @oak_planks\n\n\
+             struct keep size=5x5\n  walls mat_slot=wall height=3\n"
+        );
+        assert_eq!(codes(&source), Vec::<&str>::new(), "{label}");
+        assert_eq!(
+            floors(&source, Edition::Java),
+            vec![(label.to_owned(), FloorOrigin::Theme("medieval".to_owned()))],
+        );
+    }
+}
+
+#[test]
 fn a_module_with_no_scope_binds_no_theme() {
     let source = "\
 theme medieval:
